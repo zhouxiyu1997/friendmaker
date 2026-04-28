@@ -12,6 +12,14 @@
 ![Hardware](https://img.shields.io/badge/hardware-ESP32--WROOM--32-orange.svg)
 ![Status](https://img.shields.io/badge/status-prototype-yellow.svg)
 
+## Compatibility / 平台支持
+
+- **Currently supported:** `macOS`
+- **Not officially supported yet:** `Windows`, `Linux`
+
+当前版本的文档、串口路径、PlatformIO 调用方式，以及试用流程都按 `macOS` 打磨。  
+网页前端本身接近跨平台，但整套“刷固件 -> 串口 -> ESP32 -> Switch”链路目前只按 `macOS` 验证，不建议直接给 Windows 用户试用。
+
 ## Showcase / 演示
 
 - [Watch demo video / 查看演示视频](docs/media/demo-video.mov)
