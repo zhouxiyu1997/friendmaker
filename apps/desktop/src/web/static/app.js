@@ -171,7 +171,6 @@ let studioExecutionPollTimer = null;
 
 const COLOR_COUNT_OPTIONS_BY_MODE = {
   mono: [2],
-  palette: [8, 9, 16, 18, 24, 32, 64, 128],
   official: [8, 16, 32, 64, 84],
 };
 
@@ -193,8 +192,7 @@ els.brushSizeSelect.addEventListener("change", () => {
 
 els.colorModeSelect.addEventListener("change", () => {
   const nextMode = els.colorModeSelect.value;
-  state.studio.colorMode =
-    nextMode === "palette" || nextMode === "official" ? nextMode : "mono";
+  state.studio.colorMode = nextMode === "official" ? "official" : "mono";
   syncStudioColorCountOptions();
   syncStudioUi();
 });
@@ -343,9 +341,7 @@ async function generateStudioCommands({ logPrefix }) {
     };
     state.studio.brushSize = payload.profile.brushSize ?? state.studio.brushSize;
     state.studio.colorMode =
-      payload.profile.colorMode === "palette" || payload.profile.colorMode === "official"
-        ? payload.profile.colorMode
-        : "mono";
+      payload.profile.colorMode === "official" ? "official" : "mono";
     state.studio.colorCount = payload.profile.colorCount ?? state.studio.colorCount;
     state.studio.removeBackground = payload.profile.removeBackground === true;
 
@@ -356,9 +352,7 @@ async function generateStudioCommands({ logPrefix }) {
     els.statColors.textContent =
       payload.profile.colorMode === "mono"
         ? "黑 / 白"
-        : payload.profile.colorMode === "official"
-          ? `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`
-          : `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 色`;
+        : `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`;
     els.statPixels.textContent = String(payload.stats.totalPixels);
     els.statCommands.textContent = String(payload.stats.commandCount);
     els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
@@ -998,9 +992,7 @@ function syncStudioUi() {
   els.studioModeHint.textContent =
     state.studio.colorMode === "mono"
       ? `深色像素会绘制，浅色像素会保留为空白背景。当前会把图片映射到 250x250 画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${backgroundHint}`
-      : state.studio.colorMode === "official"
-        ? `当前会先把图片压到 ${state.studio.colorCount} 个官方色以内，再映射到游戏内置的 7x12 官方色盘，并按 ${state.studio.brushSize} 号笔生成。开始前请先把 9 个槽位手动设为白色。${backgroundHint}`
-        : `当前会先把图片自动量化成 ${state.studio.colorCount} 色，再按 250x250 画布和 ${state.studio.brushSize} 号笔生成绘制脚本。${backgroundHint}`;
+      : `当前会先把图片压到 ${state.studio.colorCount} 个官方色以内，再映射到游戏内置的 7x12 官方色盘，并按 ${state.studio.brushSize} 号笔生成。开始前请先把 9 个槽位手动设为白色。${backgroundHint}`;
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
   els.sizeSelect.disabled = state.studio.busy || executionActive;
@@ -1069,9 +1061,7 @@ function syncStudioUi() {
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
       ? `当前会把 250x250 的黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。`
-      : state.studio.colorMode === "official"
-        ? `当前会把 250x250 的官方色脚本通过串口发送到 ${state.selectedPortPath}。请先手动把 9 个槽位设为白色，ESP32 会按槽位当前颜色状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。`
-        : `当前会把 250x250 的多色脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成颜色切换、方向键移动与 A 绘制。`;
+      : `当前会把 250x250 的官方色脚本通过串口发送到 ${state.selectedPortPath}。请先手动把 9 个槽位设为白色，ESP32 会按槽位当前颜色状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。`;
   renderStudioConnectionStatus();
 }
 

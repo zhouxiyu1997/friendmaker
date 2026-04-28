@@ -42,7 +42,7 @@
           <section class="panel panel-form">
             <div class="panel-head">
               <h2>输入</h2>
-              <p>导入图片，设定单色、多色或官方色绘制参数，然后发送到 ESP32 开始绘制。</p>
+              <p>导入图片，设定单色或官方色绘制参数，然后发送到 ESP32 开始绘制。</p>
             </div>
 
             <label class="file-drop" for="image-input">
@@ -65,7 +65,7 @@
             <div class="execution-box mono-note-box">
               <div class="panel-head compact">
                 <h2>绘制模式</h2>
-                <p>当前固定走 250x250 画布并从画布中心起步。单色模式画黑白图，多色模式会先自适应量化，官方色模式会量化到游戏内置的 7x12 色盘；画笔大小按下方选择生成。</p>
+                <p>当前固定走 250x250 画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；画笔大小按下方选择生成。</p>
               </div>
 
               <p class="hint" id="studio-mode-hint">
@@ -97,7 +97,6 @@
                 <span>绘制模式</span>
                 <select id="color-mode-select">
                   <option value="mono" selected>单色绘制</option>
-                  <option value="palette">多色绘制</option>
                   <option value="official">官方色绘制</option>
                 </select>
               </label>
