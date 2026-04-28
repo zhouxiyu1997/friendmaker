@@ -108,9 +108,16 @@ Image Input
 
 ## Quick Start / 快速开始
 
+Path note:
+
+- Replace `/path/to/friendmaker` with your own local project directory
+- Replace `<your-serial-port>` with your own serial device, such as `/dev/cu.usbserial-0001`
+- If `pio` is already in your shell `PATH`, you can use `pio ...`; otherwise use `~/.platformio/penv/bin/pio ...`
+
 ### 1. Install dependencies / 安装依赖
 
 ```bash
+cd /path/to/friendmaker
 npm install
 ```
 
@@ -123,14 +130,14 @@ npm run check
 ### 3. Flash firmware / 刷入固件
 
 ```bash
-cd firmware/esp32
+cd /path/to/friendmaker/firmware/esp32
 ~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload
 ```
 
 ### 4. Start the web UI / 启动网页系统
 
 ```bash
-cd /Users/xiyu/Documents/code/friendmaker
+cd /path/to/friendmaker
 npm run ui:dev
 ```
 

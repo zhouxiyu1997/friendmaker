@@ -15,6 +15,15 @@
 - 当前文档中的串口名、PlatformIO 路径和启动命令都按 `macOS` 编写
 - `Windows` 和 `Linux` 暂未完成联调，不建议直接按本说明试用
 
+## 路径说明
+
+下面文档里出现的路径都是示例值，不是固定值：
+
+- 把 `/path/to/friendmaker` 替换成你自己的项目目录
+- 把 `<your-serial-port>` 替换成你自己的串口设备，例如 `/dev/cu.usbserial-0001`
+- 如果 `pio` 已经在你的 shell `PATH` 里，可以直接写 `pio ...`
+- 如果没有，就继续用 `~/.platformio/penv/bin/pio ...`
+
 ## 开始前必须确认
 
 开始绘制前，请一定先确认下面 3 件事：
@@ -58,7 +67,7 @@
 打开终端，进入项目目录：
 
 ```bash
-cd /Users/xiyu/Documents/code/friendmaker
+cd /path/to/friendmaker
 ```
 
 安装依赖：
@@ -82,7 +91,7 @@ npm run check
 进入固件目录：
 
 ```bash
-cd /Users/xiyu/Documents/code/friendmaker/firmware/esp32
+cd /path/to/friendmaker/firmware/esp32
 ```
 
 刷入推荐环境：
@@ -94,7 +103,7 @@ cd /Users/xiyu/Documents/code/friendmaker/firmware/esp32
 如果你知道自己的串口，也可以明确指定：
 
 ```bash
-~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload --upload-port /dev/cu.usbserial-0001
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload --upload-port <your-serial-port>
 ```
 
 刷入成功后，可以用下面这条看启动日志：
@@ -111,7 +120,7 @@ cd /Users/xiyu/Documents/code/friendmaker/firmware/esp32
 回到项目根目录：
 
 ```bash
-cd /Users/xiyu/Documents/code/friendmaker
+cd /path/to/friendmaker
 ```
 
 启动 Web UI：
@@ -281,14 +290,14 @@ npm run dev -- --list-ports
 1. 刷固件
 
 ```bash
-cd /Users/xiyu/Documents/code/friendmaker/firmware/esp32
+cd /path/to/friendmaker/firmware/esp32
 ~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload
 ```
 
 2. 启动网页
 
 ```bash
-cd /Users/xiyu/Documents/code/friendmaker
+cd /path/to/friendmaker
 npm run ui:dev
 ```
 
