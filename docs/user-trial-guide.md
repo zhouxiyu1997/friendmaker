@@ -274,6 +274,99 @@ Switch Auto Draw UI running at http://127.0.0.1:4307
 http://127.0.0.1:4307
 ```
 
+### 5.1 平时如何重新启动项目
+
+如果你只是想把本地网页重新打开，或者上一轮试用结束后想再启动一次，按下面做就可以：
+
+1. 先回到上一次启动项目的终端窗口
+2. 按 `Ctrl+C` 停掉当前本地服务
+3. 再重新启动项目
+
+`macOS` 最省事的方式：
+
+- 重新双击 `Start Friend Maker.command`
+
+或者继续用命令行方式：
+
+```bash
+cd /path/to/friendmaker
+npm run ui:dev
+```
+
+如果你是 `Windows`，重新启动通常这样做：
+
+```powershell
+cd C:\path\to\friendmaker
+npm run ui:dev
+```
+
+看到下面这行，说明已经重新启动成功：
+
+```txt
+Switch Auto Draw UI running at http://127.0.0.1:4307
+```
+
+再在浏览器里打开：
+
+```txt
+http://127.0.0.1:4307
+```
+
+补充说明：
+
+- 如果浏览器页面还开着，通常直接刷新页面就行
+- 如果提示端口被占用，通常是旧的终端进程还没关掉，先回原来的终端按一次 `Ctrl+C`
+- 如果你是通过 `Start Friend Maker.command` 启动的，也不要同时再开一个 `npm run ui:dev`，避免重复启动
+- 如果你是 `Windows`，也不要重复打开多个 `npm run ui:dev` 窗口，否则也可能出现端口占用
+
+### 5.2 GitHub 仓库更新后，如何更新本地版本
+
+如果远程仓库有新版本，你本地建议按这个顺序更新：
+
+1. 先停掉当前项目
+2. 进入项目目录
+3. 拉取最新代码
+4. 重新安装依赖
+5. 检查项目
+6. 重新启动网页
+
+命令如下：
+
+```bash
+cd /path/to/friendmaker
+git pull
+npm install
+npm run check
+npm run ui:dev
+```
+
+如果你是 `macOS`，也可以在执行完前 4 步以后，直接重新双击：
+
+- `Start Friend Maker.command`
+
+这样会更接近平时试用时的方式。
+
+如果你是 `Windows`，通常这样更新：
+
+```powershell
+cd C:\path\to\friendmaker
+git pull
+npm install
+npm run check
+npm run ui:dev
+```
+
+更新后建议额外注意 3 件事：
+
+1. 如果更新说明里提到 `固件`、`串口协议`、`ACK`、`蓝牙连接`、`ESP32`，最好再去网页的 `刷入固件` 页重新刷一次固件  
+不确定要不要重刷时，直接重刷一次通常最稳妥。
+
+2. 如果 `git pull` 提示你有本地改动、无法自动合并，先不要随便删文件  
+如果这些改动是你自己改过的内容，先备份，或者先问维护者该怎么处理。
+
+3. 如果 `npm install` 后依赖有更新，第一次重新启动可能会稍慢一点  
+这通常是正常现象。
+
 ## 6. 第一次使用顺序
 
 网页一共 3 页：
