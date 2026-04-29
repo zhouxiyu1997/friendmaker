@@ -252,6 +252,22 @@ function normalizeBrushSize(value: unknown, fallback: 1 | 3 | 7 | 13 | 19 | 27):
     : fallback;
 }
 
+function normalizeImageScalePercent(value: unknown, fallback = 100): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(25, Math.min(200, Math.round(value)));
+}
+
+function normalizeImageOffsetPercent(value: unknown, fallback = 0): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(-100, Math.min(100, Math.round(value)));
+}
+
 function isManagedExecutionActive(status: ExecutionStatus): boolean {
   return status === "running" || status === "paused" || status === "stopping";
 }
@@ -316,6 +332,9 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     profile?: string;
     size?: number;
     brushSize?: number;
+    imageScalePercent?: number;
+    imageOffsetXPercent?: number;
+    imageOffsetYPercent?: number;
     width?: number;
     height?: number;
     threshold?: number;
@@ -332,8 +351,9 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     return;
   }
 
+  const loadedProfile = await loadProfile(body.profile);
   const baseProfile = applyCliOptions(
-    await loadProfile(body.profile),
+    loadedProfile,
     makeCliOverrides(
       withDefined({
         size: body.size,
@@ -341,12 +361,15 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
         height: body.height,
         colors: body.colors,
         threshold: body.threshold,
-        resizeMode: "cover",
+        resizeMode: body.resizeMode ?? loadedProfile.resizeMode,
         mode: body.mode,
         palette: body.palette,
       }),
     ),
   );
+  const imageScalePercent = normalizeImageScalePercent(body.imageScalePercent);
+  const imageOffsetXPercent = normalizeImageOffsetPercent(body.imageOffsetXPercent);
+  const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
   const profile = {
     ...baseProfile,
     brushSize: normalizeBrushSize(body.brushSize, baseProfile.brushSize),
@@ -357,6 +380,9 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     profile,
     body.previewScale ?? 12,
     {
+      imageScalePercent,
+      imageOffsetXPercent,
+      imageOffsetYPercent,
       removeBackground: body.removeBackground === true,
     },
   );
@@ -367,6 +393,9 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       canvasWidth: profile.canvasWidth,
       canvasHeight: profile.canvasHeight,
       brushSize: profile.brushSize,
+      imageScalePercent,
+      imageOffsetXPercent,
+      imageOffsetYPercent,
       colorMode: profile.colorMode,
       colorCount: profile.colorCount,
       removeBackground: body.removeBackground === true,
@@ -381,6 +410,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       commandCount: plan.commands.length,
       estimatedRuntimeMs: plan.estimatedRuntimeMs,
       estimatedRuntimeLabel: formatDuration(plan.estimatedRuntimeMs),
+      imageBounds: plan.imageBounds,
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,
     commands: plan.commands,

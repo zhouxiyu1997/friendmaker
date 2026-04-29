@@ -73,7 +73,7 @@
             <div class="execution-box mono-note-box">
               <div class="panel-head compact">
                 <h2>绘制模式</h2>
-                <p>当前固定走 250x250 画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；画笔大小按下方选择生成。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
+                <p>当前固定走 256x256 画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；画笔大小按下方选择生成。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
               </div>
 
               <p class="hint" id="studio-mode-hint">
@@ -85,7 +85,7 @@
               <label>
                 <span>画布尺寸（固定）</span>
                 <select id="size-select">
-                  <option value="250" selected>250x250</option>
+                  <option value="256" selected>256x256</option>
                 </select>
               </label>
 
@@ -129,6 +129,24 @@
               <span id="threshold-label">单色阈值</span>
               <input id="threshold-range" type="range" min="0" max="255" value="128" />
               <strong id="threshold-value">128</strong>
+            </label>
+
+            <label class="range-row">
+              <span>导入缩放</span>
+              <input id="scale-range" type="range" min="25" max="200" step="5" value="100" />
+              <strong id="scale-value">100%</strong>
+            </label>
+
+            <label class="range-row">
+              <span>横向位置</span>
+              <input id="offset-x-range" type="range" min="-100" max="100" step="5" value="0" />
+              <strong id="offset-x-value">居中</strong>
+            </label>
+
+            <label class="range-row">
+              <span>纵向位置</span>
+              <input id="offset-y-range" type="range" min="-100" max="100" step="5" value="0" />
+              <strong id="offset-y-value">居中</strong>
             </label>
 
             <div class="execution-box">
@@ -187,8 +205,28 @@
             </div>
 
             <div class="preview-frame">
-              <img id="preview-image" alt="生成预览" />
-              <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
+              <div class="preview-canvas">
+                <img id="preview-image" alt="生成预览" />
+                <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
+              </div>
+            </div>
+
+            <div class="preview-meta-strip">
+              <div class="preview-meta-card">
+                <span>画布范围</span>
+                <strong id="stat-canvas-size">256x256</strong>
+                <small id="stat-canvas-range">x: 0-255 · y: 0-255</small>
+              </div>
+              <div class="preview-meta-card">
+                <span>图片尺寸</span>
+                <strong id="stat-image-size">-</strong>
+                <small id="stat-image-scale">-</small>
+              </div>
+              <div class="preview-meta-card">
+                <span>图片位置</span>
+                <strong id="stat-image-origin">-</strong>
+                <small id="stat-image-range">-</small>
+              </div>
             </div>
 
             <div class="stat-strip">

@@ -59,6 +59,15 @@ export interface PixelizationResult {
   usedColorIndexes: number[];
 }
 
+export interface CanvasBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maxX: number;
+  maxY: number;
+}
+
 export interface ProgressUpdate {
   index: number;
   total: number;

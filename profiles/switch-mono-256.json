@@ -1,8 +1,8 @@
 {
-  "profileName": "switch-mono-250",
+  "profileName": "switch-mono-256",
   "baudRate": 115200,
-  "canvasWidth": 250,
-  "canvasHeight": 250,
+  "canvasWidth": 256,
+  "canvasHeight": 256,
   "resizeMode": "cover",
   "cellMoveDuration": 80,
   "inputDelay": 40,

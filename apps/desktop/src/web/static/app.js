@@ -13,8 +13,11 @@ const state = {
   studio: {
     busy: false,
     target: "serial",
-    canvasSize: 250,
+    canvasSize: 256,
     brushSize: 3,
+    imageScalePercent: 100,
+    imageOffsetXPercent: 0,
+    imageOffsetYPercent: 0,
     colorMode: "mono",
     colorCount: 32,
     removeBackground: false,
@@ -99,6 +102,12 @@ const els = {
   thresholdLabel: document.getElementById("threshold-label"),
   thresholdRange: document.getElementById("threshold-range"),
   thresholdValue: document.getElementById("threshold-value"),
+  scaleRange: document.getElementById("scale-range"),
+  scaleValue: document.getElementById("scale-value"),
+  offsetXRange: document.getElementById("offset-x-range"),
+  offsetXValue: document.getElementById("offset-x-value"),
+  offsetYRange: document.getElementById("offset-y-range"),
+  offsetYValue: document.getElementById("offset-y-value"),
   studioPortSelect: document.getElementById("studio-port-select"),
   refreshPortsButton: document.getElementById("refresh-ports-button"),
   executionHint: document.getElementById("execution-hint"),
@@ -125,6 +134,12 @@ const els = {
   statPixels: document.getElementById("stat-pixels"),
   statCommands: document.getElementById("stat-commands"),
   statRuntime: document.getElementById("stat-runtime"),
+  statCanvasSize: document.getElementById("stat-canvas-size"),
+  statCanvasRange: document.getElementById("stat-canvas-range"),
+  statImageSize: document.getElementById("stat-image-size"),
+  statImageScale: document.getElementById("stat-image-scale"),
+  statImageOrigin: document.getElementById("stat-image-origin"),
+  statImageRange: document.getElementById("stat-image-range"),
   firmwareEnvSelect: document.getElementById("firmware-env-select"),
   firmwarePortSelect: document.getElementById("firmware-port-select"),
   firmwareRefreshButton: document.getElementById("firmware-refresh-button"),
@@ -169,6 +184,9 @@ const els = {
 };
 
 let studioExecutionPollTimer = null;
+let studioPreviewRefreshTimer = null;
+let studioGenerateRequestSerial = 0;
+let studioPreviewBoundsRequestSerial = 0;
 
 const COLOR_COUNT_OPTIONS_BY_MODE = {
   mono: [2],
@@ -184,11 +202,38 @@ els.pageTabs.forEach((button) => {
 els.sizeSelect.addEventListener("change", () => {
   state.studio.canvasSize = Number(els.sizeSelect.value);
   syncStudioUi();
+  scheduleStudioPreviewRefresh();
 });
 
 els.brushSizeSelect.addEventListener("change", () => {
   state.studio.brushSize = Number(els.brushSizeSelect.value);
   syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
+els.scaleRange.addEventListener("input", () => {
+  state.studio.imageScalePercent = Number(els.scaleRange.value || state.studio.imageScalePercent);
+  els.scaleValue.textContent = `${state.studio.imageScalePercent}%`;
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
+els.offsetXRange.addEventListener("input", () => {
+  state.studio.imageOffsetXPercent = Number(
+    els.offsetXRange.value || state.studio.imageOffsetXPercent,
+  );
+  els.offsetXValue.textContent = formatOffsetLabel(state.studio.imageOffsetXPercent);
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
+els.offsetYRange.addEventListener("input", () => {
+  state.studio.imageOffsetYPercent = Number(
+    els.offsetYRange.value || state.studio.imageOffsetYPercent,
+  );
+  els.offsetYValue.textContent = formatOffsetLabel(state.studio.imageOffsetYPercent);
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
 });
 
 els.colorModeSelect.addEventListener("change", () => {
@@ -196,20 +241,24 @@ els.colorModeSelect.addEventListener("change", () => {
   state.studio.colorMode = nextMode === "official" ? "official" : "mono";
   syncStudioColorCountOptions();
   syncStudioUi();
+  scheduleStudioPreviewRefresh();
 });
 
 els.colorCountSelect.addEventListener("change", () => {
   state.studio.colorCount = Number(els.colorCountSelect.value || state.studio.colorCount);
   syncStudioUi();
+  scheduleStudioPreviewRefresh();
 });
 
 els.autoRemoveBackgroundCheckbox.addEventListener("change", () => {
   state.studio.removeBackground = els.autoRemoveBackgroundCheckbox.checked;
   syncStudioUi();
+  scheduleStudioPreviewRefresh();
 });
 
 els.thresholdRange.addEventListener("input", () => {
   els.thresholdValue.textContent = els.thresholdRange.value;
+  scheduleStudioPreviewRefresh();
 });
 
 [els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect].forEach((select) => {
@@ -259,6 +308,8 @@ els.imageInput.addEventListener("change", async (event) => {
   state.imageDataUrl = await readFileAsDataUrl(file);
   els.fileLabel.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
   appendLog(els.studioLogOutput, `已载入图片：${file.name}`);
+  syncStudioUi();
+  scheduleStudioPreviewRefresh({ immediate: true });
 });
 
 els.quickStartButton.addEventListener("click", async () => {
@@ -309,69 +360,239 @@ async function generateStudioCommands({ logPrefix }) {
     return false;
   }
 
+  cancelStudioPreviewRefresh();
   setStudioBusy(true);
   appendLog(els.studioLogOutput, logPrefix);
 
   try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        imageDataUrl: state.imageDataUrl,
-        size: state.studio.canvasSize,
-        brushSize: state.studio.brushSize,
-        mode: state.studio.colorMode,
-        colors: state.studio.colorCount,
-        resizeMode: "cover",
-        threshold: Number(els.thresholdRange.value),
-        previewScale: 12,
-        removeBackground: state.studio.removeBackground,
-      }),
-    });
+    const payload = await requestStudioGeneration();
 
-    const payload = await response.json();
-
-    if (!response.ok) {
-      throw new Error(payload.error ?? "生成失败");
+    if (!payload) {
+      return false;
     }
 
-    state.commands = payload.commands;
-    state.studio.usedColorIndexes = Array.isArray(payload.stats.usedColorIndexes)
-      ? payload.stats.usedColorIndexes
-      : [];
-    state.studio.profile = {
-      baudRate: payload.profile.baudRate ?? 115200,
-      ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
-      commandRetryCount: payload.profile.commandRetryCount ?? 1,
-    };
-    state.studio.brushSize = payload.profile.brushSize ?? state.studio.brushSize;
-    state.studio.colorMode =
-      payload.profile.colorMode === "official" ? "official" : "mono";
-    state.studio.colorCount = payload.profile.colorCount ?? state.studio.colorCount;
-    state.studio.removeBackground = payload.profile.removeBackground === true;
-
-    els.commandsOutput.value = payload.commands.join("\n");
-    els.previewImage.src = payload.previewDataUrl;
-    els.previewImage.classList.add("visible");
-    els.previewEmpty.classList.add("hidden");
-    els.statColors.textContent =
-      payload.profile.colorMode === "mono"
-        ? "黑 / 白"
-        : `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`;
-    els.statPixels.textContent = String(payload.stats.totalPixels);
-    els.statCommands.textContent = String(payload.stats.commandCount);
-    els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
+    applyGeneratedStudioPayload(payload);
     appendLog(
       els.studioLogOutput,
       `生成完成：${payload.stats.commandCount} 条命令，预计耗时 ${payload.stats.estimatedRuntimeLabel}`,
     );
-    renderOfficialPalettePreview();
     return true;
   } catch (error) {
     appendLog(els.studioLogOutput, `生成失败：${getErrorMessage(error)}`);
     return false;
   } finally {
     setStudioBusy(false);
+  }
+}
+
+function buildStudioGeneratePayload() {
+  return {
+    imageDataUrl: state.imageDataUrl,
+    size: state.studio.canvasSize,
+    brushSize: state.studio.brushSize,
+    imageScalePercent: state.studio.imageScalePercent,
+    imageOffsetXPercent: state.studio.imageOffsetXPercent,
+    imageOffsetYPercent: state.studio.imageOffsetYPercent,
+    mode: state.studio.colorMode,
+    colors: state.studio.colorCount,
+    resizeMode: "contain",
+    threshold: Number(els.thresholdRange.value),
+    previewScale: 12,
+    removeBackground: state.studio.removeBackground,
+  };
+}
+
+async function requestStudioGeneration() {
+  const requestSerial = ++studioGenerateRequestSerial;
+  const response = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(buildStudioGeneratePayload()),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "生成失败");
+  }
+
+  if (requestSerial !== studioGenerateRequestSerial) {
+    return null;
+  }
+
+  return payload;
+}
+
+function applyGeneratedStudioPayload(payload) {
+  state.commands = payload.commands;
+  state.studio.usedColorIndexes = Array.isArray(payload.stats.usedColorIndexes)
+    ? payload.stats.usedColorIndexes
+    : [];
+  state.studio.profile = {
+    baudRate: payload.profile.baudRate ?? 115200,
+    ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
+    commandRetryCount: payload.profile.commandRetryCount ?? 1,
+  };
+  state.studio.brushSize = payload.profile.brushSize ?? state.studio.brushSize;
+  state.studio.imageScalePercent =
+    payload.profile.imageScalePercent ?? state.studio.imageScalePercent;
+  state.studio.imageOffsetXPercent =
+    payload.profile.imageOffsetXPercent ?? state.studio.imageOffsetXPercent;
+  state.studio.imageOffsetYPercent =
+    payload.profile.imageOffsetYPercent ?? state.studio.imageOffsetYPercent;
+  state.studio.colorMode =
+    payload.profile.colorMode === "official" ? "official" : "mono";
+  state.studio.colorCount = payload.profile.colorCount ?? state.studio.colorCount;
+  state.studio.removeBackground = payload.profile.removeBackground === true;
+
+  els.commandsOutput.value = payload.commands.join("\n");
+  els.previewImage.src = payload.previewDataUrl;
+  els.previewImage.classList.add("visible");
+  els.previewEmpty.classList.add("hidden");
+  els.statColors.textContent =
+    payload.profile.colorMode === "mono"
+      ? "黑 / 白"
+      : `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`;
+  els.statPixels.textContent = String(payload.stats.totalPixels);
+  els.statCommands.textContent = String(payload.stats.commandCount);
+  els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
+  void updatePreviewBounds(payload);
+  renderOfficialPalettePreview();
+}
+
+function renderPreviewBounds(profile, imageBounds) {
+  const canvasWidth = profile?.canvasWidth ?? state.studio.canvasSize;
+  const canvasHeight = profile?.canvasHeight ?? state.studio.canvasSize;
+
+  els.statCanvasSize.textContent = `${canvasWidth}x${canvasHeight}`;
+  els.statCanvasRange.textContent = `x: 0-${canvasWidth - 1} · y: 0-${canvasHeight - 1}`;
+
+  if (!imageBounds) {
+    els.statImageSize.textContent = "空白";
+    els.statImageScale.textContent = `缩放 ${state.studio.imageScalePercent}%`;
+    els.statImageOrigin.textContent = "-";
+    els.statImageRange.textContent = "当前没有落在画布内的有效像素";
+    return;
+  }
+
+  els.statImageSize.textContent = `${imageBounds.width}x${imageBounds.height}`;
+  els.statImageScale.textContent = `缩放 ${profile?.imageScalePercent ?? state.studio.imageScalePercent}%`;
+  els.statImageOrigin.textContent = `(${imageBounds.x}, ${imageBounds.y})`;
+  els.statImageRange.textContent =
+    `x: ${imageBounds.x}-${imageBounds.maxX} · y: ${imageBounds.y}-${imageBounds.maxY}`;
+}
+
+async function updatePreviewBounds(payload) {
+  const requestSerial = ++studioPreviewBoundsRequestSerial;
+  const canvasWidth = payload?.profile?.canvasWidth ?? state.studio.canvasSize;
+  const canvasHeight = payload?.profile?.canvasHeight ?? state.studio.canvasSize;
+  const bounds =
+    payload?.stats?.imageBounds ??
+    (await computeImageBoundsFromPreview(payload?.previewDataUrl, canvasWidth, canvasHeight));
+
+  if (requestSerial !== studioPreviewBoundsRequestSerial) {
+    return;
+  }
+
+  renderPreviewBounds(payload?.profile, bounds);
+}
+
+async function computeImageBoundsFromPreview(previewDataUrl, canvasWidth, canvasHeight) {
+  if (!previewDataUrl) {
+    return null;
+  }
+
+  const image = await loadImageElement(previewDataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(image, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const alpha = data[(y * canvas.width + x) * 4 + 3];
+
+      if (alpha <= 0) {
+        continue;
+      }
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return null;
+  }
+
+  const scaleX = canvas.width / canvasWidth;
+  const scaleY = canvas.height / canvasHeight;
+  const normalizedMinX = Math.max(0, Math.floor(minX / scaleX));
+  const normalizedMinY = Math.max(0, Math.floor(minY / scaleY));
+  const normalizedMaxX = Math.min(canvasWidth - 1, Math.floor(maxX / scaleX));
+  const normalizedMaxY = Math.min(canvasHeight - 1, Math.floor(maxY / scaleY));
+
+  return {
+    x: normalizedMinX,
+    y: normalizedMinY,
+    width: normalizedMaxX - normalizedMinX + 1,
+    height: normalizedMaxY - normalizedMinY + 1,
+    maxX: normalizedMaxX,
+    maxY: normalizedMaxY,
+  };
+}
+
+function cancelStudioPreviewRefresh() {
+  if (studioPreviewRefreshTimer !== null) {
+    window.clearTimeout(studioPreviewRefreshTimer);
+    studioPreviewRefreshTimer = null;
+  }
+}
+
+function scheduleStudioPreviewRefresh(options = {}) {
+  if (!state.imageDataUrl || state.studio.busy || isStudioExecutionActive()) {
+    return;
+  }
+
+  cancelStudioPreviewRefresh();
+
+  const delayMs = options.immediate === true ? 0 : 180;
+  studioPreviewRefreshTimer = window.setTimeout(() => {
+    studioPreviewRefreshTimer = null;
+    void refreshStudioPreview();
+  }, delayMs);
+}
+
+async function refreshStudioPreview() {
+  if (!state.imageDataUrl || state.studio.busy || isStudioExecutionActive()) {
+    return false;
+  }
+
+  try {
+    const payload = await requestStudioGeneration();
+
+    if (!payload) {
+      return false;
+    }
+
+    applyGeneratedStudioPayload(payload);
+    syncStudioUi();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -579,6 +800,9 @@ function setStudioBusy(isBusy) {
   els.generateButton.disabled = isBusy;
   els.refreshPortsButton.disabled = isBusy;
   els.thresholdRange.disabled = isBusy;
+  els.scaleRange.disabled = isBusy;
+  els.offsetXRange.disabled = isBusy;
+  els.offsetYRange.disabled = isBusy;
   els.sizeSelect.disabled = isBusy;
   els.brushSizeSelect.disabled = isBusy;
   els.copyButton.disabled = isBusy || state.commands.length === 0;
@@ -989,6 +1213,12 @@ function syncStudioUi() {
 
   els.sizeSelect.value = String(state.studio.canvasSize);
   els.brushSizeSelect.value = String(state.studio.brushSize);
+  els.scaleRange.value = String(state.studio.imageScalePercent);
+  els.scaleValue.textContent = `${state.studio.imageScalePercent}%`;
+  els.offsetXRange.value = String(state.studio.imageOffsetXPercent);
+  els.offsetXValue.textContent = formatOffsetLabel(state.studio.imageOffsetXPercent);
+  els.offsetYRange.value = String(state.studio.imageOffsetYPercent);
+  els.offsetYValue.textContent = formatOffsetLabel(state.studio.imageOffsetYPercent);
   els.colorModeSelect.value = state.studio.colorMode;
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
@@ -996,14 +1226,22 @@ function syncStudioUi() {
     ? "已开启自动扣背景，会优先去掉白底、浅灰底和棋盘格假透明背景。"
     : "当前不会自动扣背景；如果素材是白底或棋盘格假透明图，建议开启。";
   const squareBrushHint = "建议同时把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。";
+  const scaleHint = `当前导入缩放是 ${state.studio.imageScalePercent}%，100% 表示完整放进画布。`;
+  const positionHint = describeImagePosition(
+    state.studio.imageOffsetXPercent,
+    state.studio.imageOffsetYPercent,
+  );
   els.studioModeHint.textContent =
     state.studio.colorMode === "mono"
-      ? `深色像素会绘制，浅色像素会保留为空白背景。当前会把图片映射到 250x250 画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${squareBrushHint}${backgroundHint}`
-      : `当前会先把图片压到 ${state.studio.colorCount} 个官方色以内，再映射到游戏内置的 7x12 官方色盘，并按 ${state.studio.brushSize} 号笔生成。开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
+      ? `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`
+      : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
   els.sizeSelect.disabled = state.studio.busy || executionActive;
   els.brushSizeSelect.disabled = state.studio.busy || executionActive;
+  els.scaleRange.disabled = state.studio.busy || executionActive;
+  els.offsetXRange.disabled = state.studio.busy || executionActive;
+  els.offsetYRange.disabled = state.studio.busy || executionActive;
   els.colorModeSelect.disabled = state.studio.busy || executionActive;
   els.autoRemoveBackgroundCheckbox.disabled = state.studio.busy || executionActive;
   els.colorCountSelect.disabled =
@@ -1068,8 +1306,8 @@ function syncStudioUi() {
 
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
-      ? `当前会把 250x250 的黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
-      : `当前会把 250x250 的官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`;
+      ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
+      : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`;
   renderStudioConnectionStatus();
 }
 
@@ -1478,6 +1716,23 @@ function getErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function formatOffsetLabel(value) {
+  if (value === 0) {
+    return "居中";
+  }
+
+  return `${value > 0 ? "+" : ""}${value}%`;
+}
+
+function describeImagePosition(offsetXPercent, offsetYPercent, includeTrailingPunctuation = true) {
+  if (offsetXPercent === 0 && offsetYPercent === 0) {
+    return includeTrailingPunctuation ? "当前位置居中。" : "位置居中";
+  }
+
+  const summary = `当前位置为横向 ${formatOffsetLabel(offsetXPercent)}、纵向 ${formatOffsetLabel(offsetYPercent)}`;
+  return includeTrailingPunctuation ? `${summary}。` : summary;
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1487,10 +1742,26 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function loadImageElement(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("读取预览图失败"));
+    image.src = dataUrl;
+  });
+}
+
 async function init() {
   switchPage("studio");
   state.studio.canvasSize = Number(els.sizeSelect.value || state.studio.canvasSize);
   state.studio.brushSize = Number(els.brushSizeSelect.value || state.studio.brushSize);
+  state.studio.imageScalePercent = Number(els.scaleRange.value || state.studio.imageScalePercent);
+  state.studio.imageOffsetXPercent = Number(
+    els.offsetXRange.value || state.studio.imageOffsetXPercent,
+  );
+  state.studio.imageOffsetYPercent = Number(
+    els.offsetYRange.value || state.studio.imageOffsetYPercent,
+  );
   syncStudioColorCountOptions();
   await Promise.all([refreshPorts(), loadFirmwareInfo(), loadOfficialPalette(), pollStudioExecutionStatus()]);
   renderPortSelects();

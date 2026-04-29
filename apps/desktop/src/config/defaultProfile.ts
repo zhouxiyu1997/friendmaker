@@ -87,10 +87,10 @@ export const DEFAULT_PALETTE = buildReferencePalette();
 export const DEFAULT_OFFICIAL_PALETTE = OFFICIAL_PALETTE;
 
 export const DEFAULT_PROFILE: DrawingProfile = {
-  profileName: "switch-mono-250",
+  profileName: "switch-mono-256",
   baudRate: 115200,
-  canvasWidth: 250,
-  canvasHeight: 250,
+  canvasWidth: 256,
+  canvasHeight: 256,
   resizeMode: "cover",
   cellMoveDuration: 80,
   inputDelay: 40,

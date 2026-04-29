@@ -127,14 +127,27 @@ export async function pixelizeImage(
   imageSource: ImageSource,
   profile: DrawingProfile,
   options?: {
+    imageScalePercent?: number;
+    imageOffsetXPercent?: number;
+    imageOffsetYPercent?: number;
     removeBackground?: boolean;
   },
 ): Promise<PixelizationResult> {
-  const resizedImage = await resizeImage(imageSource, {
+  const resizeOptions = {
     width: profile.canvasWidth,
     height: profile.canvasHeight,
     resizeMode: profile.resizeMode,
-  });
+    ...(options?.imageScalePercent !== undefined
+      ? { scalePercent: options.imageScalePercent }
+      : {}),
+    ...(options?.imageOffsetXPercent !== undefined
+      ? { offsetXPercent: options.imageOffsetXPercent }
+      : {}),
+    ...(options?.imageOffsetYPercent !== undefined
+      ? { offsetYPercent: options.imageOffsetYPercent }
+      : {}),
+  };
+  const resizedImage = await resizeImage(imageSource, resizeOptions);
   const rawImage = options?.removeBackground ? autoRemoveBackground(resizedImage) : resizedImage;
 
   const fullPixelMap = quantizePixels(rawImage, {

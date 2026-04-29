@@ -656,11 +656,21 @@ button.ghost {
 }
 
 .preview-frame {
-  position: relative;
   margin-top: 18px;
-  min-height: 320px;
+  display: grid;
+  place-items: center;
+}
+
+.preview-canvas {
+  position: relative;
+  width: min(100%, 460px);
+  aspect-ratio: 1;
   border-radius: 24px;
   overflow: hidden;
+  border: 1px solid rgba(19, 34, 56, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 10px 28px rgba(19, 34, 56, 0.08);
   background:
     linear-gradient(45deg, rgba(19, 34, 56, 0.04) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(19, 34, 56, 0.04) 25%, transparent 25%),
@@ -670,15 +680,69 @@ button.ghost {
   background-position: 0 0, 0 12px, 12px -12px, -12px 0;
 }
 
+.preview-canvas::after {
+  content: "256 x 256 Canvas";
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 .preview-frame img {
   display: none;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: fill;
+  image-rendering: pixelated;
 }
 
 .preview-frame img.visible {
   display: block;
+}
+
+.preview-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.preview-meta-card {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(19, 34, 56, 0.05);
+}
+
+.preview-meta-card span,
+.preview-meta-card small {
+  display: block;
+  color: var(--ink-soft);
+}
+
+.preview-meta-card span {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.preview-meta-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+}
+
+.preview-meta-card small {
+  margin-top: 6px;
+  font-family: "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-size: 12px;
 }
 
 .panel-official-palette {
@@ -836,6 +900,7 @@ button.ghost {
   }
 
   .field-grid,
+  .preview-meta-strip,
   .stat-strip,
   .button-grid {
     grid-template-columns: 1fr;
