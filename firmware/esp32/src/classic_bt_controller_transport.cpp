@@ -969,6 +969,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         hasPeerAddress_ = true;
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
+        sendCurrentInputReport(false);
       }
       Serial.printf(
           "INFO bt hid event=open status=%d conn=%d peer=%s\n",
