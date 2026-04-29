@@ -53,7 +53,7 @@
 - 支持 `单色绘制` 与 `官方色绘制`
 - 支持 `256x256` 脚本坐标画布工作流
 - 支持 `自动扣背景`，适合白底、浅灰底、棋盘格假透明图
-- 通过串口将绘制脚本逐条发送给 ESP32，并等待 `ACK`
+- 通过带 `SEQ <session> <seq>` 去重帧的串口协议将绘制脚本逐条发送给 ESP32，并等待 `ACK`
 - 在网页中完成脚本生成、固件刷写、手柄连接与按钮测试，以及暂停、继续和中断绘制
 
 ### 整体架构
@@ -341,7 +341,7 @@ Reference documents:
 - Support both `mono drawing` and `official palette drawing`
 - Use a `256x256` script-coordinate canvas workflow
 - Support `automatic background removal` for white, light gray, and fake transparency checkerboard backgrounds
-- Send drawing commands to the ESP32 over serial and wait for `ACK`
+- Send drawing commands to the ESP32 over a `SEQ <session> <seq>` deduplicating serial protocol and wait for `ACK`
 - Handle script generation, firmware flashing, controller connection and button testing, plus pause, resume, and stop actions from the web interface
 
 ### Architecture

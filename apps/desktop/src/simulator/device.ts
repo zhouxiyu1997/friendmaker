@@ -1,3 +1,5 @@
+import { parseSequencedFrame, type SequencedFrame } from "../protocol/sequencing.js";
+
 function parseTwoInts(line: string): { first: number; second: number } | null {
   const parts = line.trim().split(/\s+/u);
 
@@ -31,7 +33,7 @@ function delay(ms: number): Promise<void> {
 }
 
 export interface SimulatedDeviceResponse {
-  ack: "OK" | `ERR ${string}`;
+  ack: string;
   lines: string[];
 }
 
@@ -42,6 +44,13 @@ interface SimulatedDeviceState {
   drawCount: number;
   paused: boolean;
   ended: boolean;
+}
+
+interface SequencedDeviceState {
+  sessionId: string | null;
+  lastSequence: number;
+  lastCommand: string;
+  lastAck: string;
 }
 
 export class SimulatedDevice {
@@ -55,6 +64,80 @@ export class SimulatedDevice {
     paused: false,
     ended: false,
   };
+  private sequenceState: SequencedDeviceState = {
+    sessionId: null,
+    lastSequence: 0,
+    lastCommand: "",
+    lastAck: "",
+  };
+
+  private makeAck(frame: SequencedFrame): string {
+    return `OK ${frame.sessionId} ${frame.sequence}`;
+  }
+
+  private makeError(frame: SequencedFrame, message: string): string {
+    return `ERR ${frame.sessionId} ${frame.sequence} ${message}`;
+  }
+
+  private cacheAndReturn(
+    frame: SequencedFrame,
+    ack: string,
+    lines: string[],
+  ): SimulatedDeviceResponse {
+    this.sequenceState.lastSequence = frame.sequence;
+    this.sequenceState.lastCommand = frame.command;
+    this.sequenceState.lastAck = ack;
+
+    return {
+      ack,
+      lines,
+    };
+  }
+
+  private validateFrame(frame: SequencedFrame): SimulatedDeviceResponse | null {
+    if (this.sequenceState.sessionId !== frame.sessionId) {
+      if (frame.sequence !== 1) {
+        return {
+          ack: this.makeError(frame, "sequence expected 1 for new session"),
+          lines: [],
+        };
+      }
+
+      this.sequenceState = {
+        sessionId: frame.sessionId,
+        lastSequence: 0,
+        lastCommand: "",
+        lastAck: "",
+      };
+      return null;
+    }
+
+    if (frame.sequence === this.sequenceState.lastSequence) {
+      if (frame.command === this.sequenceState.lastCommand && this.sequenceState.lastAck) {
+        return {
+          ack: this.sequenceState.lastAck,
+          lines: [],
+        };
+      }
+
+      return {
+        ack: this.makeError(frame, "duplicate sequence command mismatch"),
+        lines: [],
+      };
+    }
+
+    if (frame.sequence !== this.sequenceState.lastSequence + 1) {
+      return {
+        ack: this.makeError(
+          frame,
+          `sequence expected ${this.sequenceState.lastSequence + 1}`,
+        ),
+        lines: [],
+      };
+    }
+
+    return null;
+  }
 
   async executeCommand(
     line: string,
@@ -64,7 +147,24 @@ export class SimulatedDevice {
       errorAtCommand?: number;
     },
   ): Promise<SimulatedDeviceResponse> {
-    const trimmed = line.trim();
+    const frame = parseSequencedFrame(line);
+
+    if (!frame) {
+      await delay(options.ackDelayMs);
+      return {
+        ack: "ERR protocol frame required",
+        lines: [],
+      };
+    }
+
+    const sequenceResult = this.validateFrame(frame);
+
+    if (sequenceResult) {
+      await delay(options.ackDelayMs);
+      return sequenceResult;
+    }
+
+    const trimmed = frame.command;
     const lines: string[] = [];
 
     if (
@@ -75,14 +175,14 @@ export class SimulatedDevice {
       this.injectedFailures.add(options.commandIndex);
       await delay(options.ackDelayMs);
       return {
-        ack: `ERR injected failure at command ${options.commandIndex}`,
+        ack: this.makeError(frame, `injected failure at command ${options.commandIndex}`),
         lines,
       };
     }
 
     if (trimmed.length === 0) {
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "I") {
@@ -90,34 +190,34 @@ export class SimulatedDevice {
         `INFO transport=${this.transportName} x=${this.state.x} y=${this.state.y} color=${this.state.colorIndex} draws=${this.state.drawCount}`,
       );
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "H") {
       this.state.x = 0;
       this.state.y = 0;
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "P") {
       this.state.drawCount += 1;
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "S") {
       this.state.paused = true;
       lines.push("INFO paused=true");
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "R") {
       this.state.paused = false;
       lines.push("INFO paused=false");
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "E") {
@@ -126,7 +226,7 @@ export class SimulatedDevice {
         `INFO end x=${this.state.x} y=${this.state.y} color=${this.state.colorIndex} draws=${this.state.drawCount}`,
       );
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed.startsWith("M ")) {
@@ -134,13 +234,13 @@ export class SimulatedDevice {
 
       if (!parsed) {
         await delay(options.ackDelayMs);
-        return { ack: "ERR invalid move", lines };
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid move"), lines);
       }
 
       this.state.x += parsed.first;
       this.state.y += parsed.second;
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed.startsWith("C ")) {
@@ -148,12 +248,12 @@ export class SimulatedDevice {
 
       if (colorIndex === null) {
         await delay(options.ackDelayMs);
-        return { ack: "ERR invalid color", lines };
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid color"), lines);
       }
 
       this.state.colorIndex = colorIndex;
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed.startsWith("W ")) {
@@ -161,19 +261,19 @@ export class SimulatedDevice {
 
       if (waitMs === null) {
         await delay(options.ackDelayMs);
-        return { ack: "ERR invalid wait", lines };
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid wait"), lines);
       }
 
       await delay(waitMs + options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     if (trimmed === "A" || trimmed === "B" || trimmed === "X" || trimmed === "Y") {
       await delay(options.ackDelayMs);
-      return { ack: "OK", lines };
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
     await delay(options.ackDelayMs);
-    return { ack: "ERR unknown command", lines };
+    return this.cacheAndReturn(frame, this.makeError(frame, "unknown command"), lines);
   }
 }

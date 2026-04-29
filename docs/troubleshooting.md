@@ -5,12 +5,13 @@
 - Confirm Node.js is at least 18.17
 - Re-run `npm install`
 
-## Serial port times out waiting for `OK`
+## Serial port times out waiting for `OK <session> <seq>`
 
 - Make sure the ESP32 firmware is flashed
 - Confirm the baud rate matches both sides
 - Use `npm run dev -- --list-ports` to verify the device path
-- Open a serial monitor and check whether the board prints `OK` after commands
+- Open a serial monitor and check whether the board prints sequenced ACK lines such as `OK a1b2c3d4 1`
+- Manual serial tests must send sequenced frames, for example `SEQ a1b2c3d4 1 I`; the CLI and Web UI wrap visible commands automatically
 - Start with `npm run dev -- --commands-file ./examples/smoke-test-commands.txt --port <device> --send` before trying full image streaming
 
 ## ESP32 board does not appear on macOS

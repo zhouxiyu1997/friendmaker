@@ -1,4 +1,9 @@
 import type { ProgressUpdate, SenderControls } from "../types.js";
+import {
+  createSessionId,
+  formatSequencedCommand,
+  parseSequencedAck,
+} from "../protocol/sequencing.js";
 import { SimulatedDevice } from "./device.js";
 
 function delay(ms: number): Promise<void> {
@@ -58,6 +63,9 @@ export class SimulatedAckSender implements SenderControls {
       onDeviceLine?: (line: string) => void;
     },
   ): Promise<void> {
+    const sessionId = createSessionId();
+    let sequence = 1;
+
     for (const [index, command] of commands.entries()) {
       await this.waitWhilePaused();
 
@@ -67,10 +75,12 @@ export class SimulatedAckSender implements SenderControls {
 
       let attempt = 0;
       let sent = false;
+      const commandSequence = sequence;
+      const framedCommand = formatSequencedCommand(sessionId, commandSequence, command);
 
       while (!sent) {
         const response = await withTimeout(
-          this.device.executeCommand(command, {
+          this.device.executeCommand(framedCommand, {
             commandIndex: index + 1,
             ackDelayMs: options.ackDelayMs,
             ...(options.errorAtCommand !== undefined
@@ -84,7 +94,13 @@ export class SimulatedAckSender implements SenderControls {
           options.onDeviceLine?.(line);
         }
 
-        if (response.ack !== "OK") {
+        const ack = parseSequencedAck(response.ack);
+
+        if (!ack || ack.sessionId !== sessionId || ack.sequence !== commandSequence) {
+          throw new Error(`Device returned an invalid ACK: ${response.ack}`);
+        }
+
+        if (ack.type !== "ok") {
           if (attempt >= options.retries) {
             throw new Error(`Device returned ${response.ack}`);
           }
@@ -104,13 +120,17 @@ export class SimulatedAckSender implements SenderControls {
         total: commands.length,
         command,
       });
+      sequence += 1;
     }
 
     if (this.stopped) {
-      const response = await this.device.executeCommand("E", {
-        commandIndex: commands.length + 1,
-        ackDelayMs: options.ackDelayMs,
-      });
+      const response = await this.device.executeCommand(
+        formatSequencedCommand(sessionId, sequence, "E"),
+        {
+          commandIndex: commands.length + 1,
+          ackDelayMs: options.ackDelayMs,
+        },
+      );
 
       for (const line of response.lines) {
         options.onDeviceLine?.(line);

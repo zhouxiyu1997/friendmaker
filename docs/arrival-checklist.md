@@ -59,7 +59,7 @@ npm run dev -- --commands-file ./examples/smoke-test-commands.txt --port <your-s
 Expected result:
 
 - the Mac CLI shows command progress
-- the board returns `OK` for each command
+- the board returns sequenced ACK lines such as `OK a1b2c3d4 1` for each command
 - the serial monitor prints `INFO transport=classic-bt-hid` when the `I` command runs
 - the `I` command also prints Bluetooth readiness fields such as `bt_hid_ready`, `bt_app_registered`, and `bt_discoverable`
 

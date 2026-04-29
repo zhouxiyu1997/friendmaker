@@ -4,9 +4,15 @@ import { ReadlineParser } from "@serialport/parser-readline";
 import { SerialPort } from "serialport";
 
 import { preferSerialPath } from "./listPorts.js";
+import {
+  createSessionId,
+  formatSequencedCommand,
+  parseSequencedAck,
+} from "../protocol/sequencing.js";
 import type { ProgressUpdate, SenderControls } from "../types.js";
 
-const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "ERR ", "BOOT ", "rst:"] as const;
+const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
+const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 
 async function waitForOpen(port: SerialPort): Promise<void> {
   if (port.isOpen) {
@@ -17,7 +23,7 @@ async function waitForOpen(port: SerialPort): Promise<void> {
 }
 
 function isRecognizedDeviceLine(line: string): boolean {
-  if (line === "OK" || line.startsWith("ERR")) {
+  if (line === "OK" || line === "ERR" || ACK_LINE_PREFIXES.some((prefix) => line.startsWith(prefix))) {
     return true;
   }
 
@@ -39,7 +45,8 @@ function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
     return cleanText;
   }
 
-  const candidateIndexes = DEVICE_LINE_PREFIXES.map((prefix) => cleanText.lastIndexOf(prefix))
+  const candidateIndexes = [...ACK_LINE_PREFIXES, ...DEVICE_LINE_PREFIXES]
+    .map((prefix) => cleanText.lastIndexOf(prefix))
     .filter((index) => index >= 0);
 
   if (candidateIndexes.length === 0) {
@@ -54,6 +61,10 @@ function waitForAck(
   parser: ReadlineParser,
   port: SerialPort,
   timeoutMs: number,
+  expected: {
+    sessionId: string;
+    sequence: number;
+  },
   options?: {
     onDeviceLine?: (line: string) => void;
     onInterruptReady?: (interrupt: (() => void) | null) => void;
@@ -88,13 +99,33 @@ function waitForAck(
         return;
       }
 
-      if (line === "OK") {
-        finish(() => resolve("OK"));
+      const ack = parseSequencedAck(line);
+
+      if (ack) {
+        if (ack.sessionId !== expected.sessionId || ack.sequence !== expected.sequence) {
+          options?.onDeviceLine?.(
+            `WARN ignored ack session=${ack.sessionId} seq=${ack.sequence} expected=${expected.sessionId}:${expected.sequence}`,
+          );
+          return;
+        }
+
+        if (ack.type === "ok") {
+          finish(() => resolve("OK"));
+          return;
+        }
+
+        finish(() => reject(new Error(`Device returned ERR ${ack.sessionId} ${ack.sequence} ${ack.message}`)));
         return;
       }
 
-      if (line.startsWith("ERR")) {
-        finish(() => reject(new Error(`Device returned ${line}`)));
+      if (line === "OK" || line === "ERR" || line.startsWith("OK ") || line.startsWith("ERR ")) {
+        finish(() =>
+          reject(
+            new Error(
+              `Device returned an unsequenced or malformed ACK: ${line}. Reflash the ESP32 firmware for the SEQ protocol.`,
+            ),
+          ),
+        );
         return;
       }
 
@@ -256,6 +287,8 @@ export class SerialAckSender implements SenderControls {
     this.activePort = port;
 
     const parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
+    const sessionId = createSessionId();
+    let sequence = 1;
 
     try {
       await waitForOpen(port);
@@ -269,14 +302,20 @@ export class SerialAckSender implements SenderControls {
 
         let attempt = 0;
         let sent = false;
+        const commandSequence = sequence;
+        const framedCommand = formatSequencedCommand(sessionId, commandSequence, command);
 
         while (!sent) {
           try {
-            await writeLine(port, command);
+            await writeLine(port, framedCommand);
             await waitForAck(
               parser,
               port,
               getAckTimeoutForCommand(command, options.ackTimeoutMs),
+              {
+                sessionId,
+                sequence: commandSequence,
+              },
               {
                 ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
                 onInterruptReady: (interrupt) => {
@@ -307,10 +346,11 @@ export class SerialAckSender implements SenderControls {
           total: commands.length,
           command,
         });
+        sequence += 1;
       }
 
       if (this.stopped && port.isOpen) {
-        await writeLine(port, "E");
+        await writeLine(port, formatSequencedCommand(sessionId, sequence, "E"));
       }
     } finally {
       this.interruptAckWait = null;
