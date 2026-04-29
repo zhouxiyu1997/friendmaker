@@ -379,6 +379,7 @@ void ClassicBtControllerTransport::clearConnectionState() {
   lastSendReportStatus_ = -1;
   lastSendReportReason_ = 0;
   lastSendReportId_ = 0;
+  sendFailureCount_ = 0;
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
 }
@@ -557,6 +558,8 @@ void ClassicBtControllerTransport::ensureSendTask() {
 
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
+  // Initial delay to allow connection to stabilize
+  vTaskDelay(pdMS_TO_TICKS(500));
   while (true) {
     transport->sendCurrentInputReport(false);
     vTaskDelay(pdMS_TO_TICKS((transport->connected_ || transport->paired_) ? 15 : 100));
@@ -711,7 +714,10 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = 0x30;
-    readyForReports_ = false;
+    sendFailureCount_++;
+    if (sendFailureCount_ > 5) {
+      readyForReports_ = false;
+    }
     if (logFailure) {
       Serial.printf(
           "WARN bt send_report failed err=%s connected=%s fail_count=%lu\n",
@@ -722,6 +728,7 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
     return false;
   }
 
+  sendFailureCount_ = 0;
   timer_ = static_cast<uint8_t>(timer_ + 1);
   return true;
 }
@@ -962,7 +969,6 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         hasPeerAddress_ = true;
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
-        sendCurrentInputReport(false);
       }
       Serial.printf(
           "INFO bt hid event=open status=%d conn=%d peer=%s\n",

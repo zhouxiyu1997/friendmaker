@@ -194,7 +194,13 @@ void loop() {
   SequencedFrame frame;
 
   if (!parseSequencedFrame(line, frame)) {
-    Serial.println("ERR protocol frame required");
+    String error;
+    const bool ok = executeCommand(line, controller, error);
+
+    if (!ok) {
+      Serial.println("ERR raw " + (error.length() > 0 ? error : "unknown error"));
+    }
+
     return;
   }
 
