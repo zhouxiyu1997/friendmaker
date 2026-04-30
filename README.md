@@ -99,7 +99,7 @@
 
 - 会量化到游戏内置的 `7 x 12` 官方色盘
 - 当前支持 `8 / 16 / 32 / 64 / 84` 色量化档位
-- 当前按游戏原始 `9` 个槽位默认颜色起步，不再要求先手动改成白色
+- 当前按游戏原始 `9` 个色盘槽位的默认颜色起步
 
 ### 运行要求
 
@@ -206,6 +206,8 @@ cd C:\path\to\friendmaker\firmware\esp32
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 
+如果刷固件时开发板一直进不去下载模式，可以尝试按住实体板上的 `BOOT` 键，再重新刷入。
+
 #### 4. 启动网页界面
 
 ```bash
@@ -225,7 +227,7 @@ http://127.0.0.1:4307
 
 1. Switch 中的画笔大小要和网页当前选择一致
 2. 开始绘制前，画笔和光标必须停在画布中心
-3. 如果使用官方色绘制，保持游戏默认的 `9` 个槽位初始颜色即可
+3. 如果使用官方色绘制，保持游戏默认的 `9` 个色盘槽位颜色即可
 
 ### 自动扣背景
 
@@ -264,7 +266,10 @@ http://127.0.0.1:4307
 #### 手柄测试
 
 - 连接手柄
-- 重置蓝牙
+- 重置手柄蓝牙
+- 如果连接手柄连不上，先点击 `重置手柄蓝牙`，再点击 `连接手柄`
+- 如果还是连不上，可以按一下实体板上的 `EN` 键重启开发板，再重新点击 `连接手柄`
+- 如果还是连不上，回到 `刷入固件` 页重新刷一次固件后再试
 - 单步测试按钮、方向键与摇杆
 - 查看 HID 连接状态
 - 发送自定义测试命令并查看滚动日志
@@ -417,7 +422,7 @@ The practical actions are:
 
 - Quantizes colors into the built-in `7 x 12` official palette
 - Currently supports `8 / 16 / 32 / 64 / 84` quantization levels
-- Starts from the game's default `9` palette slots and no longer requires manually setting them to white first
+- Starts from the game's default colors for the `9` palette slots
 
 ### Requirements
 
@@ -543,7 +548,7 @@ These are the three most commonly missed prerequisites:
 
 1. The brush size in Switch must match the current selection in the web UI
 2. Before drawing starts, the brush and cursor must be positioned at the canvas center
-3. If you use official palette drawing, keep the game's default `9` palette slots unchanged
+3. If you use official palette drawing, keep the game's default colors for the `9` palette slots
 
 ### Automatic Background Removal
 
@@ -582,7 +587,9 @@ Notes:
 #### Controller Test
 
 - Connect the controller
-- Reset Bluetooth
+- Reset Controller Bluetooth
+- If the controller does not connect, click `Reset Controller Bluetooth` first and then `Connect the controller`
+- If it still does not connect, reflash the firmware and try again
 - Test buttons, D-pad, and stick movement step by step
 - Inspect HID connection status
 - Send custom test commands and review scrollable logs

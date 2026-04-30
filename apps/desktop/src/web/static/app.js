@@ -780,7 +780,7 @@ els.controllerInfoButton.addEventListener("click", async () => {
 });
 
 els.controllerResetButton.addEventListener("click", async () => {
-  await runControllerCommands(["BT RESET"], "重置蓝牙");
+  await runControllerCommands(["BT RESET"], "重置手柄蓝牙");
 });
 
 els.controllerActionButtons.forEach((button) => {

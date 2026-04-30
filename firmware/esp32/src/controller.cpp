@@ -48,12 +48,8 @@ uint8_t clampBasicColorCol(int col) {
   return static_cast<uint8_t>(col);
 }
 
-uint8_t wrappedUpSteps(uint8_t currentRow, uint8_t targetRow) {
-  return static_cast<uint8_t>((currentRow + BASIC_COLOR_GRID_ROWS - targetRow) % BASIC_COLOR_GRID_ROWS);
-}
-
-uint8_t wrappedLeftSteps(uint8_t currentCol, uint8_t targetCol) {
-  return static_cast<uint8_t>((currentCol + BASIC_COLOR_GRID_COLS - targetCol) % BASIC_COLOR_GRID_COLS);
+int basicColorDelta(uint8_t currentValue, uint8_t targetValue) {
+  return static_cast<int>(targetValue) - static_cast<int>(currentValue);
 }
 
 uint8_t scaleChannelToSteps(float value, uint8_t steps) {
@@ -267,8 +263,8 @@ void SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t
   const uint8_t targetCol = clampBasicColorCol(col);
   const uint8_t currentRow = basicPaletteTrackingReady_ ? basicPaletteSlotRows_[slotIndex] : BASIC_COLOR_INITIAL_SLOT_ROWS[slotIndex];
   const uint8_t currentCol = basicPaletteTrackingReady_ ? basicPaletteSlotCols_[slotIndex] : BASIC_COLOR_INITIAL_SLOT_COLS[slotIndex];
-  const uint8_t upSteps = wrappedUpSteps(currentRow, targetRow);
-  const uint8_t leftSteps = wrappedLeftSteps(currentCol, targetCol);
+  const int rowDelta = basicColorDelta(currentRow, targetRow);
+  const int colDelta = basicColorDelta(currentCol, targetCol);
 
   transport_.pressButton(ControllerButton::Y, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
@@ -284,18 +280,22 @@ void SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t
   pressPaletteMenuButton(transport_, ControllerButton::Y);
   delay(COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS);
 
-  // The basic color grid wraps around, so we can't "hold until the edge".
-  // Instead we keep track of each slot's current row/column and move only the
-  // exact number of UP/LEFT taps required to reach the next target.
+  // Keep track of each slot's current row/column and move by direct deltas.
+  // We intentionally do not treat the basic-color page as a circular grid,
+  // because some game states can expose extra swatches outside the regular
+  // 7x12 arrangement and wrap-around assumptions become unsafe.
   pressPaletteMenuButton(transport_, ControllerButton::L);
   delay(BASIC_COLOR_TAB_SETTLE_MS);
 
-  for (uint8_t step = 0; step < upSteps; step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadUp);
+  const ControllerButton verticalButton = rowDelta < 0 ? ControllerButton::DpadUp : ControllerButton::DpadDown;
+  const ControllerButton horizontalButton = colDelta < 0 ? ControllerButton::DpadLeft : ControllerButton::DpadRight;
+
+  for (int step = 0; step < abs(rowDelta); step += 1) {
+    pressPaletteMenuButton(transport_, verticalButton);
   }
 
-  for (uint8_t step = 0; step < leftSteps; step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadLeft);
+  for (int step = 0; step < abs(colDelta); step += 1) {
+    pressPaletteMenuButton(transport_, horizontalButton);
   }
 
   // In the basic-color picker, pressing A on the target swatch immediately
