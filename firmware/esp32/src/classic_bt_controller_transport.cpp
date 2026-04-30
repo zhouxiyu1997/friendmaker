@@ -987,19 +987,25 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
           param->close.conn_status);
       break;
     case ESP_HIDD_SEND_REPORT_EVT:
-      if (param->send_report.status != ESP_HIDD_SUCCESS) {
-        sendReportFailureCount_ += 1;
-      }
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;
       lastSendReportId_ = param->send_report.report_id;
-      readyForReports_ = param->send_report.status == ESP_HIDD_SUCCESS && connected_;
+      
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
+        sendReportFailureCount_ += 1;
+        sendFailureCount_++;
+        if (sendFailureCount_ > 5) {
+          readyForReports_ = false;
+        }
         Serial.printf(
-            "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
+            "WARN bt hid event=send-report status=%d reason=%u report=%u fail_count=%u\n",
             param->send_report.status,
             param->send_report.reason,
-            param->send_report.report_id);
+            param->send_report.report_id,
+            sendFailureCount_);
+      } else {
+        sendFailureCount_ = 0;
+        readyForReports_ = connected_;
       }
       break;
     case ESP_HIDD_GET_REPORT_EVT:
