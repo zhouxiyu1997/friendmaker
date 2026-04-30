@@ -11,12 +11,12 @@
 当前试用版支持：
 
 - `macOS`：完整试用流程
-- `Windows`：手动安装与手动启动流程
+- `Windows`：一键安装与手动启动流程
 
 说明：
 
 - `macOS` 仍然是当前最完整、最省事的版本
-- `Windows` 现在可以手动安装并试用，但还没有一键启动器
+- `Windows` 现在可以一键安装并试用，但还没有一键启动器
 - `Linux` 暂未完成联调
 
 ## 路径说明
@@ -139,6 +139,13 @@ npm run check
 
 如果这里没有报错，就说明桌面端已经能启动。
 
+如果你是 `Windows` 用户，也可以直接双击：
+
+- `Install Friend Maker.cmd`
+
+这个脚本会自动检查 `Node.js`、`npm`、`Python 3`、`PlatformIO`，并在失败时给出中文提示。
+如果自动安装失败，可以直接参考 [Windows 安装说明](setup-windows.md) 继续手动安装。
+
 ## 3. 启动方式
 
 ### 3.1 macOS 一键启动
@@ -169,18 +176,20 @@ cd /path/to/friendmaker
 - 绘制过程中不要关闭这个启动出来的终端窗口
 - 启动器现在也会自动补装 `PlatformIO`，这样后续刷固件可以直接使用
 
-### 3.2 Windows 手动启动
+### 3.2 Windows 安装与启动
+
+如果你是 `Windows` 用户，建议先优先使用：
+
+- `Install Friend Maker.cmd`
 
 如果你是 `Windows` 用户，请先参考：
 
-- [Windows 手动安装说明](setup-windows.md)
+- [Windows 安装说明](setup-windows.md)
 
-最短流程是：
+安装完成后，启动网页的最短流程是：
 
 ```powershell
 cd C:\path\to\friendmaker
-npm install
-npm run check
 npm run ui:dev
 ```
 

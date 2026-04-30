@@ -33,18 +33,18 @@
 ### 平台支持
 
 - 完整支持：`macOS`
-- 支持手动安装与启动：`Windows`
+- 支持一键安装与手动启动：`Windows`
 - 暂未正式支持：`Linux`
 
 当前版本已经提供：
 
 - `macOS` 的完整试用流程与一键启动
-- `Windows` 的手动安装与手动启动流程
+- `Windows` 的一键安装脚本与手动启动流程
 
 参考文档：
 
 - [macOS / Windows 试用说明](docs/user-trial-guide.md)
-- [Windows 手动安装说明](docs/setup-windows.md)
+- [Windows 安装说明](docs/setup-windows.md)
 
 ### 演示
 
@@ -152,6 +152,32 @@ cd /path/to/friendmaker
 - 如果缺少 `Homebrew`，启动器会询问是否安装
 - 第一次安装软件时，终端可能会请求输入系统密码
 - 使用过程中请保持终端窗口开启
+
+#### Windows 一键安装
+
+你现在可以通过下面两种方式完成安装：
+
+- 双击 [`Install Friend Maker.cmd`](./Install%20Friend%20Maker.cmd)
+- 或在 `CMD` / `PowerShell` 中运行：
+
+```bat
+cd C:\path\to\friendmaker
+Install Friend Maker.cmd
+```
+
+这个安装脚本会：
+
+- 检测 `Node.js`、`npm`、`Python 3` 和 `PlatformIO`
+- 在检测到 `winget` 时尝试自动安装缺失的软件
+- 自动执行 `npm install`
+- 自动执行 `npm run check`
+- 如果安装失败，用中文提示当前问题
+
+补充说明：
+
+- 如果系统里没有 `winget`，请先安装或更新 `App Installer`
+- 如果自动安装失败，可以直接参考 [Windows 安装说明](docs/setup-windows.md) 走原本的手动安装流程
+- 这个脚本负责安装，当前 Windows 仍然需要手动运行 `npm run ui:dev` 启动网页
 
 #### 1. 安装依赖
 
@@ -325,18 +351,18 @@ This project is still being improved; the current version may show `color deviat
 ### Compatibility
 
 - Fully supported: `macOS`
-- Manual setup supported: `Windows`
+- One-click install and manual launch supported: `Windows`
 - Not officially supported yet: `Linux`
 
 The current version already provides:
 
 - a complete trial workflow and one-click launcher for `macOS`
-- manual installation and manual startup instructions for `Windows`
+- a one-click installer and manual startup instructions for `Windows`
 
 Reference documents:
 
 - [macOS / Windows Trial Guide](docs/user-trial-guide.md)
-- [Windows Manual Setup Guide](docs/setup-windows.md)
+- [Windows Setup Guide](docs/setup-windows.md)
 
 ### Showcase
 
@@ -444,6 +470,32 @@ Notes:
 - if `Homebrew` is missing, the launcher will ask whether it should be installed
 - the Terminal may ask for your password during first-time software installation
 - keep the Terminal window open while using the app
+
+#### One-click install on Windows
+
+You can now install the project in either of these ways:
+
+- double-click [`Install Friend Maker.cmd`](./Install%20Friend%20Maker.cmd)
+- or run in `CMD` / `PowerShell`:
+
+```bat
+cd C:\path\to\friendmaker
+Install Friend Maker.cmd
+```
+
+This installer will:
+
+- detect `Node.js`, `npm`, `Python 3`, and `PlatformIO`
+- try to install missing software automatically when `winget` is available
+- run `npm install`
+- run `npm run check`
+- show Chinese error messages if installation fails
+
+Notes:
+
+- if `winget` is missing, install or update `App Installer` first
+- if the automatic install fails, switch to the original manual flow in [Windows Setup Guide](docs/setup-windows.md)
+- this script handles installation only; on Windows you still start the web UI manually with `npm run ui:dev`
 
 #### 1. Install dependencies
 

@@ -1,10 +1,11 @@
 # Setup on Windows
 
-This guide covers the current **manual setup** flow for Windows users.
+This guide covers the current Windows setup flow, including the new **one-click installer** and the manual fallback steps.
 
 ## What works today
 
 - install dependencies
+- run the one-click installer
 - flash ESP32 firmware with PlatformIO
 - start the local web UI
 - select a `COM` serial port and draw
@@ -12,7 +13,6 @@ This guide covers the current **manual setup** flow for Windows users.
 ## What is not included yet
 
 - no one-click Windows launcher yet
-- no automatic dependency installer yet
 
 ## Requirements
 
@@ -22,6 +22,34 @@ This guide covers the current **manual setup** flow for Windows users.
 - `Python 3.10+`
 - `PlatformIO Core 6+`
 - `ESP32-WROOM-32 / ESP-32S`
+
+## One-click install
+
+You can now install the project by:
+
+- double-clicking `Install Friend Maker.cmd`
+- or running it from `CMD` / `PowerShell`
+
+```bat
+cd C:\path\to\friendmaker
+Install Friend Maker.cmd
+```
+
+The installer will:
+
+- detect `Node.js`, `npm`, `Python 3`, and `PlatformIO`
+- try to install missing `Node.js` / `Python` automatically with `winget`
+- install `PlatformIO` with `pip`
+- run `npm install`
+- run `npm run check`
+- show Chinese failure messages if something goes wrong
+
+Notes:
+
+- if `winget` is missing, install or update `App Installer` first
+- if the automatic install fails, continue with the manual steps below in this document
+- the script only installs dependencies and validates the project
+- you still start the UI manually with `npm run ui:dev`
 
 ## Install PlatformIO
 
@@ -40,6 +68,8 @@ $env:USERPROFILE\.platformio\penv\Scripts\pio.exe
 ```
 
 ## Install project dependencies
+
+If you do not use the one-click installer, run:
 
 ```powershell
 cd C:\path\to\friendmaker
