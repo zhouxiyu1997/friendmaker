@@ -1,5 +1,3 @@
-import { once } from "node:events";
-
 import { ReadlineParser } from "@serialport/parser-readline";
 import { SerialPort } from "serialport";
 
@@ -32,14 +30,6 @@ export interface SerialSessionSnapshot {
   busy: boolean;
   idleTimeoutMs: number;
   lastUsedAt: number | null;
-}
-
-async function waitForOpen(port: SerialPort): Promise<void> {
-  if (port.isOpen) {
-    return;
-  }
-
-  await once(port, "open");
 }
 
 function isRecognizedDeviceLine(line: string): boolean {
@@ -250,6 +240,24 @@ function writeLine(port: SerialPort, line: string): Promise<void> {
   });
 }
 
+function openPort(port: SerialPort): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (port.isOpen) {
+      resolve();
+      return;
+    }
+
+    port.open((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
 function closePort(port: SerialPort): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!port.isOpen) {
@@ -278,6 +286,10 @@ export class SerialCommandSession {
   private sequence = 1;
   private interruptAckWait: (() => void) | null = null;
   private lastUsedAtValue: number | null = null;
+  private openingPromise: Promise<void> | null = null;
+  private closingPromise: Promise<void> | null = null;
+  private portErrorHandler: ((error: Error) => void) | null = null;
+  private portCloseHandler: (() => void) | null = null;
 
   constructor(path: string, baudRate: number) {
     this.portPath = preferSerialPath(path);
@@ -297,14 +309,45 @@ export class SerialCommandSession {
       return;
     }
 
-    this.port = new SerialPort({
+    if (this.openingPromise) {
+      await this.openingPromise;
+      return;
+    }
+
+    const port = new SerialPort({
       path: this.portPath,
       baudRate: this.baudRate,
-      autoOpen: true,
+      autoOpen: false,
       hupcl: false,
     });
-    this.parser = this.port.pipe(new ReadlineParser({ delimiter: "\n" }));
-    await waitForOpen(this.port);
+    const parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
+    this.port = port;
+    this.parser = parser;
+    this.attachPortLifecycleHandlers(port);
+
+    const openingPromise = openPort(port);
+    this.openingPromise = openingPromise;
+
+    try {
+      await openingPromise;
+    } catch (error) {
+      if (this.port === port) {
+        this.port = null;
+        this.parser = null;
+      }
+
+      this.detachPortLifecycleHandlers(port);
+      throw error;
+    } finally {
+      if (this.openingPromise === openingPromise) {
+        this.openingPromise = null;
+      }
+    }
+
+    if (this.port !== port || !port.isOpen || !this.parser) {
+      throw new Error("Serial session is not open.");
+    }
+
     this.lastUsedAtValue = Date.now();
     onDeviceLine?.(`INFO serial_session=open port=${this.portPath} baud=${this.baudRate}`);
   }
@@ -313,14 +356,84 @@ export class SerialCommandSession {
     this.interruptAckWait?.();
     this.interruptAckWait = null;
 
-    if (!this.port) {
+    const port = this.port;
+
+    if (!port) {
       return;
     }
 
-    const port = this.port;
-    this.port = null;
-    this.parser = null;
-    await closePort(port);
+    if (this.closingPromise) {
+      await this.closingPromise;
+      return;
+    }
+
+    const openingPromise = this.openingPromise;
+    this.closingPromise = (async () => {
+      try {
+        try {
+          await openingPromise;
+        } catch {
+          // Opening failed, so there is no open descriptor left to close.
+        }
+
+        if (port.isOpen) {
+          await closePort(port);
+        }
+      } finally {
+        this.detachPortLifecycleHandlers(port);
+
+        if (this.port === port) {
+          this.port = null;
+          this.parser = null;
+        }
+
+        if (this.openingPromise === openingPromise) {
+          this.openingPromise = null;
+        }
+
+        this.closingPromise = null;
+      }
+    })();
+
+    await this.closingPromise;
+  }
+
+  private attachPortLifecycleHandlers(port: SerialPort): void {
+    this.portErrorHandler = () => {
+      // Persistent sessions can be idle when a USB device is unplugged. Keep
+      // those EventEmitter errors handled, then invalidate the session.
+      queueMicrotask(() => {
+        if (this.port === port) {
+          void this.close().catch(() => {
+            // The error event already tells us this descriptor is not healthy.
+          });
+        }
+      });
+    };
+    this.portCloseHandler = () => {
+      if (this.port === port) {
+        this.port = null;
+        this.parser = null;
+        this.openingPromise = null;
+      }
+
+      this.detachPortLifecycleHandlers(port);
+    };
+
+    port.on("error", this.portErrorHandler);
+    port.on("close", this.portCloseHandler);
+  }
+
+  private detachPortLifecycleHandlers(port: SerialPort): void {
+    if (this.portErrorHandler) {
+      port.off("error", this.portErrorHandler);
+      this.portErrorHandler = null;
+    }
+
+    if (this.portCloseHandler) {
+      port.off("close", this.portCloseHandler);
+      this.portCloseHandler = null;
+    }
   }
 
   async send(commands: string[], options: SerialCommandSendOptions): Promise<void> {
