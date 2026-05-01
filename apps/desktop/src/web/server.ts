@@ -11,7 +11,10 @@ import { applyCliOptions, type CliOptions } from "../cli/args.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
 import { listPortInfos, preferSerialPath } from "../serial/listPorts.js";
-import { SerialAckSender } from "../serial/sender.js";
+import {
+  SerialSessionManager,
+  type SerialSessionSnapshot,
+} from "../serial/sender.js";
 import { SimulatedAckSender } from "../simulator/sender.js";
 import type { SenderControls } from "../types.js";
 
@@ -22,6 +25,7 @@ const staticRoot = path.join(__dirname, "static");
 const firmwareRoot = path.join(repoRoot, "firmware", "esp32");
 const host = "127.0.0.1";
 const port = 4307;
+const serialSessionManager = new SerialSessionManager();
 
 const FIRMWARE_ENVIRONMENTS = [
   {
@@ -89,6 +93,66 @@ let managedExecution: ManagedExecution = createEmptyExecution();
 
 function resetManagedExecutionState(): void {
   managedExecution = createEmptyExecution();
+}
+
+class ManagedSerialSessionSender implements SenderControls {
+  private paused = false;
+  private stopped = false;
+  private interruptAckWait: (() => void) | null = null;
+
+  constructor(private readonly sessionManager: SerialSessionManager) {}
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    this.paused = false;
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.interruptAckWait?.();
+    this.interruptAckWait = null;
+    void this.sessionManager.disconnect({ force: true }).catch(() => {
+      // Stop uses disconnect only to interrupt a blocking ACK wait.
+    });
+  }
+
+  async send(
+    commands: string[],
+    options: {
+      path: string;
+      baudRate: number;
+      ackTimeoutMs: number;
+      retries: number;
+      onProgress?: (progress: { index: number; total: number; command: string }) => void;
+      onDeviceLine?: (line: string) => void;
+    },
+  ): Promise<void> {
+    this.paused = false;
+    this.stopped = false;
+
+    await this.sessionManager.send(commands, {
+      path: options.path,
+      baudRate: options.baudRate,
+      ackTimeoutMs: options.ackTimeoutMs,
+      retries: options.retries,
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
+      beforeCommand: () => this.waitWhilePaused(),
+      shouldStop: () => this.stopped,
+      onInterruptReady: (interrupt) => {
+        this.interruptAckWait = interrupt;
+      },
+    });
+  }
+
+  private async waitWhilePaused(): Promise<void> {
+    while (this.paused && !this.stopped) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
 }
 
 function json(
@@ -431,6 +495,7 @@ async function executeCommands(body: {
   target: "simulate" | "serial";
   totalCommands: number;
   lines: string[];
+  session: SerialSessionSnapshot;
 }> {
   if (!Array.isArray(body.commands) || body.commands.length === 0) {
     throw new Error("Missing commands.");
@@ -446,11 +511,13 @@ async function executeCommands(body: {
       throw new Error("Missing portPath.");
     }
 
-    const sender = new SerialAckSender();
+    if (isManagedExecutionActive(managedExecution.status)) {
+      throw new Error("Drawing execution is already running.");
+    }
 
     lines.push(`INFO port=${body.portPath} baud=${body.baudRate ?? 115200}`);
 
-    await sender.send(body.commands, {
+    await serialSessionManager.send(body.commands, {
       path: body.portPath,
       baudRate: body.baudRate ?? 115200,
       ackTimeoutMs,
@@ -480,6 +547,7 @@ async function executeCommands(body: {
     target,
     totalCommands: body.commands.length,
     lines,
+    session: serialSessionManager.snapshot(),
   };
 }
 
@@ -510,7 +578,7 @@ async function runManagedExecution(
         throw new Error("Missing portPath.");
       }
 
-      const sender = execution.sender as SerialAckSender;
+      const sender = execution.sender as ManagedSerialSessionSender;
       appendManagedExecutionLine(
         execution,
         `INFO port=${body.portPath} baud=${body.baudRate ?? 115200}`,
@@ -601,7 +669,7 @@ async function startManagedExecution(body: {
   }
 
   const sender: SenderControls =
-    target === "serial" ? new SerialAckSender() : new SimulatedAckSender();
+    target === "serial" ? new ManagedSerialSessionSender(serialSessionManager) : new SimulatedAckSender();
 
   const execution: ManagedExecution = {
     id: executionCounter += 1,
@@ -694,6 +762,7 @@ async function handleFirmwareFlash(
 
     const environment = getFirmwareEnvironment(body.environmentId);
     const portPath = preferSerialPath(body.portPath);
+    const session = await serialSessionManager.disconnect();
     const result = await runPlatformIo([
       "run",
       "-e",
@@ -710,10 +779,11 @@ async function handleFirmwareFlash(
       portPath,
       platformIoPath: result.platformIoPath,
       output: result.output,
+      session,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -733,7 +803,7 @@ async function handleExecute(request: IncomingMessage, response: ServerResponse)
     json(response, 200, await executeCommands(body));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -756,10 +826,11 @@ async function handleExecutionStart(
     json(response, 200, {
       success: true,
       execution: await startManagedExecution(body),
+      session: serialSessionManager.snapshot(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -767,7 +838,28 @@ async function handleExecutionStatus(response: ServerResponse): Promise<void> {
   json(response, 200, {
     success: true,
     execution: snapshotManagedExecution(),
+    session: serialSessionManager.snapshot(),
   });
+}
+
+async function handleSerialSessionStatus(response: ServerResponse): Promise<void> {
+  json(response, 200, { ...serialSessionManager.snapshot() });
+}
+
+async function handleSerialSessionDisconnect(response: ServerResponse): Promise<void> {
+  try {
+    if (isManagedExecutionActive(managedExecution.status)) {
+      throw new Error("Drawing execution is active.");
+    }
+
+    json(response, 200, {
+      success: true,
+      session: await serialSessionManager.disconnect(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
+  }
 }
 
 function updateManagedExecutionState(
@@ -793,10 +885,11 @@ async function handleExecutionPause(response: ServerResponse): Promise<void> {
     json(response, 200, {
       success: true,
       execution: updateManagedExecutionState("paused", "INFO execution paused"),
+      session: serialSessionManager.snapshot(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -810,10 +903,11 @@ async function handleExecutionResume(response: ServerResponse): Promise<void> {
     json(response, 200, {
       success: true,
       execution: updateManagedExecutionState("running", "INFO execution resumed"),
+      session: serialSessionManager.snapshot(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -827,10 +921,11 @@ async function handleExecutionStop(response: ServerResponse): Promise<void> {
     json(response, 200, {
       success: true,
       execution: updateManagedExecutionState("stopping", "INFO execution stop requested"),
+      session: serialSessionManager.snapshot(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -844,10 +939,11 @@ async function handleExecutionReset(response: ServerResponse): Promise<void> {
     json(response, 200, {
       success: true,
       execution: snapshotManagedExecution(),
+      session: serialSessionManager.snapshot(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -869,7 +965,7 @@ async function handleSimulate(request: IncomingMessage, response: ServerResponse
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 400, { error: message });
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
   }
 }
 
@@ -924,6 +1020,16 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/execute") {
       await handleExecute(request, response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/serial-session/status") {
+      await handleSerialSessionStatus(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/serial-session/disconnect") {
+      await handleSerialSessionDisconnect(response);
       return;
     }
 

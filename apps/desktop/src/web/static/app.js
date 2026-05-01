@@ -4,6 +4,14 @@ const state = {
   commands: [],
   ports: [],
   selectedPortPath: "",
+  serialSession: {
+    connected: false,
+    portPath: null,
+    baudRate: null,
+    busy: false,
+    idleTimeoutMs: 15 * 60 * 1000,
+    lastUsedAt: null,
+  },
   firmwareEnvironments: [],
   firmwareTooling: {
     available: false,
@@ -164,6 +172,8 @@ const els = {
   controllerRefreshButton: document.getElementById("controller-refresh-button"),
   controllerInfoButton: document.getElementById("controller-info-button"),
   controllerResetButton: document.getElementById("controller-reset-button"),
+  controllerDisconnectButton: document.getElementById("controller-disconnect-button"),
+  controllerSerialSessionStatus: document.getElementById("controller-serial-session-status"),
   controllerActionButtons: [...document.querySelectorAll("[data-controller-action]")],
   controllerCustomCommands: document.getElementById("controller-custom-commands"),
   controllerSendCustomButton: document.getElementById("controller-send-custom-button"),
@@ -666,9 +676,11 @@ async function executeStudioCommands({ logPrefix }) {
     const payload = await response.json();
 
     if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
       throw new Error(payload.error ?? "执行失败");
     }
 
+    applySerialSessionSnapshot(payload.session);
     applyStudioExecutionSnapshot(payload.execution);
     startStudioExecutionPolling();
     return true;
@@ -732,6 +744,7 @@ els.firmwareFlashButton.addEventListener("click", async () => {
     els.firmwareLogOutput,
     `开始刷入固件：${state.firmware.environmentId} -> ${state.selectedPortPath}`,
   );
+  appendLog(els.firmwareLogOutput, "刷入前会自动释放串口会话，避免端口占用。");
 
   try {
     const response = await fetch("/api/firmware/flash", {
@@ -745,6 +758,7 @@ els.firmwareFlashButton.addEventListener("click", async () => {
     const payload = await response.json();
 
     if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
       throw new Error(payload.error ?? "刷入固件失败");
     }
 
@@ -755,6 +769,8 @@ els.firmwareFlashButton.addEventListener("click", async () => {
       environmentLabel: payload.environment.label,
       portPath: state.selectedPortPath,
     });
+    applySerialSessionSnapshot(payload.session);
+    appendLog(els.firmwareLogOutput, "刷入前已释放串口会话。");
     appendLog(els.firmwareLogOutput, `刷入完成：${payload.environment.label}`);
     appendLog(els.firmwareLogOutput, payload.output.trim());
   } catch (error) {
@@ -781,6 +797,30 @@ els.controllerInfoButton.addEventListener("click", async () => {
 
 els.controllerResetButton.addEventListener("click", async () => {
   await runControllerCommands(["BT RESET"], "重置手柄蓝牙");
+});
+
+els.controllerDisconnectButton.addEventListener("click", async () => {
+  setControllerBusy(true);
+
+  try {
+    const response = await fetch("/api/serial-session/disconnect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
+      throw new Error(payload.error ?? "断开串口失败");
+    }
+
+    applySerialSessionSnapshot(payload.session);
+    appendLog(els.controllerLogOutput, "串口连接已断开。");
+  } catch (error) {
+    appendLog(els.controllerLogOutput, `断开串口失败：${getErrorMessage(error)}`);
+  } finally {
+    setControllerBusy(false);
+  }
 });
 
 els.controllerActionButtons.forEach((button) => {
@@ -952,10 +992,12 @@ async function pollStudioExecutionStatus() {
     const payload = await response.json();
 
     if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
       throw new Error(payload.error ?? "读取绘制状态失败");
     }
 
     applyStudioExecutionSnapshot(payload.execution);
+    applySerialSessionSnapshot(payload.session);
   } catch (error) {
     stopStudioExecutionPolling();
     appendLog(els.studioLogOutput, `读取绘制状态失败：${getErrorMessage(error)}`);
@@ -991,11 +1033,13 @@ async function sendStudioExecutionControl(action, label) {
     const payload = await response.json();
 
     if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
       throw new Error(payload.error ?? `${label}失败`);
     }
 
     appendLog(els.studioLogOutput, `${label}请求已发送。`);
     applyStudioExecutionSnapshot(payload.execution);
+    applySerialSessionSnapshot(payload.session);
   } catch (error) {
     appendLog(els.studioLogOutput, `${label}失败：${getErrorMessage(error)}`);
   }
@@ -1059,6 +1103,68 @@ function boolLabel(value, labels) {
   }
 
   return "未知";
+}
+
+function applySerialSessionSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return;
+  }
+
+  state.serialSession = {
+    connected: snapshot.connected === true,
+    portPath: typeof snapshot.portPath === "string" ? snapshot.portPath : null,
+    baudRate: typeof snapshot.baudRate === "number" ? snapshot.baudRate : null,
+    busy: snapshot.busy === true,
+    idleTimeoutMs:
+      typeof snapshot.idleTimeoutMs === "number"
+        ? snapshot.idleTimeoutMs
+        : state.serialSession.idleTimeoutMs,
+    lastUsedAt: typeof snapshot.lastUsedAt === "number" ? snapshot.lastUsedAt : null,
+  };
+  syncControllerUi();
+}
+
+async function loadSerialSessionStatus() {
+  try {
+    const response = await fetch("/api/serial-session/status");
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "读取串口连接状态失败");
+    }
+
+    applySerialSessionSnapshot(payload);
+  } catch {
+    applySerialSessionSnapshot({
+      connected: false,
+      portPath: null,
+      baudRate: null,
+      busy: false,
+      idleTimeoutMs: state.serialSession.idleTimeoutMs,
+      lastUsedAt: null,
+    });
+  }
+}
+
+function renderSerialSessionStatus() {
+  const session = state.serialSession;
+  const idleMinutes = Math.max(1, Math.round(session.idleTimeoutMs / 60_000));
+
+  if (session.busy) {
+    els.controllerSerialSessionStatus.textContent =
+      session.portPath && session.baudRate
+        ? `串口正在使用中：${session.portPath} @ ${session.baudRate}。`
+        : "串口命令正在执行中。";
+    return;
+  }
+
+  if (session.connected) {
+    els.controllerSerialSessionStatus.textContent =
+      `串口保持连接：${session.portPath ?? "-"} @ ${session.baudRate ?? "-"}，空闲 ${idleMinutes} 分钟后自动断开。`;
+    return;
+  }
+
+  els.controllerSerialSessionStatus.textContent = "串口会在首次发送测试命令时自动连接。";
 }
 
 function setControllerStatus(partialStatus) {
@@ -1424,9 +1530,11 @@ function syncControllerUi() {
   els.controllerInfoButton.disabled = shouldDisable;
   els.controllerResetButton.disabled = shouldDisable;
   els.controllerSendCustomButton.disabled = shouldDisable;
+  els.controllerDisconnectButton.disabled = state.controller.busy || !state.serialSession.connected;
   els.controllerActionButtons.forEach((button) => {
     button.disabled = shouldDisable;
   });
+  renderSerialSessionStatus();
 }
 
 async function runExecution({
@@ -1459,9 +1567,11 @@ async function runExecution({
     const payload = await response.json();
 
     if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
       throw new Error(payload.error ?? "执行失败");
     }
 
+    applySerialSessionSnapshot(payload.session);
     appendLog(logTarget, `${successLabel}完成：${payload.totalCommands} 条命令，目标 ${payload.target}`);
     (payload.lines ?? []).forEach((line) => appendLog(logTarget, `[device] ${line}`));
     return payload;
@@ -1926,7 +2036,13 @@ async function init() {
     STUDIO_IMAGE_OFFSET_LIMITS,
   );
   syncStudioColorCountOptions();
-  await Promise.all([refreshPorts(), loadFirmwareInfo(), loadOfficialPalette(), pollStudioExecutionStatus()]);
+  await Promise.all([
+    refreshPorts(),
+    loadFirmwareInfo(),
+    loadOfficialPalette(),
+    loadSerialSessionStatus(),
+    pollStudioExecutionStatus(),
+  ]);
   renderPortSelects();
   syncStudioUi();
   syncFirmwareUi();
