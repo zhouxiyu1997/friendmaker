@@ -17,19 +17,19 @@ jobs:
         include:
           - name: macOS arm64
             os: macos-26
-            script: npm run dist:mac -- --arm64
+            script: npm run dist:mac -- --arm64 --publish never
             artifact: friend-maker-macos-arm64
           - name: macOS x64
             os: macos-26-intel
-            script: npm run dist:mac -- --x64
+            script: npm run dist:mac -- --x64 --publish never
             artifact: friend-maker-macos-x64
           - name: Windows x64
             os: windows-latest
-            script: npm run dist:win:x64
+            script: npm run dist:win:x64 -- --publish never
             artifact: friend-maker-windows-x64
           - name: Windows arm64
             os: windows-11-arm
-            script: npm run dist:win:arm64
+            script: npm run dist:win:arm64 -- --publish never
             artifact: friend-maker-windows-arm64
 
     steps:
