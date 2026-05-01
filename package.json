@@ -3,21 +3,94 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/apps/desktop/src/electron/main.js",
   "scripts": {
     "dev": "tsx apps/desktop/src/index.ts",
     "ui:dev": "tsx apps/desktop/src/web/server.ts",
     "start:mac": "bash scripts/macos-launch.sh",
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "build": "tsc -p tsconfig.json && node scripts/copy-web-static.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "electron:dev": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run dist:win:x64",
+    "dist:win:x64": "npm run build && electron-builder --win --x64",
+    "dist:win:arm64": "npm run build && electron-builder --win --arm64",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.friendmaker.desktop",
+    "productName": "Friend Maker",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "firmware/esp32",
+        "to": "firmware/esp32",
+        "filter": [
+          "**/*",
+          "!**/.pio/**"
+        ]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/serialport/**",
+      "node_modules/@serialport/**",
+      "node_modules/sharp/**",
+      "node_modules/@img/**"
+    ],
+    "npmRebuild": true,
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.utilities",
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icons"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Friend Maker"
+    }
   },
   "dependencies": {
     "@serialport/parser-readline": "^13.0.0",
     "image-q": "^4.0.0",
     "serialport": "^13.0.0",
-    "sharp": "^0.34.3"
+    "sharp": "^0.34.3",
+    "tar": "^7.5.13"
   },
   "devDependencies": {
     "@types/node": "^24.0.15",
+    "electron": "^41.4.0",
+    "electron-builder": "^26.8.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   }

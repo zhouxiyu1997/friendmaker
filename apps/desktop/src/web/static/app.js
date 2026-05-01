@@ -17,6 +17,23 @@ const state = {
     available: false,
     path: null,
     firmwareRoot: null,
+    source: null,
+    python: {
+      available: false,
+      path: null,
+      source: null,
+      runtimeSupported: false,
+      runtimeSystem: null,
+    },
+    install: {
+      status: "idle",
+      lines: [],
+      error: null,
+      platformIoExe: null,
+      lineOffset: 0,
+      totalLineCount: 0,
+    },
+    installLineCount: 0,
   },
   studio: {
     busy: false,
@@ -154,6 +171,7 @@ const els = {
   firmwareEnvSelect: document.getElementById("firmware-env-select"),
   firmwarePortSelect: document.getElementById("firmware-port-select"),
   firmwareRefreshButton: document.getElementById("firmware-refresh-button"),
+  firmwareInstallToolingButton: document.getElementById("firmware-install-tooling-button"),
   firmwareFlashButton: document.getElementById("firmware-flash-button"),
   firmwarePlatformIoHint: document.getElementById("firmware-platformio-hint"),
   firmwareEnvHint: document.getElementById("firmware-env-hint"),
@@ -197,6 +215,7 @@ const els = {
 };
 
 let studioExecutionPollTimer = null;
+let firmwareToolingPollTimer = null;
 let studioPreviewRefreshTimer = null;
 let studioGenerateRequestSerial = 0;
 let studioPreviewBoundsRequestSerial = 0;
@@ -333,6 +352,10 @@ els.firmwareRefreshButton.addEventListener("click", async () => {
   await refreshPorts({
     log: (message) => appendLog(els.firmwareLogOutput, message),
   });
+});
+
+els.firmwareInstallToolingButton.addEventListener("click", async () => {
+  await startFirmwareToolingInstall();
 });
 
 els.controllerRefreshButton.addEventListener("click", async () => {
@@ -791,6 +814,128 @@ els.firmwareClearLogButton.addEventListener("click", () => {
   clearLog(els.firmwareLogOutput);
 });
 
+async function startFirmwareToolingInstall() {
+  if (state.firmwareTooling.available) {
+    appendLog(els.firmwareLogOutput, "PlatformIO 已经可用。");
+    return;
+  }
+
+  const shouldInstall = window.confirm("刷入固件需要 PlatformIO，未检测到。是否现在安装？");
+  if (!shouldInstall) {
+    appendLog(els.firmwareLogOutput, "已取消准备 PlatformIO。");
+    return;
+  }
+
+  let allowPythonDownload = false;
+  if (!state.firmwareTooling.python?.available) {
+    if (!state.firmwareTooling.python?.runtimeSupported) {
+      appendLog(els.firmwareLogOutput, "当前系统暂不支持自动下载 app-local Python。");
+      return;
+    }
+
+    allowPythonDownload = window.confirm(
+      "安装 PlatformIO 需要 Python。未检测到可用 Python，是否下载一个仅供 Friend Maker 使用的 Python 运行环境？",
+    );
+
+    if (!allowPythonDownload) {
+      appendLog(els.firmwareLogOutput, "已取消下载 app-local Python。");
+      return;
+    }
+  }
+
+  try {
+    state.firmwareTooling.installLineCount = 0;
+    const response = await fetch("/api/firmware/tooling/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowPythonDownload }),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "准备 PlatformIO 失败");
+    }
+
+    applyFirmwareToolingInstallSnapshot(payload.install);
+    pollFirmwareToolingInstall();
+  } catch (error) {
+    appendLog(els.firmwareLogOutput, `准备 PlatformIO 失败：${getErrorMessage(error)}`);
+  } finally {
+    syncFirmwareUi();
+  }
+}
+
+function applyFirmwareToolingInstallSnapshot(install) {
+  const nextInstall = install ?? {
+    status: "idle",
+    lines: [],
+    error: null,
+    platformIoExe: null,
+    lineOffset: 0,
+    totalLineCount: 0,
+  };
+  const lines = Array.isArray(nextInstall.lines) ? nextInstall.lines : [];
+  const fallbackTotalLineCount = lines.length;
+  const totalLineCount = Number.isFinite(nextInstall.totalLineCount)
+    ? nextInstall.totalLineCount
+    : fallbackTotalLineCount;
+  const lineOffset = Number.isFinite(nextInstall.lineOffset)
+    ? nextInstall.lineOffset
+    : Math.max(0, totalLineCount - lines.length);
+  const previousLineCount = state.firmwareTooling.installLineCount ?? 0;
+  const firstUnreadLine = previousLineCount > totalLineCount
+    ? lineOffset
+    : Math.max(previousLineCount, lineOffset);
+  const newLines = lines.slice(firstUnreadLine - lineOffset);
+
+  newLines.forEach((line) => appendLog(els.firmwareLogOutput, `[tooling] ${line}`));
+  state.firmwareTooling.install = {
+    ...nextInstall,
+    lineOffset,
+    totalLineCount,
+    lines,
+  };
+  state.firmwareTooling.installLineCount = totalLineCount;
+}
+
+function pollFirmwareToolingInstall() {
+  if (firmwareToolingPollTimer) {
+    return;
+  }
+
+  firmwareToolingPollTimer = window.setInterval(async () => {
+    try {
+      const response = await fetch("/api/firmware/tooling/install/status");
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取 PlatformIO 准备状态失败");
+      }
+
+      applyFirmwareToolingInstallSnapshot(payload.install);
+
+      if (payload.install?.status === "completed" || payload.install?.status === "failed") {
+        stopFirmwareToolingPolling();
+        await loadFirmwareInfo();
+      }
+    } catch (error) {
+      stopFirmwareToolingPolling();
+      appendLog(els.firmwareLogOutput, `读取 PlatformIO 准备状态失败：${getErrorMessage(error)}`);
+    } finally {
+      syncFirmwareUi();
+    }
+  }, 1_000);
+}
+
+function stopFirmwareToolingPolling() {
+  if (!firmwareToolingPollTimer) {
+    return;
+  }
+
+  window.clearInterval(firmwareToolingPollTimer);
+  firmwareToolingPollTimer = null;
+}
+
 els.controllerInfoButton.addEventListener("click", async () => {
   await runControllerCommands(["I"], "连接手柄");
 });
@@ -1048,6 +1193,7 @@ async function sendStudioExecutionControl(action, label) {
 function setFirmwareBusy(isBusy) {
   state.firmware.busy = isBusy;
   els.firmwareRefreshButton.disabled = isBusy;
+  els.firmwareInstallToolingButton.disabled = isBusy;
   els.firmwareEnvSelect.disabled = isBusy || state.firmwareEnvironments.length === 0;
   syncFirmwareUi();
 }
@@ -1473,7 +1619,8 @@ function syncStudioUi() {
   }
 
   if (!state.ports.length) {
-    els.executionHint.textContent = "还没有检测到串口设备。等 ESP32 插上后，点击“刷新串口”。";
+    els.executionHint.textContent =
+      "还没有检测到串口设备。请确认使用数据线、重新插拔 ESP32；仍无设备时按芯片型号安装 CP210x/CH340 驱动。";
     renderStudioConnectionStatus();
     return;
   }
@@ -1508,16 +1655,25 @@ function syncFirmwareUi() {
     els.firmwareEnvSelect.value = environment.id;
   }
 
+  const installStatus = state.firmwareTooling.install?.status ?? "idle";
+  const installing = installStatus === "running";
+
+  els.firmwareInstallToolingButton.classList.toggle("hidden", state.firmwareTooling.available);
+  els.firmwareInstallToolingButton.disabled = state.firmware.busy || installing;
+  els.firmwareInstallToolingButton.textContent = installing ? "正在准备 PlatformIO..." : "准备 PlatformIO";
+
   if (!state.firmwareTooling.available) {
     els.firmwarePlatformIoHint.textContent =
-      "当前没有检测到 PlatformIO，刷固件页暂时不可用。";
+      installing
+        ? "正在准备 PlatformIO，请等待下方日志完成。"
+        : "当前没有检测到 PlatformIO。刷入固件需要先准备 PlatformIO。";
   } else {
     els.firmwarePlatformIoHint.textContent = `PlatformIO 已就绪：${state.firmwareTooling.path}`;
   }
 
   els.firmwarePortSelect.disabled = state.firmware.busy;
   els.firmwareFlashButton.disabled =
-    state.firmware.busy || !state.firmwareTooling.available || !state.selectedPortPath;
+    state.firmware.busy || installing || !state.firmwareTooling.available || !state.selectedPortPath;
   renderFirmwareStatus();
 }
 
@@ -1691,7 +1847,11 @@ async function refreshPorts({ log } = {}) {
     syncControllerUi();
 
     if (typeof log === "function") {
-      log(state.ports.length ? `检测到 ${state.ports.length} 个串口设备。` : "当前没有检测到串口设备。");
+      log(
+        state.ports.length
+          ? `检测到 ${state.ports.length} 个串口设备。`
+          : "当前没有检测到串口设备。请换数据线、重新插拔 ESP32；仍无设备时按芯片型号安装 CP210x/CH340 驱动。",
+      );
     }
   } catch (error) {
     if (typeof log === "function") {
@@ -1738,8 +1898,20 @@ async function loadFirmwareInfo() {
       throw new Error(payload.error ?? "固件信息加载失败");
     }
 
-    state.firmwareTooling = payload.platformIo ?? state.firmwareTooling;
+    const previousLineCount = state.firmwareTooling.installLineCount;
+    state.firmwareTooling = {
+      ...state.firmwareTooling,
+      ...(payload.platformIo ?? {}),
+      python: payload.python ?? state.firmwareTooling.python,
+      install: payload.install ?? state.firmwareTooling.install,
+      installLineCount: previousLineCount,
+    };
     state.firmwareEnvironments = Array.isArray(payload.environments) ? payload.environments : [];
+
+    if (payload.install?.status === "running") {
+      applyFirmwareToolingInstallSnapshot(payload.install);
+      pollFirmwareToolingInstall();
+    }
 
     if (!state.firmwareEnvironments.some((item) => item.id === state.firmware.environmentId)) {
       state.firmware.environmentId = state.firmwareEnvironments[0]?.id ?? "";

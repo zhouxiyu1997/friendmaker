@@ -1,15 +1,19 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { spawn, spawnSync } from "node:child_process";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { generateDrawPlan } from "../app/generateDrawPlan.js";
 import { applyCliOptions, type CliOptions } from "../cli/args.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
+import {
+  FirmwareToolingManager,
+  type ToolingConfig,
+} from "./firmwareTooling.js";
 import { listPortInfos, preferSerialPath } from "../serial/listPorts.js";
 import {
   SerialSessionManager,
@@ -21,11 +25,55 @@ import type { SenderControls } from "../types.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
-const staticRoot = path.join(__dirname, "static");
-const firmwareRoot = path.join(repoRoot, "firmware", "esp32");
-const host = "127.0.0.1";
-const port = 4307;
+const defaultStaticRoot = path.join(__dirname, "static");
+const defaultFirmwareRoot = resolveDefaultFirmwareRoot();
+const defaultHost = "127.0.0.1";
+const defaultPort = 4307;
+const defaultAppDataRoot = path.join(os.homedir(), ".friend-maker");
 const serialSessionManager = new SerialSessionManager();
+
+export interface StartWebServerOptions {
+  host?: string;
+  port?: number;
+  staticRoot?: string;
+  firmwareRoot?: string;
+  appDataRoot?: string;
+  toolingPaths?: ToolingConfig;
+}
+
+export interface WebServerHandle {
+  server: Server;
+  host: string;
+  port: number;
+  url: string;
+  close: () => Promise<void>;
+}
+
+interface WebRuntimeConfig {
+  host: string;
+  port: number;
+  staticRoot: string;
+  firmwareRoot: string;
+  toolingManager: FirmwareToolingManager;
+}
+
+let webRuntime: WebRuntimeConfig = {
+  host: defaultHost,
+  port: defaultPort,
+  staticRoot: defaultStaticRoot,
+  firmwareRoot: defaultFirmwareRoot,
+  toolingManager: new FirmwareToolingManager({ appDataRoot: defaultAppDataRoot }),
+};
+
+function resolveDefaultFirmwareRoot(): string {
+  const fallback = path.join(repoRoot, "firmware", "esp32");
+  const candidates = [
+    fallback,
+    path.resolve(__dirname, "..", "..", "..", "..", "..", "firmware", "esp32"),
+  ];
+
+  return candidates.find((candidate) => existsSync(path.join(candidate, "platformio.ini"))) ?? fallback;
+}
 
 const FIRMWARE_ENVIRONMENTS = [
   {
@@ -177,7 +225,7 @@ function getContentType(filePath: string): string {
 }
 
 async function serveStatic(response: ServerResponse, fileName: string): Promise<void> {
-  const filePath = path.join(staticRoot, fileName);
+  const filePath = path.join(webRuntime.staticRoot, fileName);
   const content = await readFile(filePath);
   response.writeHead(200, { "content-type": getContentType(filePath) });
   response.end(content);
@@ -211,43 +259,9 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-function resolvePlatformIoPath(): string | null {
-  const candidates = [
-    process.env.PLATFORMIO_BIN,
-    path.join(os.homedir(), ".platformio", "penv", "bin", "pio"),
-    path.join(os.homedir(), ".platformio", "penv", "Scripts", "pio.exe"),
-    path.join(os.homedir(), ".platformio", "penv", "Scripts", "platformio.exe"),
-    path.join(os.homedir(), ".local", "bin", "pio"),
-  ].filter((value): value is string => typeof value === "string" && value.length > 0);
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  const lookup = process.platform === "win32" ? "where" : "which";
-  const commands = ["pio", "platformio"];
-
-  for (const command of commands) {
-    const result = spawnSync(lookup, [command], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-
-    if (result.status === 0) {
-      const resolvedPath = result.stdout
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .find((line) => line.length > 0);
-
-      if (resolvedPath) {
-        return resolvedPath;
-      }
-    }
-  }
-
-  return null;
+async function resolvePlatformIoPath(): Promise<string | null> {
+  const platformIo = await webRuntime.toolingManager.resolvePlatformIo();
+  return platformIo.path;
 }
 
 function getFirmwareEnvironment(environmentId: string): (typeof FIRMWARE_ENVIRONMENTS)[number] {
@@ -264,16 +278,18 @@ async function runPlatformIo(args: string[]): Promise<{
   platformIoPath: string;
   output: string;
 }> {
-  const platformIoPath = resolvePlatformIoPath();
+  const platformIoPath = await resolvePlatformIoPath();
 
   if (!platformIoPath) {
     throw new Error("PlatformIO not found. Install it first or set PLATFORMIO_BIN.");
   }
 
+  const platformIoEnv = await webRuntime.toolingManager.getPlatformIoEnv();
+
   return new Promise((resolve, reject) => {
     const child = spawn(platformIoPath, args, {
-      cwd: firmwareRoot,
-      env: process.env,
+      cwd: webRuntime.firmwareRoot,
+      env: platformIoEnv,
     });
 
     let output = `$ ${platformIoPath} ${args.join(" ")}\n`;
@@ -730,15 +746,39 @@ function handleOfficialPalette(response: ServerResponse): void {
 }
 
 async function handleFirmwareInfo(response: ServerResponse): Promise<void> {
-  const platformIoPath = resolvePlatformIoPath();
+  const tooling = await webRuntime.toolingManager.getInfo();
 
   json(response, 200, {
     platformIo: {
-      available: platformIoPath !== null,
-      path: platformIoPath,
-      firmwareRoot,
+      ...tooling.platformIo,
+      firmwareRoot: webRuntime.firmwareRoot,
     },
+    python: tooling.python,
+    install: tooling.install,
     environments: FIRMWARE_ENVIRONMENTS,
+  });
+}
+
+async function handleToolingInstall(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    allowPythonDownload?: boolean;
+  };
+
+  json(response, 202, {
+    success: true,
+    install: await webRuntime.toolingManager.startInstall({
+      allowPythonDownload: body.allowPythonDownload === true,
+    }),
+  });
+}
+
+function handleToolingInstallStatus(response: ServerResponse): void {
+  json(response, 200, {
+    success: true,
+    install: webRuntime.toolingManager.getInstallStatus(),
   });
 }
 
@@ -969,14 +1009,14 @@ async function handleSimulate(request: IncomingMessage, response: ServerResponse
   }
 }
 
-const server = createServer(async (request, response) => {
+async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
     if (!request.url || !request.method) {
       json(response, 400, { error: "Invalid request." });
       return;
     }
 
-    const url = new URL(request.url, `http://${host}:${port}`);
+    const url = new URL(request.url, `http://${webRuntime.host}:${webRuntime.port}`);
 
     if (request.method === "GET" && url.pathname === "/") {
       await serveStatic(response, "index.html");
@@ -1005,6 +1045,16 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/firmware/info") {
       await handleFirmwareInfo(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/firmware/tooling/install") {
+      await handleToolingInstall(request, response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/firmware/tooling/install/status") {
+      handleToolingInstallStatus(response);
       return;
     }
 
@@ -1073,8 +1123,73 @@ const server = createServer(async (request, response) => {
     const message = error instanceof Error ? error.message : String(error);
     json(response, 500, { error: message });
   }
-});
+}
 
-server.listen(port, host, () => {
-  console.log(`Switch Auto Draw UI running at http://${host}:${port}`);
-});
+export async function startWebServer(
+  options: StartWebServerOptions = {},
+): Promise<WebServerHandle> {
+  webRuntime = {
+    host: options.host ?? defaultHost,
+    port: options.port ?? defaultPort,
+    staticRoot: options.staticRoot ?? defaultStaticRoot,
+    firmwareRoot: options.firmwareRoot ?? defaultFirmwareRoot,
+    toolingManager: new FirmwareToolingManager({
+      appDataRoot: options.appDataRoot ?? defaultAppDataRoot,
+      ...(options.toolingPaths ? { initialConfig: options.toolingPaths } : {}),
+    }),
+  };
+
+  const server = createServer(handleRequest);
+
+  await new Promise<void>((resolve, reject) => {
+    const handleError = (error: Error): void => {
+      reject(error);
+    };
+
+    server.once("error", handleError);
+    server.listen(webRuntime.port, webRuntime.host, () => {
+      server.off("error", handleError);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  const actualPort = typeof address === "object" && address !== null ? address.port : webRuntime.port;
+  webRuntime.port = actualPort;
+
+  return {
+    server,
+    host: webRuntime.host,
+    port: actualPort,
+    url: `http://${webRuntime.host}:${actualPort}`,
+    close: async () => {
+      await serialSessionManager.disconnect({ force: true }).catch(() => undefined);
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+function isDirectRun(): boolean {
+  return Boolean(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
+}
+
+if (isDirectRun()) {
+  void startWebServer()
+    .then((handle) => {
+      console.log(`Switch Auto Draw UI running at ${handle.url}`);
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      process.exitCode = 1;
+    });
+}

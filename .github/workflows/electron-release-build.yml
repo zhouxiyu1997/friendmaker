@@ -1,0 +1,80 @@
+name: Electron Release Build
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-26
+            script: npm run dist:mac -- --arm64
+            artifact: friend-maker-macos-arm64
+          - name: macOS x64
+            os: macos-26-intel
+            script: npm run dist:mac -- --x64
+            artifact: friend-maker-macos-x64
+          - name: Windows x64
+            os: windows-latest
+            script: npm run dist:win:x64
+            artifact: friend-maker-windows-x64
+          - name: Windows arm64
+            os: windows-11-arm
+            script: npm run dist:win:arm64
+            artifact: friend-maker-windows-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build installer
+        run: ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.blockmap
+          if-no-files-found: error
+
+      - name: Upload release assets
+        shell: bash
+        run: |
+          files=()
+          for pattern in release/*.dmg release/*.zip release/*.exe release/*.blockmap; do
+            for file in $pattern; do
+              if [ -e "$file" ]; then
+                files+=("$file")
+              fi
+            done
+          done
+          gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

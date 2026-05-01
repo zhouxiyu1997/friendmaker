@@ -1,5 +1,6 @@
 node_modules
 dist
+release
 .DS_Store
 .turbo
 coverage
