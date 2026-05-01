@@ -25,9 +25,30 @@ function getBundledFirmwareRoot(): string {
   return path.join(repoRoot, "firmware", "esp32");
 }
 
+function hasWhitespace(value: string): boolean {
+  return /\s/u.test(value);
+}
+
+function getPlatformIoSafeDataRoot(): string {
+  const homeRoot = path.join(app.getPath("home"), ".friend-maker");
+  if (!hasWhitespace(homeRoot)) {
+    return homeRoot;
+  }
+
+  const windowsPublicRoot = process.env.PUBLIC
+    ? path.join(process.env.PUBLIC, "FriendMaker")
+    : "";
+  if (process.platform === "win32" && windowsPublicRoot && !hasWhitespace(windowsPublicRoot)) {
+    return windowsPublicRoot;
+  }
+
+  return homeRoot;
+}
+
 async function ensureWritableFirmwareRoot(): Promise<string> {
-  const targetRoot = path.join(app.getPath("userData"), "firmware", "esp32");
-  const markerPath = path.join(app.getPath("userData"), "firmware", ".friend-maker-version");
+  const dataRoot = getPlatformIoSafeDataRoot();
+  const targetRoot = path.join(dataRoot, "firmware", "esp32");
+  const markerPath = path.join(dataRoot, "firmware", ".friend-maker-version");
   const sourceRoot = getBundledFirmwareRoot();
   let marker = "";
 
@@ -60,7 +81,7 @@ async function createMainWindow(): Promise<void> {
     port: 0,
     staticRoot: getStaticRoot(),
     firmwareRoot,
-    appDataRoot: app.getPath("userData"),
+    appDataRoot: getPlatformIoSafeDataRoot(),
   });
 
   mainWindow = new BrowserWindow({

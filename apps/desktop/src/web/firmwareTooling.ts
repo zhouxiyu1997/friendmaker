@@ -147,6 +147,10 @@ function isPythonExecutable(candidate: string): boolean {
   return result.status === 0 && /^Python 3\./u.test(output.trim());
 }
 
+function hasWhitespace(value: string): boolean {
+  return /\s/u.test(value);
+}
+
 function getPlatformIoCandidates(config: ToolingConfig, appLocalCoreDir: string): string[] {
   return [
     config.platformioExe,
@@ -327,17 +331,16 @@ export class FirmwareToolingManager {
 
   async getPlatformIoEnv(): Promise<NodeJS.ProcessEnv> {
     const config = await this.readConfig();
-    const coreDir = config.platformioCoreDir ?? this.platformIoCoreDir;
-    const platformIo = await this.resolvePlatformIo();
+    const configuredCoreDir = config.platformioCoreDir;
+    const coreDir =
+      configuredCoreDir && !hasWhitespace(configuredCoreDir)
+        ? configuredCoreDir
+        : this.platformIoCoreDir;
 
-    if (platformIo.path?.startsWith(coreDir)) {
-      return {
-        ...process.env,
-        PLATFORMIO_CORE_DIR: coreDir,
-      };
-    }
-
-    return { ...process.env };
+    return {
+      ...process.env,
+      PLATFORMIO_CORE_DIR: coreDir,
+    };
   }
 
   async startInstall(options: { allowPythonDownload?: boolean }): Promise<ToolingInstallSnapshot> {
