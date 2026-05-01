@@ -29,6 +29,10 @@
     ],
     "extraResources": [
       {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
         "from": "firmware/esp32",
         "to": "firmware/esp32",
         "filter": [
@@ -47,6 +51,7 @@
     ],
     "npmRebuild": true,
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.utilities",
       "identity": null,
       "target": [
@@ -55,9 +60,13 @@
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
+    },
+    "linux": {
+      "icon": "build/icons"
     },
     "nsis": {
       "oneClick": false,

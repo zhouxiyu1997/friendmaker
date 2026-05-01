@@ -25,6 +25,14 @@ function getBundledFirmwareRoot(): string {
   return path.join(repoRoot, "firmware", "esp32");
 }
 
+function getAppIconPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "icon.png");
+  }
+
+  return path.join(repoRoot, "build", "icon.png");
+}
+
 function hasWhitespace(value: string): boolean {
   return /\s/u.test(value);
 }
@@ -75,6 +83,11 @@ async function ensureWritableFirmwareRoot(): Promise<string> {
 
 async function createMainWindow(): Promise<void> {
   const firmwareRoot = await ensureWritableFirmwareRoot();
+  const appIcon = getAppIconPath();
+
+  if (process.platform === "darwin" && existsSync(appIcon)) {
+    app.dock?.setIcon(appIcon);
+  }
 
   webServer = await startWebServer({
     host: "127.0.0.1",
@@ -90,6 +103,7 @@ async function createMainWindow(): Promise<void> {
     minWidth: 980,
     minHeight: 720,
     title: "Friend Maker",
+    ...(existsSync(appIcon) ? { icon: appIcon } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
