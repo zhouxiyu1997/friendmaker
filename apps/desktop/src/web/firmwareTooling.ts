@@ -9,8 +9,10 @@ import path from "node:path";
 
 import { extract } from "tar";
 
+const PLATFORMIO_INSTALLER_COMMIT = "7d1203d1a6d075a2cb560295888e23bc43c12abb";
+const PLATFORMIO_INSTALLER_SHA256 = "068d5dca983b22ed36a00dea7d42e58b646f0ac495885892f5746357f39a0470";
 const PLATFORMIO_INSTALLER_URL =
-  "https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py";
+  `https://raw.githubusercontent.com/platformio/platformio-core-installer/${PLATFORMIO_INSTALLER_COMMIT}/get-platformio.py`;
 const MAX_INSTALL_LOG_LINES = 400;
 
 type ToolingSource = "saved" | "app-local" | "env" | "home" | "path";
@@ -64,6 +66,8 @@ export interface ToolingInstallSnapshot {
   finishedAt: number | null;
   error: string | null;
   platformIoExe: string | null;
+  lineOffset: number;
+  totalLineCount: number;
   lines: string[];
 }
 
@@ -93,6 +97,8 @@ function createIdleInstallState(): ToolingInstallSnapshot {
     finishedAt: null,
     error: null,
     platformIoExe: null,
+    lineOffset: 0,
+    totalLineCount: 0,
     lines: [],
   };
 }
@@ -354,6 +360,8 @@ export class FirmwareToolingManager {
       finishedAt: null,
       error: null,
       platformIoExe: null,
+      lineOffset: 0,
+      totalLineCount: 0,
       lines: [],
     };
 
@@ -440,6 +448,13 @@ export class FirmwareToolingManager {
       const installerPath = path.join(this.cacheDir, "get-platformio.py");
       this.appendInstallLine("Downloading PlatformIO installer...");
       await downloadFile(PLATFORMIO_INSTALLER_URL, installerPath);
+      this.appendInstallLine("Verifying PlatformIO installer...");
+
+      const installerDigest = await sha256File(installerPath);
+      if (installerDigest !== PLATFORMIO_INSTALLER_SHA256) {
+        throw new Error("Downloaded PlatformIO installer failed SHA256 verification.");
+      }
+
       this.appendInstallLine("Installing PlatformIO...");
 
       await runProcess(pythonPath, [installerPath], {
@@ -509,11 +524,14 @@ export class FirmwareToolingManager {
   }
 
   private appendInstallLine(line: string): void {
+    this.installState.totalLineCount += 1;
     this.installState.lines.push(line);
 
     if (this.installState.lines.length > MAX_INSTALL_LOG_LINES) {
       this.installState.lines.splice(0, this.installState.lines.length - MAX_INSTALL_LOG_LINES);
     }
+
+    this.installState.lineOffset = this.installState.totalLineCount - this.installState.lines.length;
   }
 
   private finishInstall(status: "completed" | "failed", platformIoExe: string | null, error?: string): void {

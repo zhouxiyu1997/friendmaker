@@ -30,6 +30,8 @@ const state = {
       lines: [],
       error: null,
       platformIoExe: null,
+      lineOffset: 0,
+      totalLineCount: 0,
     },
     installLineCount: 0,
   },
@@ -869,18 +871,31 @@ function applyFirmwareToolingInstallSnapshot(install) {
     lines: [],
     error: null,
     platformIoExe: null,
+    lineOffset: 0,
+    totalLineCount: 0,
   };
   const lines = Array.isArray(nextInstall.lines) ? nextInstall.lines : [];
-  const knownLineCount =
-    lines.length < state.firmwareTooling.installLineCount ? 0 : state.firmwareTooling.installLineCount;
-  const newLines = lines.slice(knownLineCount);
+  const fallbackTotalLineCount = lines.length;
+  const totalLineCount = Number.isFinite(nextInstall.totalLineCount)
+    ? nextInstall.totalLineCount
+    : fallbackTotalLineCount;
+  const lineOffset = Number.isFinite(nextInstall.lineOffset)
+    ? nextInstall.lineOffset
+    : Math.max(0, totalLineCount - lines.length);
+  const previousLineCount = state.firmwareTooling.installLineCount ?? 0;
+  const firstUnreadLine = previousLineCount > totalLineCount
+    ? lineOffset
+    : Math.max(previousLineCount, lineOffset);
+  const newLines = lines.slice(firstUnreadLine - lineOffset);
 
   newLines.forEach((line) => appendLog(els.firmwareLogOutput, `[tooling] ${line}`));
   state.firmwareTooling.install = {
     ...nextInstall,
+    lineOffset,
+    totalLineCount,
     lines,
   };
-  state.firmwareTooling.installLineCount = lines.length;
+  state.firmwareTooling.installLineCount = totalLineCount;
 }
 
 function pollFirmwareToolingInstall() {
