@@ -67,14 +67,14 @@ jobs:
       - name: Upload release assets
         shell: bash
         run: |
-          files=()
-          for pattern in release/*.dmg release/*.zip release/*.exe release/*.blockmap; do
-            for file in $pattern; do
-              if [ -e "$file" ]; then
-                files+=("$file")
-              fi
-            done
-          done
+          shopt -s nullglob
+          files=(release/*.dmg release/*.zip release/*.exe release/*.blockmap)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release assets found in release/"
+            find release -maxdepth 2 -type f -print || true
+            exit 1
+          fi
+          printf 'Uploading release asset: %s\n' "${files[@]}"
           gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
