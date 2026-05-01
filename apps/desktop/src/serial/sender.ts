@@ -67,6 +67,19 @@ function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
   return isRecognizedDeviceLine(candidate) ? candidate : null;
 }
 
+function getEmbeddedDeviceLine(line: string): string | null {
+  const candidateIndexes = DEVICE_LINE_PREFIXES.map((prefix) => line.indexOf(prefix)).filter(
+    (index) => index > 0,
+  );
+
+  if (candidateIndexes.length === 0) {
+    return null;
+  }
+
+  const candidate = line.slice(Math.min(...candidateIndexes)).trim();
+  return DEVICE_LINE_PREFIXES.some((prefix) => candidate.startsWith(prefix)) ? candidate : null;
+}
+
 function waitForAck(
   parser: ReadlineParser,
   port: SerialPort,
@@ -129,6 +142,14 @@ function waitForAck(
       }
 
       if (line === "OK" || line === "ERR" || line.startsWith("OK ") || line.startsWith("ERR ")) {
+        const embeddedDeviceLine = getEmbeddedDeviceLine(line);
+
+        if (embeddedDeviceLine) {
+          options?.onDeviceLine?.(`WARN ignored malformed serial line=${line}`);
+          options?.onDeviceLine?.(embeddedDeviceLine);
+          return;
+        }
+
         finish(() =>
           reject(
             new Error(
@@ -258,6 +279,24 @@ function openPort(port: SerialPort): Promise<void> {
   });
 }
 
+function flushPort(port: SerialPort): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!port.isOpen) {
+      resolve();
+      return;
+    }
+
+    port.flush((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
 function closePort(port: SerialPort): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!port.isOpen) {
@@ -320,12 +359,31 @@ export class SerialCommandSession {
       autoOpen: false,
       hupcl: false,
     });
-    const parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
     this.port = port;
-    this.parser = parser;
     this.attachPortLifecycleHandlers(port);
 
-    const openingPromise = openPort(port);
+    const openingPromise = (async () => {
+      await openPort(port);
+
+      if (this.port !== port || !port.isOpen) {
+        throw new Error("Serial session is not open.");
+      }
+
+      try {
+        await flushPort(port);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        onDeviceLine?.(`WARN serial_flush_failed reason=${message}`);
+      }
+
+      if (this.port !== port || !port.isOpen) {
+        throw new Error("Serial session is not open.");
+      }
+
+      this.parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
+      this.lastUsedAtValue = Date.now();
+      onDeviceLine?.(`INFO serial_session=open port=${this.portPath} baud=${this.baudRate}`);
+    })();
     this.openingPromise = openingPromise;
 
     try {
@@ -343,13 +401,6 @@ export class SerialCommandSession {
         this.openingPromise = null;
       }
     }
-
-    if (this.port !== port || !port.isOpen || !this.parser) {
-      throw new Error("Serial session is not open.");
-    }
-
-    this.lastUsedAtValue = Date.now();
-    onDeviceLine?.(`INFO serial_session=open port=${this.portPath} baud=${this.baudRate}`);
   }
 
   async close(): Promise<void> {
