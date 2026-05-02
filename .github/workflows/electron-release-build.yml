@@ -27,10 +27,6 @@ jobs:
             os: windows-latest
             script: npm run dist:win:x64 -- --publish never
             artifact: friend-maker-windows-x64
-          - name: Windows arm64
-            os: windows-11-arm
-            script: npm run dist:win:arm64 -- --publish never
-            artifact: friend-maker-windows-arm64
 
     steps:
       - name: Checkout

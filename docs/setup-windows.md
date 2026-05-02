@@ -1,6 +1,6 @@
 # Setup on Windows
 
-This guide covers the current Windows setup flow, including the new **one-click installer** and the manual fallback steps.
+This guide covers the current Windows x64 setup flow, including the new **one-click installer** and the manual fallback steps.
 
 ## What works today
 
@@ -16,12 +16,14 @@ This guide covers the current Windows setup flow, including the new **one-click 
 
 ## Requirements
 
-- Windows 10 or Windows 11
+- Windows 10 or Windows 11 on x64
 - `Node.js 20+`
 - `npm 10+`
 - `Python 3.10+`
 - `PlatformIO Core 6+`
 - `ESP32-WROOM-32 / ESP-32S`
+
+Windows ARM64 is not a supported release target.
 
 ## One-click install
 
@@ -76,6 +78,42 @@ cd C:\path\to\friendmaker
 npm install
 npm run check
 ```
+
+## Install serial driver
+
+ESP32-WROOM-32 / ESP-32S boards usually expose a Windows `COM` port through a USB-to-UART chip on the development board. Friend Maker prioritizes these drivers:
+
+1. CP210x / CP2102
+2. CH340 / CH341
+
+After PlatformIO is ready, if Friend Maker still shows no serial devices, use the in-app driver helper on the **Firmware Flash** page:
+
+1. Click **安装 CP210x 驱动（优先）**.
+2. Confirm the Windows administrator prompt.
+3. Unplug and reconnect the ESP32.
+4. Click **刷新串口**.
+5. If there is still no `COM` port, click **安装 CH340/CH341 驱动（备选）**, click **INSTALL** in the WCH installer, and repeat the unplug/reconnect step.
+
+Manual CP210x install:
+
+```powershell
+pnputil /add-driver C:\path\to\CP210x\silabser.inf /install
+```
+
+Manual CH340/CH341 install:
+
+```powershell
+Start-Process C:\path\to\CH341SER.EXE -Verb RunAs
+```
+
+To uninstall a driver, open Device Manager, enable **View > Show hidden devices**, then remove the matching `Silicon Labs CP210x USB to UART Bridge` or `USB-SERIAL CH340` device. If you need to remove the driver package too, find its published name and delete it:
+
+```powershell
+pnputil /enum-drivers | Select-String -Pattern "Silicon|CP210|CH340|CH341|WCH" -Context 0,6
+pnputil /delete-driver oem42.inf /uninstall /force
+```
+
+Replace `oem42.inf` with the published name shown on your machine.
 
 ## Flash firmware
 

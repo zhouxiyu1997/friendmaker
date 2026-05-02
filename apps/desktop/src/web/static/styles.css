@@ -841,6 +841,25 @@ input[type="range"]:focus-visible,
   grid-column: 1 / -1;
 }
 
+.driver-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(245, 191, 85, 0.42);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(245, 191, 85, 0.18), rgba(255, 255, 255, 0.82));
+}
+
+.driver-panel strong {
+  font-size: 16px;
+}
+
+.driver-panel p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
 .controller-log-panel {
   grid-column: 2;
 }

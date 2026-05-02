@@ -35,6 +35,22 @@ const state = {
     },
     installLineCount: 0,
   },
+  windowsSerialDrivers: {
+    supported: false,
+    platform: null,
+    arch: null,
+    reason: null,
+    drivers: [],
+    install: {
+      status: "idle",
+      driverId: null,
+      lines: [],
+      error: null,
+      lineOffset: 0,
+      totalLineCount: 0,
+    },
+    installLineCount: 0,
+  },
   studio: {
     busy: false,
     target: "serial",
@@ -175,6 +191,10 @@ const els = {
   firmwareFlashButton: document.getElementById("firmware-flash-button"),
   firmwarePlatformIoHint: document.getElementById("firmware-platformio-hint"),
   firmwareEnvHint: document.getElementById("firmware-env-hint"),
+  windowsDriverPanel: document.getElementById("windows-driver-panel"),
+  windowsDriverHint: document.getElementById("windows-driver-hint"),
+  installCp210xDriverButton: document.getElementById("install-cp210x-driver-button"),
+  installCh341DriverButton: document.getElementById("install-ch341-driver-button"),
   firmwareStatusCard: document.getElementById("firmware-status-card"),
   firmwareStatusPill: document.getElementById("firmware-status-pill"),
   firmwareStatusTitle: document.getElementById("firmware-status-title"),
@@ -216,6 +236,7 @@ const els = {
 
 let studioExecutionPollTimer = null;
 let firmwareToolingPollTimer = null;
+let windowsSerialDriverPollTimer = null;
 let studioPreviewRefreshTimer = null;
 let studioGenerateRequestSerial = 0;
 let studioPreviewBoundsRequestSerial = 0;
@@ -356,6 +377,14 @@ els.firmwareRefreshButton.addEventListener("click", async () => {
 
 els.firmwareInstallToolingButton.addEventListener("click", async () => {
   await startFirmwareToolingInstall();
+});
+
+els.installCp210xDriverButton.addEventListener("click", async () => {
+  await startWindowsSerialDriverInstall("cp210x");
+});
+
+els.installCh341DriverButton.addEventListener("click", async () => {
+  await startWindowsSerialDriverInstall("ch341");
 });
 
 els.controllerRefreshButton.addEventListener("click", async () => {
@@ -934,6 +963,130 @@ function stopFirmwareToolingPolling() {
 
   window.clearInterval(firmwareToolingPollTimer);
   firmwareToolingPollTimer = null;
+}
+
+async function startWindowsSerialDriverInstall(driverId) {
+  const driver = getWindowsSerialDriver(driverId);
+  const driverLabel = driver?.label ?? driverId;
+
+  if (!state.windowsSerialDrivers.supported) {
+    appendLog(
+      els.firmwareLogOutput,
+      `当前环境不支持一键安装 Windows 串口驱动：${state.windowsSerialDrivers.reason ?? "仅支持 Windows x64"}`,
+    );
+    return;
+  }
+
+  if (!driver?.available) {
+    appendLog(els.firmwareLogOutput, `${driverLabel} 驱动资源缺失，无法安装。`);
+    return;
+  }
+
+  const installerNote = driverId === "ch341"
+    ? "打开 WCH 安装器后请点击 INSTALL。"
+    : "应用会调用 pnputil 安装 CP210x 驱动。";
+  const shouldInstall = window.confirm(
+    `即将安装 ${driverLabel} 串口驱动。Windows 会弹出管理员权限确认。${installerNote} 安装完成后请重新插拔 ESP32，再点击“刷新串口”。是否继续？`,
+  );
+  if (!shouldInstall) {
+    appendLog(els.firmwareLogOutput, `已取消安装 ${driverLabel} 驱动。`);
+    return;
+  }
+
+  try {
+    state.windowsSerialDrivers.installLineCount = 0;
+    const response = await fetch("/api/windows-serial-drivers/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ driverId }),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "驱动安装启动失败");
+    }
+
+    applyWindowsSerialDriverInstallSnapshot(payload.install);
+    pollWindowsSerialDriverInstall();
+  } catch (error) {
+    appendLog(els.firmwareLogOutput, `驱动安装启动失败：${getErrorMessage(error)}`);
+  } finally {
+    syncFirmwareUi();
+  }
+}
+
+function applyWindowsSerialDriverInstallSnapshot(install) {
+  const nextInstall = install ?? {
+    status: "idle",
+    driverId: null,
+    lines: [],
+    error: null,
+    lineOffset: 0,
+    totalLineCount: 0,
+  };
+  const lines = Array.isArray(nextInstall.lines) ? nextInstall.lines : [];
+  const fallbackTotalLineCount = lines.length;
+  const totalLineCount = Number.isFinite(nextInstall.totalLineCount)
+    ? nextInstall.totalLineCount
+    : fallbackTotalLineCount;
+  const lineOffset = Number.isFinite(nextInstall.lineOffset)
+    ? nextInstall.lineOffset
+    : Math.max(0, totalLineCount - lines.length);
+  const previousLineCount = state.windowsSerialDrivers.installLineCount ?? 0;
+  const firstUnreadLine = previousLineCount > totalLineCount
+    ? lineOffset
+    : Math.max(previousLineCount, lineOffset);
+  const newLines = lines.slice(firstUnreadLine - lineOffset);
+
+  newLines.forEach((line) => appendLog(els.firmwareLogOutput, `[driver] ${line}`));
+  state.windowsSerialDrivers.install = {
+    ...nextInstall,
+    lineOffset,
+    totalLineCount,
+    lines,
+  };
+  state.windowsSerialDrivers.installLineCount = totalLineCount;
+}
+
+function pollWindowsSerialDriverInstall() {
+  if (windowsSerialDriverPollTimer) {
+    return;
+  }
+
+  windowsSerialDriverPollTimer = window.setInterval(async () => {
+    try {
+      const response = await fetch("/api/windows-serial-drivers/install/status");
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取驱动安装状态失败");
+      }
+
+      applyWindowsSerialDriverInstallSnapshot(payload.install);
+
+      if (payload.install?.status === "completed" || payload.install?.status === "failed") {
+        stopWindowsSerialDriverPolling();
+        await loadWindowsSerialDriversInfo();
+        await refreshPorts({
+          log: (message) => appendLog(els.firmwareLogOutput, message),
+        });
+      }
+    } catch (error) {
+      stopWindowsSerialDriverPolling();
+      appendLog(els.firmwareLogOutput, `读取驱动安装状态失败：${getErrorMessage(error)}`);
+    } finally {
+      syncFirmwareUi();
+    }
+  }, 1_000);
+}
+
+function stopWindowsSerialDriverPolling() {
+  if (!windowsSerialDriverPollTimer) {
+    return;
+  }
+
+  window.clearInterval(windowsSerialDriverPollTimer);
+  windowsSerialDriverPollTimer = null;
 }
 
 els.controllerInfoButton.addEventListener("click", async () => {
@@ -1620,7 +1773,7 @@ function syncStudioUi() {
 
   if (!state.ports.length) {
     els.executionHint.textContent =
-      "还没有检测到串口设备。请确认使用数据线、重新插拔 ESP32；仍无设备时按芯片型号安装 CP210x/CH340 驱动。";
+      "还没有检测到串口设备。请确认使用可传输数据的 USB 线、重新插拔 ESP32；在刷入固件页确认 PlatformIO 就绪后可安装 CP210x 或 CH340/CH341 驱动。";
     renderStudioConnectionStatus();
     return;
   }
@@ -1671,10 +1824,53 @@ function syncFirmwareUi() {
     els.firmwarePlatformIoHint.textContent = `PlatformIO 已就绪：${state.firmwareTooling.path}`;
   }
 
+  syncWindowsSerialDriverUi();
+
   els.firmwarePortSelect.disabled = state.firmware.busy;
   els.firmwareFlashButton.disabled =
     state.firmware.busy || installing || !state.firmwareTooling.available || !state.selectedPortPath;
   renderFirmwareStatus();
+}
+
+function syncWindowsSerialDriverUi() {
+  const driverInstallStatus = state.windowsSerialDrivers.install?.status ?? "idle";
+  const driverInstalling = driverInstallStatus === "running";
+  const isWindows = state.windowsSerialDrivers.platform === "win32";
+  const mainlineEnvironmentSelected = state.firmware.environmentId === "esp32dev_wireless";
+  const shouldShowDriverPanel =
+    isWindows &&
+    mainlineEnvironmentSelected &&
+    state.firmwareTooling.available &&
+    state.ports.length === 0;
+  const cp210xDriver = getWindowsSerialDriver("cp210x");
+  const ch341Driver = getWindowsSerialDriver("ch341");
+
+  els.windowsDriverPanel.classList.toggle("hidden", !shouldShowDriverPanel);
+
+  if (!shouldShowDriverPanel) {
+    return;
+  }
+
+  if (!state.windowsSerialDrivers.supported) {
+    els.windowsDriverHint.textContent =
+      state.windowsSerialDrivers.reason ?? "当前仅支持 Windows x64 的一键串口驱动安装。";
+  } else {
+    els.windowsDriverHint.textContent =
+      "PlatformIO 已就绪但仍未检测到串口。请先确认使用可传输数据的 USB 线并重新插拔 ESP32；仍无串口时优先安装 CP210x 驱动，如果仍检测不到再安装 CH340/CH341 驱动。";
+  }
+
+  els.installCp210xDriverButton.disabled =
+    state.firmware.busy || driverInstalling || !state.windowsSerialDrivers.supported || !cp210xDriver?.available;
+  els.installCh341DriverButton.disabled =
+    state.firmware.busy || driverInstalling || !state.windowsSerialDrivers.supported || !ch341Driver?.available;
+  els.installCp210xDriverButton.textContent =
+    driverInstalling && state.windowsSerialDrivers.install?.driverId === "cp210x"
+      ? "正在安装 CP210x..."
+      : "安装 CP210x 驱动（优先）";
+  els.installCh341DriverButton.textContent =
+    driverInstalling && state.windowsSerialDrivers.install?.driverId === "ch341"
+      ? "正在安装 CH340/CH341..."
+      : "安装 CH340/CH341 驱动（备选）";
 }
 
 function syncControllerUi() {
@@ -1850,7 +2046,7 @@ async function refreshPorts({ log } = {}) {
       log(
         state.ports.length
           ? `检测到 ${state.ports.length} 个串口设备。`
-          : "当前没有检测到串口设备。请换数据线、重新插拔 ESP32；仍无设备时按芯片型号安装 CP210x/CH340 驱动。",
+          : "当前没有检测到串口设备。请换数据线、重新插拔 ESP32；PlatformIO 就绪后仍无设备时优先安装 CP210x 驱动，再尝试 CH340/CH341 驱动。",
       );
     }
   } catch (error) {
@@ -1923,6 +2119,42 @@ async function loadFirmwareInfo() {
   } finally {
     syncFirmwareUi();
   }
+}
+
+async function loadWindowsSerialDriversInfo() {
+  try {
+    const response = await fetch("/api/windows-serial-drivers/info");
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Windows 串口驱动信息加载失败");
+    }
+
+    const previousLineCount = state.windowsSerialDrivers.installLineCount;
+    state.windowsSerialDrivers = {
+      ...state.windowsSerialDrivers,
+      supported: payload.supported === true,
+      platform: payload.platform ?? null,
+      arch: payload.arch ?? null,
+      reason: payload.reason ?? null,
+      drivers: Array.isArray(payload.drivers) ? payload.drivers : [],
+      install: payload.install ?? state.windowsSerialDrivers.install,
+      installLineCount: previousLineCount,
+    };
+
+    if (payload.install?.status === "running") {
+      applyWindowsSerialDriverInstallSnapshot(payload.install);
+      pollWindowsSerialDriverInstall();
+    }
+  } catch (error) {
+    appendLog(els.firmwareLogOutput, `加载 Windows 串口驱动信息失败：${getErrorMessage(error)}`);
+  } finally {
+    syncFirmwareUi();
+  }
+}
+
+function getWindowsSerialDriver(driverId) {
+  return state.windowsSerialDrivers.drivers.find((driver) => driver.id === driverId) ?? null;
 }
 
 async function loadOfficialPalette() {
@@ -2211,6 +2443,7 @@ async function init() {
   await Promise.all([
     refreshPorts(),
     loadFirmwareInfo(),
+    loadWindowsSerialDriversInfo(),
     loadOfficialPalette(),
     loadSerialSessionStatus(),
     pollStudioExecutionStatus(),

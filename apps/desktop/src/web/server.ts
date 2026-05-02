@@ -14,6 +14,10 @@ import {
   FirmwareToolingManager,
   type ToolingConfig,
 } from "./firmwareTooling.js";
+import {
+  WindowsSerialDriverManager,
+  type WindowsSerialDriverId,
+} from "./windowsSerialDrivers.js";
 import { listPortInfos, preferSerialPath } from "../serial/listPorts.js";
 import {
   SerialSessionManager,
@@ -27,6 +31,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
 const defaultStaticRoot = path.join(__dirname, "static");
 const defaultFirmwareRoot = resolveDefaultFirmwareRoot();
+const defaultWindowsDriverRoot = resolveDefaultWindowsDriverRoot();
 const defaultHost = "127.0.0.1";
 const defaultPort = 4307;
 const defaultAppDataRoot = path.join(os.homedir(), ".friend-maker");
@@ -37,6 +42,7 @@ export interface StartWebServerOptions {
   port?: number;
   staticRoot?: string;
   firmwareRoot?: string;
+  windowsDriverRoot?: string;
   appDataRoot?: string;
   toolingPaths?: ToolingConfig;
 }
@@ -55,6 +61,7 @@ interface WebRuntimeConfig {
   staticRoot: string;
   firmwareRoot: string;
   toolingManager: FirmwareToolingManager;
+  windowsSerialDriverManager: WindowsSerialDriverManager;
 }
 
 let webRuntime: WebRuntimeConfig = {
@@ -63,6 +70,7 @@ let webRuntime: WebRuntimeConfig = {
   staticRoot: defaultStaticRoot,
   firmwareRoot: defaultFirmwareRoot,
   toolingManager: new FirmwareToolingManager({ appDataRoot: defaultAppDataRoot }),
+  windowsSerialDriverManager: new WindowsSerialDriverManager(defaultWindowsDriverRoot),
 };
 
 function resolveDefaultFirmwareRoot(): string {
@@ -73,6 +81,16 @@ function resolveDefaultFirmwareRoot(): string {
   ];
 
   return candidates.find((candidate) => existsSync(path.join(candidate, "platformio.ini"))) ?? fallback;
+}
+
+function resolveDefaultWindowsDriverRoot(): string {
+  const fallback = path.join(repoRoot, "drivers", "windows");
+  const candidates = [
+    fallback,
+    path.resolve(__dirname, "..", "..", "..", "..", "..", "drivers", "windows"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? fallback;
 }
 
 const FIRMWARE_ENVIRONMENTS = [
@@ -782,6 +800,44 @@ function handleToolingInstallStatus(response: ServerResponse): void {
   });
 }
 
+function handleWindowsSerialDriversInfo(response: ServerResponse): void {
+  json(response, 200, { ...webRuntime.windowsSerialDriverManager.getInfo() });
+}
+
+async function handleWindowsSerialDriverInstall(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    driverId?: WindowsSerialDriverId;
+  };
+
+  if (body.driverId !== "cp210x" && body.driverId !== "ch341") {
+    json(response, 400, { error: "Unsupported Windows serial driver." });
+    return;
+  }
+
+  try {
+    json(response, 202, {
+      success: true,
+      install: await webRuntime.windowsSerialDriverManager.startInstall(body.driverId),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    json(response, 400, {
+      error: message,
+      install: webRuntime.windowsSerialDriverManager.getInstallStatus(),
+    });
+  }
+}
+
+function handleWindowsSerialDriverInstallStatus(response: ServerResponse): void {
+  json(response, 200, {
+    success: true,
+    install: webRuntime.windowsSerialDriverManager.getInstallStatus(),
+  });
+}
+
 async function handleFirmwareFlash(
   request: IncomingMessage,
   response: ServerResponse,
@@ -1058,6 +1114,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/windows-serial-drivers/info") {
+      handleWindowsSerialDriversInfo(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/windows-serial-drivers/install") {
+      await handleWindowsSerialDriverInstall(request, response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/windows-serial-drivers/install/status") {
+      handleWindowsSerialDriverInstallStatus(response);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/generate") {
       await handleGenerate(request, response);
       return;
@@ -1137,6 +1208,9 @@ export async function startWebServer(
       appDataRoot: options.appDataRoot ?? defaultAppDataRoot,
       ...(options.toolingPaths ? { initialConfig: options.toolingPaths } : {}),
     }),
+    windowsSerialDriverManager: new WindowsSerialDriverManager(
+      options.windowsDriverRoot ?? defaultWindowsDriverRoot,
+    ),
   };
 
   const server = createServer(handleRequest);

@@ -425,6 +425,21 @@
             <p class="hint" id="firmware-platformio-hint">正在检测 PlatformIO...</p>
             <p class="hint" id="firmware-env-hint">选择目标开发板后，这里会显示对应说明。</p>
 
+            <div id="windows-driver-panel" class="driver-panel hidden">
+              <strong>未检测到 Windows 串口设备</strong>
+              <p id="windows-driver-hint">
+                PlatformIO 已就绪但仍没有串口设备时，请先确认数据线可传输数据并重新插拔 ESP32。
+              </p>
+              <div class="action-row slim">
+                <button id="install-cp210x-driver-button" class="ghost" type="button">
+                  安装 CP210x 驱动（优先）
+                </button>
+                <button id="install-ch341-driver-button" class="ghost" type="button">
+                  安装 CH340/CH341 驱动（备选）
+                </button>
+              </div>
+            </div>
+
             <div class="action-row">
               <button id="firmware-refresh-button" class="ghost" type="button">刷新串口</button>
               <button id="firmware-install-tooling-button" class="ghost hidden" type="button">准备 PlatformIO</button>

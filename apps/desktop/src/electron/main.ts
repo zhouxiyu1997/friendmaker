@@ -33,6 +33,14 @@ function getAppIconPath(): string {
   return path.join(repoRoot, "build", "icon.png");
 }
 
+function getWindowsDriverRoot(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "drivers", "windows");
+  }
+
+  return path.join(repoRoot, "drivers", "windows");
+}
+
 function hasWhitespace(value: string): boolean {
   return /\s/u.test(value);
 }
@@ -95,6 +103,7 @@ async function createMainWindow(): Promise<void> {
     staticRoot: getStaticRoot(),
     firmwareRoot,
     appDataRoot: getPlatformIoSafeDataRoot(),
+    windowsDriverRoot: getWindowsDriverRoot(),
   });
 
   mainWindow = new BrowserWindow({

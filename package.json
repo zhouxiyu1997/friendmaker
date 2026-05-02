@@ -16,7 +16,6 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run dist:win:x64",
     "dist:win:x64": "npm run build && electron-builder --win --x64",
-    "dist:win:arm64": "npm run build && electron-builder --win --arm64",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -64,6 +63,12 @@
     "win": {
       "icon": "build/icon.ico",
       "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "drivers/windows",
+          "to": "drivers/windows"
+        }
+      ],
       "target": [
         "nsis"
       ]
