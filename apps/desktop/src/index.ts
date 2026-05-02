@@ -8,6 +8,7 @@ import { loadProfile } from "./config/loadProfile.js";
 import { listPorts } from "./serial/listPorts.js";
 import { SerialAckSender } from "./serial/sender.js";
 import { SimulatedAckSender } from "./simulator/sender.js";
+import { formatControllerInputFailureMessage } from "./protocol/timing.js";
 import type { SenderControls } from "./types.js";
 import { ensureParentDirectory } from "./utils/fs.js";
 
@@ -145,6 +146,8 @@ async function main(): Promise<void> {
         `Used colors: ${plan.usedColorIndexes.join(", ")}`,
         `Pixels: ${plan.totalPixels}`,
         `Commands: ${serializedCommands.length}`,
+        `Line runs: ${plan.pathStats.lineRunCount}`,
+        `Max move: ${plan.pathStats.maxMoveSteps}`,
         `Estimated runtime: ${formatDuration(plan.estimatedRuntimeMs)}`,
         cli.preview ? `Preview: ${cli.preview}` : undefined,
         cli.writeCommands ? `Commands file: ${cli.writeCommands}` : undefined,
@@ -204,6 +207,6 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`Error: ${message}`);
+  console.error(`Error: ${formatControllerInputFailureMessage(message)}`);
   process.exitCode = 1;
 });

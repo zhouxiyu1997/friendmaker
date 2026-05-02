@@ -1,8 +1,10 @@
 import type { ControllerButton } from "../types.js";
 
 export type DrawCommand =
+  | { type: "inputConfig"; buttonPressMs: number; inputDelayMs: number; homeMs: number }
   | { type: "home" }
   | { type: "move"; dx: number; dy: number }
+  | { type: "line"; dx: number; dy: number }
   | { type: "draw"; button: ControllerButton }
   | { type: "press"; button: ControllerButton }
   | { type: "color"; index: number }
@@ -18,8 +20,20 @@ export function homeCommand(): DrawCommand {
   return { type: "home" };
 }
 
+export function inputConfigCommand(
+  buttonPressMs: number,
+  inputDelayMs: number,
+  homeMs: number,
+): DrawCommand {
+  return { type: "inputConfig", buttonPressMs, inputDelayMs, homeMs };
+}
+
 export function moveCommand(dx: number, dy: number): DrawCommand {
   return { type: "move", dx, dy };
+}
+
+export function lineCommand(dx: number, dy: number): DrawCommand {
+  return { type: "line", dx, dy };
 }
 
 export function drawCommand(button: ControllerButton): DrawCommand {

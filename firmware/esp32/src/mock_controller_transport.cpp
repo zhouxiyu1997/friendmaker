@@ -4,19 +4,21 @@
 
 void MockControllerTransport::begin() {}
 
-void MockControllerTransport::pressButtons(
+bool MockControllerTransport::pressButtons(
     uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
   (void)buttonsMask;
   delay(holdMs);
   delay(settleMs);
+  return true;
 }
 
-void MockControllerTransport::moveDirection(
+bool MockControllerTransport::moveDirection(
     int x, int y, uint16_t holdMs, uint16_t settleMs) {
   (void)x;
   (void)y;
   delay(holdMs);
   delay(settleMs);
+  return true;
 }
 
 bool MockControllerTransport::resetConnection() { return true; }
