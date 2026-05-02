@@ -91,8 +91,8 @@ const state = {
     environmentId: "esp32dev_wireless",
     result: {
       status: "idle",
-      title: "等待刷入固件",
-      detail: "点击“编译并刷入固件”后，这里会显示成功或失败。",
+      title: "等待写入开发板",
+      detail: "点击“编译并刷入固件”后，这里会显示最近一次结果。",
       environmentLabel: "-",
       portPath: "-",
       updatedAt: null,
@@ -104,8 +104,8 @@ const state = {
     status: {
       tone: "idle",
       pill: "待连接",
-      title: "等待连接手柄",
-      detail: "点击“连接手柄”后，这里会显示当前蓝牙发现、认证、连接和报告发送状态。",
+      title: "等待建立手柄链路",
+      detail: "点击“连接手柄”后，这里会更新蓝牙发现、认证、连接和报告发送状态。",
       transport: "-",
       profile: "-",
       discoverable: "未知",
@@ -402,14 +402,14 @@ els.imageInput.addEventListener("change", async (event) => {
 
   state.imageDataUrl = await readFileAsDataUrl(file);
   els.fileLabel.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
-  appendLog(els.studioLogOutput, `已载入图片：${file.name}`);
+  appendLog(els.studioLogOutput, `素材已载入：${file.name}`);
   syncStudioUi();
   scheduleStudioPreviewRefresh({ immediate: true });
 });
 
 els.quickStartButton.addEventListener("click", async () => {
   const generated = await generateStudioCommands({
-    logPrefix: "开始一键生成并绘制...",
+    logPrefix: "开始生成脚本并准备绘制...",
   });
 
   if (!generated) {
@@ -423,7 +423,7 @@ els.quickStartButton.addEventListener("click", async () => {
 
 els.generateButton.addEventListener("click", async () => {
   await generateStudioCommands({
-    logPrefix: "开始生成预览和命令...",
+    logPrefix: "开始生成预览与命令...",
   });
 });
 
@@ -451,7 +451,7 @@ els.resetExecutionButton.addEventListener("click", async () => {
 
 async function generateStudioCommands({ logPrefix }) {
   if (!state.imageDataUrl) {
-    appendLog(els.studioLogOutput, "请先选择图片。");
+    appendLog(els.studioLogOutput, "请先导入一张图片。");
     return false;
   }
 
@@ -469,7 +469,7 @@ async function generateStudioCommands({ logPrefix }) {
     applyGeneratedStudioPayload(payload);
     appendLog(
       els.studioLogOutput,
-      `生成完成：${payload.stats.commandCount} 条命令，预计耗时 ${payload.stats.estimatedRuntimeLabel}`,
+      `脚本已生成：${payload.stats.commandCount} 条命令，预计 ${payload.stats.estimatedRuntimeLabel}`,
     );
     return true;
   } catch (error) {
@@ -778,7 +778,7 @@ els.studioClearLogButton.addEventListener("click", () => {
 
 els.firmwareFlashButton.addEventListener("click", async () => {
   if (!state.selectedPortPath) {
-    appendLog(els.firmwareLogOutput, "请先选择要刷入的串口设备。");
+    appendLog(els.firmwareLogOutput, "请先选择要写入固件的串口设备。");
     return;
   }
 
@@ -789,16 +789,16 @@ els.firmwareFlashButton.addEventListener("click", async () => {
   setFirmwareBusy(true);
   setFirmwareResult({
     status: "running",
-    title: "正在刷入固件",
-    detail: "PlatformIO 正在编译并上传固件，请稍等片刻。",
+    title: "正在写入开发板",
+    detail: "PlatformIO 正在编译并上传固件，请保持设备连接。",
     environmentLabel: environment?.label ?? state.firmware.environmentId,
     portPath: state.selectedPortPath,
   });
   appendLog(
     els.firmwareLogOutput,
-    `开始刷入固件：${state.firmware.environmentId} -> ${state.selectedPortPath}`,
+    `开始写入固件：${state.firmware.environmentId} -> ${state.selectedPortPath}`,
   );
-  appendLog(els.firmwareLogOutput, "刷入前会自动释放串口会话，避免端口占用。");
+  appendLog(els.firmwareLogOutput, "写入前会自动释放串口会话，避免端口占用。");
 
   try {
     const response = await fetch("/api/firmware/flash", {
@@ -813,29 +813,29 @@ els.firmwareFlashButton.addEventListener("click", async () => {
 
     if (!response.ok) {
       applySerialSessionSnapshot(payload.session);
-      throw new Error(payload.error ?? "刷入固件失败");
+      throw new Error(payload.error ?? "固件写入失败");
     }
 
     setFirmwareResult({
       status: "success",
-      title: "固件刷入成功",
-      detail: "设备已经写入完成，可以继续去手柄测试页读取设备信息。",
+      title: "固件已写入",
+      detail: "开发板已经更新完成，可以前往手柄测试页读取设备信息。",
       environmentLabel: payload.environment.label,
       portPath: state.selectedPortPath,
     });
     applySerialSessionSnapshot(payload.session);
-    appendLog(els.firmwareLogOutput, "刷入前已释放串口会话。");
-    appendLog(els.firmwareLogOutput, `刷入完成：${payload.environment.label}`);
+    appendLog(els.firmwareLogOutput, "写入前已释放串口会话。");
+    appendLog(els.firmwareLogOutput, `固件写入完成：${payload.environment.label}`);
     appendLog(els.firmwareLogOutput, payload.output.trim());
   } catch (error) {
     setFirmwareResult({
       status: "error",
-      title: "固件刷入失败",
+      title: "固件写入失败",
       detail: summarizeFirmwareError(getErrorMessage(error)),
       environmentLabel: environment?.label ?? state.firmware.environmentId,
       portPath: state.selectedPortPath,
     });
-    appendLog(els.firmwareLogOutput, `刷入失败：${getErrorMessage(error)}`);
+    appendLog(els.firmwareLogOutput, `固件写入失败：${getErrorMessage(error)}`);
   } finally {
     setFirmwareBusy(false);
   }
@@ -1500,8 +1500,8 @@ function updateControllerStatusFromLines(lines) {
 
   let tone = "idle";
   let pill = "待连接";
-  let title = "等待连接手柄";
-  let detail = "当前还没有拿到可用的蓝牙连接状态。";
+  let title = "等待建立手柄链路";
+  let detail = "当前还没有拿到可用于绘制的蓝牙状态。";
 
   if (initError !== "-" && initError !== "ESP_OK") {
     tone = "error";
@@ -1511,10 +1511,10 @@ function updateControllerStatusFromLines(lines) {
   } else if (ready === true) {
     tone = "success";
     pill = "已就绪";
-    title = "手柄已连接";
+    title = "手柄链路已就绪";
     detail = readyInferredFromPairing
-      ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
-      : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+      ? "开发板已经完成 HID 连接和配对；报告通道字段可能滞后，但当前可以发送按钮和摇杆报告。"
+      : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续测试或开始绘制。";
   } else if (connected === true) {
     tone = "running";
     pill = "已连接";
@@ -1567,22 +1567,22 @@ function renderStudioConnectionStatus() {
 
   let tone = "idle";
   let pill = "可先生成";
-  let title = "可以先生成黑白脚本";
-  let detail = "生成预览和脚本不依赖手柄连接。真正发送到开发板前，再去完成一次手柄测试即可。";
+  let title = "可以先生成预览和脚本";
+  let detail = "生成预览不依赖手柄连接；真正发送到开发板前，需要先完成手柄测试。";
 
   if (ready) {
     tone = "success";
     pill = "已连接";
-    title = "手柄已连接，可以开始绘制";
-    detail = `当前开发板已经处于可发送状态，可以把绘制脚本发到 ${state.selectedPortPath || "串口设备"}。`;
+    title = "手柄已就绪，可以开始绘制";
+    detail = `当前开发板已经处于可发送状态，可以把脚本发到 ${state.selectedPortPath || "串口设备"}。`;
   } else {
     tone = "warning";
     pill = "需要测试";
     title = "需要先进行手柄测试";
     detail =
       connected || auth || discoverable
-        ? "开发板已经开始和 Switch 握手，但还没有到“已就绪”。请先到“手柄测试”页把连接跑通。"
-        : "当前还没有确认开发板已经连上 Switch。开始绘制前，请先到“手柄测试”页完成连接。";
+        ? "开发板已经开始和 Switch 握手，但还没有到“已就绪”。请到“手柄测试”页继续确认。"
+        : "当前还没有确认开发板已连上 Switch。开始绘制前，请先完成手柄测试。";
   }
 
   els.studioConnectionCard.className = `studio-connection-card studio-connection-${tone}`;
@@ -1776,35 +1776,35 @@ function syncStudioUi() {
   }
 
   if (!hasImage) {
-    els.executionHint.textContent = "请先导入一张图片，然后可以直接点“一键开始绘制”。";
+    els.executionHint.textContent = "先导入一张图片；预览生成后再决定是否发送到开发板。";
     renderStudioConnectionStatus();
     return;
   }
 
   if (!state.ports.length) {
     els.executionHint.textContent =
-      "还没有检测到串口设备。请确认使用可传输数据的 USB 线、重新插拔 ESP32；在刷入固件页确认 PlatformIO 就绪后可安装 CP210x 或 CH340/CH341 驱动。";
+      "还没有检测到串口设备。请确认 USB 线支持数据传输并重新插拔 ESP32；Windows 环境可在刷入固件页安装串口驱动。";
     renderStudioConnectionStatus();
     return;
   }
 
   if (!hasPort) {
-    els.executionHint.textContent = "请先选择一个串口设备。";
+    els.executionHint.textContent = "请选择要发送脚本的串口设备。";
     renderStudioConnectionStatus();
     return;
   }
 
   if (!controllerReady) {
     els.executionHint.textContent =
-      "串口设备已经选好，但手柄还没到“已就绪”。请先去“手柄测试”页完成连接。";
+      "串口设备已选好，但手柄还没到“已就绪”。请先去“手柄测试”页完成连接。";
     renderStudioConnectionStatus();
     return;
   }
 
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
-      ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
-      : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`;
+      ? `将发送 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本到 ${state.selectedPortPath}。ESP32 会从画布中心起步，按 ${state.studio.brushSize} 号笔绘制。`
+      : `将发送 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本到 ${state.selectedPortPath}。请保持右侧 9 个槽位默认颜色不变，并使用 ${state.studio.brushSize} 号笔。`;
   renderStudioConnectionStatus();
 }
 
@@ -1829,7 +1829,7 @@ function syncFirmwareUi() {
     els.firmwarePlatformIoHint.textContent =
       installing
         ? "正在准备 PlatformIO，请等待下方日志完成。"
-        : "当前没有检测到 PlatformIO。刷入固件需要先准备 PlatformIO。";
+        : "当前没有检测到 PlatformIO。写入固件前需要先准备 PlatformIO。";
   } else {
     els.firmwarePlatformIoHint.textContent = `PlatformIO 已就绪：${state.firmwareTooling.path}`;
   }
@@ -2301,7 +2301,7 @@ function summarizeFirmwareError(message) {
     .map((line) => line.trim())
     .find(Boolean);
 
-  return summaryLine ?? "刷入失败，请查看下方日志。";
+  return summaryLine ?? "固件写入失败，请查看下方日志。";
 }
 
 function appendLog(element, message) {

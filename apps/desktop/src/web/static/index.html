@@ -12,44 +12,58 @@
       content="Friend Maker, 朋友制作器, Tomodachi Life, 朋友收集梦想生活, Nintendo Switch auto draw, ESP32 Pro Controller emulator, pixel art drawing automation"
     />
     <title>朋友制作器 / Friend Maker | Tomodachi Life 自动绘制工具</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23faf9f7'/%3E%3Cpath d='M14 40c7-15 16-22 28-22 6 0 9 4 9 9 0 11-11 21-25 21-8 0-14-3-12-8z' fill='%23fbbd41'/%3E%3Cpath d='M20 39c5-8 11-12 19-12' fill='none' stroke='%23000000' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='45' cy='20' r='6' fill='%2384e7a5'/%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#studio-main">跳到工作台内容</a>
     <div class="shell">
       <header class="hero">
         <div class="hero-copy">
           <div class="hero-topline">
-            <span class="hero-tag">Switch 版《朋友收集：梦想生活》 / Tomodachi Life</span>
+            <span class="hero-tag">Friend Maker Studio</span>
+            <span class="hero-tag hero-tag-muted">Switch 自动绘制控制台</span>
           </div>
           <h1 class="hero-brand">朋友制作器 / Friend Maker</h1>
           <p class="hero-body">
-            自动绘画的基本原理，是通过数据线连接电脑与 ESP32 开发板，先刷入固定固件，再由电脑发送绘图指令，开发板按规律模拟
-            Switch 手柄输入完成自动绘画。
+            把导图、像素预览、ESP32 固件刷写、手柄连接测试和脚本执行放进同一张桌面工作台。
           </p>
           <p class="subcopy">
-            推荐顺序是先刷固件，再做手柄测试，最后回到“脚本生成”页导入图片并先点“仅生成命令”。手柄测试未通过时，不允许开始正式绘制。开始前请确认
-            Switch 处于初始绘画页面、画笔停在画布中心、侧边色彩槽保持默认；彩色模式请使用“官方色绘制”，自定义调色板暂未开放。建议首次先用简单图和大画笔测试，开始绘制后不要再操作手柄或触碰屏幕，以免错位。
+            推荐顺序：先刷固件，再确认手柄可发送，最后回到脚本生成。正式绘制前，让 Switch 停在初始绘画页、画笔位于画布中心，并保持侧边色彩槽默认。
           </p>
         </div>
         <div class="hero-side">
-          <div class="hero-badge">
-            <span>Current Mode</span>
-            <strong>Studio + Flash + Test</strong>
+          <div class="hero-art-card" aria-hidden="true">
+            <div class="hero-badge">
+              <span>Workflow</span>
+              <strong>Studio / Flash / Test</strong>
+            </div>
+            <div class="pixel-board">
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <div class="color-rail">
+              <i></i><i></i><i></i><i></i><i></i>
+            </div>
           </div>
           <section class="workflow-card" aria-label="推荐流程">
             <span class="workflow-label">推荐流程</span>
             <ol class="workflow-list">
               <li>
                 <strong>先刷固件</strong>
-                <span>先到“刷入固件”更新 ESP32，确保后面的蓝牙连接和按键测试基于最新版本进行。</span>
+                <span>更新 ESP32，确保蓝牙连接和按键测试基于最新版本。</span>
               </li>
               <li>
                 <strong>再测连接</strong>
-                <span>进入“手柄测试”确认开发板已经能被 Switch 正常识别、连接，并进入可发送状态。</span>
+                <span>确认开发板已被 Switch 识别，并进入可发送状态。</span>
               </li>
               <li>
                 <strong>最后导图</strong>
-                <span>确认连接没问题后，再回到“脚本生成”输入图片、调整参数并开始正式绘制。</span>
+                <span>导入图片、检查预览，再开始正式绘制。</span>
               </li>
             </ol>
           </section>
@@ -58,17 +72,17 @@
 
       <div class="page-nav-wrap">
         <nav class="page-nav" aria-label="功能导航">
-          <button class="page-tab active" data-page-target="studio" type="button">
+          <button class="page-tab active" data-page-target="studio" type="button" aria-pressed="true">
             <span class="page-tab-title">脚本生成</span>
-            <small class="page-tab-meta">导图、预览、执行</small>
+            <small class="page-tab-meta">导图 / 预览 / 执行</small>
           </button>
-          <button class="page-tab" data-page-target="firmware" type="button">
+          <button class="page-tab" data-page-target="firmware" type="button" aria-pressed="false">
             <span class="page-tab-title">刷入固件</span>
-            <small class="page-tab-meta">编译、烧录、排错</small>
+            <small class="page-tab-meta">编译 / 烧录 / 排错</small>
           </button>
-          <button class="page-tab" data-page-target="controller" type="button">
+          <button class="page-tab" data-page-target="controller" type="button" aria-pressed="false">
             <span class="page-tab-title">手柄测试</span>
-            <small class="page-tab-meta">连接、状态、单步动作</small>
+            <small class="page-tab-meta">连接 / 状态 / 单步动作</small>
           </button>
         </nav>
       </div>
@@ -91,8 +105,8 @@
         <section class="page-intro">
           <div class="page-intro-copy">
             <p class="page-kicker">脚本生成</p>
-            <h2>把图片处理、像素预览和执行放在同一条视线里</h2>
-            <p>这里适合连续完成“导入图片、调整参数、确认预览、开始绘制”这一整段流程。</p>
+            <h2>先看清像素，再把脚本交给开发板</h2>
+            <p>导入图片后，调整缩放、位置、笔刷和色彩模式，再确认预览与耗时。</p>
           </div>
           <div class="page-step-row" aria-label="脚本生成步骤">
             <span class="page-step">1. 导入图片</span>
@@ -100,17 +114,17 @@
             <span class="page-step">3. 检查预览后开始绘制</span>
           </div>
         </section>
-        <main class="grid">
+        <main id="studio-main" class="grid">
           <section class="panel panel-form">
             <div class="panel-head">
-              <h2>输入</h2>
-              <p>导入图片，设定单色或官方色绘制参数，然后发送到 ESP32 开始绘制。</p>
+              <h2>输入与执行</h2>
+              <p>导入素材，设置绘制参数，并在手柄状态就绪后把脚本发送到 ESP32。</p>
             </div>
 
             <label class="file-drop" for="image-input">
               <input id="image-input" type="file" accept="image/png,image/jpeg,image/svg+xml" />
               <span class="file-title">导入图片</span>
-              <span class="file-meta" id="file-label">支持 PNG / JPG / SVG</span>
+              <span class="file-meta" id="file-label">支持 PNG / JPG / SVG，可直接拖入素材</span>
             </label>
 
             <div id="studio-connection-card" class="studio-connection-card studio-connection-warning">
@@ -127,7 +141,7 @@
             <div class="execution-box mono-note-box">
               <div class="panel-head compact">
                 <h2>绘制模式</h2>
-                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；画笔大小按下方选择生成。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
+                <p>固定使用 256x256 脚本坐标画布，从画布中心起步。单色模式生成黑白脚本；官方色模式会量化到游戏内置 7x12 色盘。</p>
               </div>
 
               <p class="hint" id="studio-mode-hint">
@@ -239,7 +253,7 @@
             <div class="execution-box">
               <div class="panel-head compact">
                 <h2>执行</h2>
-                <p>手柄连接完成后，这里会直接把脚本发送到 ESP32 串口设备。开始前建议把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。</p>
+                <p>手柄连接完成后，脚本会直接发往 ESP32 串口设备。开始前建议把 Switch 笔刷切到方块笔刷。</p>
               </div>
 
               <div class="field-grid execution-grid">
@@ -255,8 +269,8 @@
                 <button id="refresh-ports-button" class="ghost" type="button">刷新串口</button>
               </div>
 
-              <p class="hint" id="execution-hint">请选择串口设备，连接手柄后即可直接开始绘制。</p>
-              <p class="hint">安全时序模式会默认启用；请先刷入最新固件。执行前也请再确认一次：Switch 里的画笔大小和网页一致，并且当前已切到方块笔刷。</p>
+              <p class="hint" id="execution-hint">请选择串口设备，手柄就绪后即可开始绘制。</p>
+              <p class="hint">安全时序模式默认启用。执行前确认 Switch 里的画笔大小与网页一致，并切到方块笔刷。</p>
             </div>
 
             <div class="action-row">
@@ -278,7 +292,7 @@
           <section class="panel panel-preview">
             <div class="panel-head">
               <h2>预览</h2>
-              <p>这里显示像素化结果和关键统计信息。</p>
+              <p>像素化结果、画布落点和命令规模会集中显示在这里。</p>
             </div>
 
             <div class="preview-tools">
@@ -286,7 +300,7 @@
                 <input id="auto-remove-background-checkbox" type="checkbox" />
                 <span class="checkbox-copy">
                   <strong>自动扣背景</strong>
-                  <small>适合白底、浅灰底、棋盘格假透明图。真正带透明通道的 PNG 不需要开启。</small>
+                  <small>适合白底、浅灰底、棋盘格假透明图。透明 PNG 通常不需要开启。</small>
                 </span>
               </label>
 
@@ -362,7 +376,7 @@
           <section class="panel panel-script">
             <div class="panel-head">
               <h2>脚本</h2>
-              <p>这是当前协议下可直接发送给设备的动作脚本。官方色绘制会额外插入内置色盘配置命令。</p>
+              <p>当前协议下可直接发送给设备的动作脚本。官方色绘制会额外插入色盘配置命令。</p>
             </div>
 
             <textarea id="commands-output" class="code-block" spellcheck="false" placeholder="生成后会在这里显示命令脚本"></textarea>
@@ -392,8 +406,8 @@
         <section class="page-intro">
           <div class="page-intro-copy">
             <p class="page-kicker">刷入固件</p>
-            <h2>把环境选择、烧录结果和日志排查拆得更清楚</h2>
-            <p>这页只负责 ESP32 固件编译和刷写，适合在设备需要更新时单独完成，不打断主绘制流程。</p>
+            <h2>先让开发板进入正确的绘制语言</h2>
+            <p>这页只负责 ESP32 固件编译和刷写，方便在设备需要更新时单独处理。</p>
           </div>
           <div class="page-step-row" aria-label="刷入固件步骤">
             <span class="page-step">1. 选择目标环境</span>
@@ -405,7 +419,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>刷入固件</h2>
-              <p>这里会调用本机的 PlatformIO，直接把固件编译并刷入 ESP32。</p>
+              <p>调用本机 PlatformIO，编译并上传当前固件到 ESP32。</p>
             </div>
 
             <div class="field-grid">
@@ -455,9 +469,9 @@
 
             <div id="firmware-status-card" class="firmware-status-card firmware-status-idle">
               <span id="firmware-status-pill" class="status-pill">待执行</span>
-              <strong id="firmware-status-title" class="status-title">等待刷入固件</strong>
+              <strong id="firmware-status-title" class="status-title">等待写入开发板</strong>
               <p id="firmware-status-detail" class="status-detail">
-                点击“编译并刷入固件”后，这里会显示成功或失败。
+                点击“编译并刷入固件”后，这里会显示最近一次结果。
               </p>
             </div>
 
@@ -491,7 +505,7 @@
               <button id="firmware-clear-log-button" class="ghost" type="button">清空日志</button>
             </div>
 
-            <pre id="firmware-log-output" class="log-output" data-empty-log="等待刷入固件...">等待刷入固件...</pre>
+            <pre id="firmware-log-output" class="log-output" data-empty-log="等待写入固件...">等待写入固件...</pre>
           </section>
         </main>
       </section>
@@ -500,8 +514,8 @@
         <section class="page-intro">
           <div class="page-intro-copy">
             <p class="page-kicker">手柄测试</p>
-            <h2>先确认连接状态，再做单步动作验证</h2>
-            <p>这里把连接、可发现、认证、配对和动作测试拆开显示，方便先排链路问题，再排按键动作。</p>
+            <h2>先确认链路，再验证按钮和摇杆</h2>
+            <p>连接、可发现、认证、配对和动作测试分开显示，便于定位问题。</p>
           </div>
           <div class="page-step-row" aria-label="手柄测试步骤">
             <span class="page-step">1. 刷新并连接手柄</span>
@@ -605,9 +619,9 @@
 
             <div id="controller-status-card" class="firmware-status-card firmware-status-idle controller-status-card">
               <span id="controller-status-pill" class="status-pill">待连接</span>
-              <strong id="controller-status-title" class="status-title">等待连接手柄</strong>
+              <strong id="controller-status-title" class="status-title">等待建立手柄链路</strong>
               <p id="controller-status-detail" class="status-detail">
-                点击“连接手柄”后，这里会显示当前蓝牙发现、认证、连接和报告发送状态。
+                点击“连接手柄”后，这里会更新蓝牙发现、认证、连接和报告发送状态。
               </p>
 
               <div class="controller-health-grid">
