@@ -26,20 +26,18 @@
 
 关键词：`Friend Maker`、`朋友制作器`、`Tomodachi Life`、`朋友收集：梦想生活`、`Nintendo Switch auto draw`、`ESP32 Pro Controller emulator`、`pixel art drawing automation`、`Bluetooth Classic HID`。
 
-### 提醒
-
-这个项目仍在持续完善中，当前版本在部分图片或设备环境下可能出现 `颜色偏差`，复杂图片偶尔可能出现 `色块偏移`，建议优先从 `简单图片` 开始尝试。
-
 ### 平台支持
 
-- 完整支持：`macOS`
-- 支持一键安装与手动启动：`Windows`
+- 支持桌面端一键安装启动：`macOS`
+- 支持桌面端一键安装启动：`Windows x64`
+- 暂不支持：`Windows ARM64`
 - 暂未正式支持：`Linux`
 
 当前版本已经提供：
 
-- `macOS` 的完整试用流程与一键启动
-- `Windows` 的一键安装脚本与手动启动流程
+- `macOS / Windows x64` 的桌面端安装包，安装后可直接启动
+- `macOS` 的 `Start Friend Maker.command` 一键启动脚本，作为仓库版备用方式
+- `Windows` 的 `Install Friend Maker.cmd` 一键安装脚本与手动启动流程，作为仓库版备用方式
 
 参考文档：
 
@@ -58,7 +56,7 @@
 - 支持 `256x256` 脚本坐标画布工作流
 - 支持 `自动扣背景`，适合白底、浅灰底、棋盘格假透明图
 - 通过带 `SEQ <session> <seq>` 去重帧的串口协议将绘制脚本逐条发送给 ESP32，并等待 `ACK`
-- 在网页中完成脚本生成、固件刷写、手柄连接与按钮测试，以及暂停、继续和中断绘制
+- 在界面中完成脚本生成、固件刷写、手柄连接与按钮测试，以及暂停、继续和中断绘制
 
 ### 整体架构
 
@@ -112,11 +110,28 @@
 
 #### 软件
 
-- `Node.js 20+`
-- `npm 10+`
-- `PlatformIO Core 6+`
+- 如果你使用 `桌面端安装包`，不需要预先手动安装 `Node.js`、`npm` 或 `PlatformIO`，但首次准备 `PlatformIO` 需要联网
+- 如果你使用 `仓库版备用流程`，建议准备 `Node.js 20+`、`npm 10+`、`PlatformIO Core 6+`
 
 ### 快速开始
+
+#### 桌面端一键安装启动（推荐）
+
+当前推荐优先使用桌面端安装包：
+
+- `macOS`：安装 `.dmg` 后直接启动 `Friend Maker`
+- `Windows x64`：运行安装包 `.exe` 后直接启动 `Friend Maker`
+
+首次使用请注意：
+
+- 如果 `刷入固件` 页提示没有 `PlatformIO`，点击 `准备 PlatformIO`
+- 这一步需要联网；如果应用提示缺少 `Python`，允许下载仅供 `Friend Maker` 使用的本地 Python 运行环境即可
+- 初次刷入固件可能需要 `5 分钟左右`，请耐心等待
+- 不要安装在中文目录下
+- 如果你是 `Windows` 用户，且串口设备列表为空、检查不到 `ESP32`，在 `PlatformIO` 就绪后先尝试 `安装 CP210x 驱动（优先）`，仍无效果再尝试 `安装 CH340/CH341 驱动（备选）`
+- `Windows ARM64` 当前不在支持范围内；这类设备市场占有率约 `1%`，我们手头也没有设备可测，欢迎有能力的朋友提交 PR 补充支持
+
+#### 仓库版备用流程
 
 路径说明：
 
@@ -127,7 +142,7 @@
 - macOS 路径：`~/.platformio/penv/bin/pio`
 - Windows 路径：`%USERPROFILE%\\.platformio\\penv\\Scripts\\pio.exe`
 
-#### macOS 一键启动
+#### macOS 仓库版一键启动（备用）
 
 你现在可以通过下面两种方式启动应用：
 
@@ -153,7 +168,7 @@ cd /path/to/friendmaker
 - 第一次安装软件时，终端可能会请求输入系统密码
 - 使用过程中请保持终端窗口开启
 
-#### Windows 一键安装
+#### Windows 仓库版一键安装（备用）
 
 你现在可以通过下面两种方式完成安装：
 
@@ -306,11 +321,8 @@ docs/media/          README 展示图片与视频
 
 ### 当前限制
 
-- 当前 UI 是轻量 Web 原型，不是 Electron 桌面应用
 - Switch 连接和绘图流程仍然依赖固定场景假设
-- 官方 `7x12` 色盘仍在持续校准中
 - 自定义颜色自动调色还不稳定，当前更推荐 `官方色绘制`
-- 实验性的 `多色绘制` 已从前端试用版中隐藏，避免对试用者造成误导
 - 第一优先级仍然是输入稳定性，而不是绘制速度
 
 ### 当前状态
@@ -349,20 +361,18 @@ It converts images into pixel grids and controller action scripts, then uses an 
 
 Keywords: `Friend Maker`, `Tomodachi Life`, `Nintendo Switch auto draw`, `ESP32 Pro Controller emulator`, `pixel art drawing automation`, `Bluetooth Classic HID`.
 
-### Note
-
-This project is still being improved; the current version may show `color deviation` on some images or device setups, and complex drawings may occasionally produce `misaligned color blocks`, so starting with `simple images` is recommended.
-
 ### Compatibility
 
-- Fully supported: `macOS`
-- One-click install and manual launch supported: `Windows`
+- Desktop app one-click install and launch supported: `macOS`
+- Desktop app one-click install and launch supported: `Windows x64`
+- Not supported yet: `Windows ARM64`
 - Not officially supported yet: `Linux`
 
 The current version already provides:
 
-- a complete trial workflow and one-click launcher for `macOS`
-- a one-click installer and manual startup instructions for `Windows`
+- desktop installers for `macOS / Windows x64`, with direct app launch after install
+- the `Start Friend Maker.command` launcher for the repo-based macOS fallback flow
+- the `Install Friend Maker.cmd` installer and manual startup flow for the repo-based Windows fallback path
 
 Reference documents:
 
@@ -381,7 +391,7 @@ Reference documents:
 - Use a `256x256` script-coordinate canvas workflow
 - Support `automatic background removal` for white, light gray, and fake transparency checkerboard backgrounds
 - Send drawing commands to the ESP32 over a `SEQ <session> <seq>` deduplicating serial protocol and wait for `ACK`
-- Handle script generation, firmware flashing, controller connection and button testing, plus pause, resume, and stop actions from the web interface
+- Handle script generation, firmware flashing, controller connection and button testing, plus pause, resume, and stop actions from the shared app interface
 
 ### Architecture
 
@@ -435,11 +445,28 @@ The practical actions are:
 
 #### Software
 
-- `Node.js 20+`
-- `npm 10+`
-- `PlatformIO Core 6+`
+- If you use the packaged desktop app, you do not need to preinstall `Node.js`, `npm`, or `PlatformIO`, but the first `PlatformIO` setup requires network access
+- If you use the repo-based fallback flow, prepare `Node.js 20+`, `npm 10+`, and `PlatformIO Core 6+`
 
 ### Quick Start
+
+#### Desktop app one-click install and launch (recommended)
+
+The preferred path is now the packaged desktop app:
+
+- `macOS`: install the `.dmg`, then launch `Friend Maker`
+- `Windows x64`: run the installer `.exe`, then launch `Friend Maker`
+
+First-use notes:
+
+- if the `Firmware Flash` page says `PlatformIO` is missing, click `Prepare PlatformIO`
+- this step needs network access; if the app says `Python` is missing, allow it to download an app-local Python runtime for Friend Maker
+- the first firmware flash may take around `5 minutes`, so please wait patiently
+- do not install under a non-English path
+- if you are on `Windows` and no serial port appears for the `ESP32`, prepare `PlatformIO` first, then try `Install CP210x Driver` before `Install CH340/CH341 Driver`
+- `Windows ARM64` is not in the current support scope; its market share is only about `1%`, we do not have hardware to validate it, and PRs are welcome if you want to add support
+
+#### Repo-based fallback flow
 
 Path notes:
 
@@ -450,7 +477,7 @@ Path notes:
 - macOS path: `~/.platformio/penv/bin/pio`
 - Windows path: `%USERPROFILE%\\.platformio\\penv\\Scripts\\pio.exe`
 
-#### One-click launch on macOS
+#### Repo-based one-click launch on macOS
 
 You can now start the app in either of these ways:
 
@@ -476,7 +503,7 @@ Notes:
 - the Terminal may ask for your password during first-time software installation
 - keep the Terminal window open while using the app
 
-#### One-click install on Windows
+#### Repo-based one-click install on Windows
 
 You can now install the project in either of these ways:
 
@@ -626,12 +653,9 @@ docs/media/          README images and videos
 
 ### Current Limitations
 
-- The current UI is a lightweight web prototype, not an Electron desktop app
 - The Switch connection and drawing workflow still depend on fixed scenario assumptions
-- The official `7x12` palette is still being calibrated
 - Automatic custom-color tuning is not stable yet, so `official palette drawing` is currently recommended
-- Experimental `multi-color drawing` has been hidden from the frontend trial build to avoid misleading trial users
-- The highest priority is still **input stability**, not drawing speed
+- The highest priority is still input stability, not drawing speed
 
 ### Development Status
 

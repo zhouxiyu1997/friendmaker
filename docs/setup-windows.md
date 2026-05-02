@@ -1,33 +1,56 @@
 # Setup on Windows
 
-This guide covers the current Windows x64 setup flow, including the new **one-click installer** and the manual fallback steps.
+This guide covers the current Windows x64 setup flow, including the packaged desktop app, the repo-based fallback installer, and the manual fallback steps.
 
 ## What works today
 
-- install dependencies
-- run the one-click installer
+- install and launch the packaged desktop app
+- run the repo-based one-click installer
 - flash ESP32 firmware with PlatformIO
+- prepare PlatformIO from inside the app when it is missing
+- install Windows serial drivers from inside the app
 - start the local web UI
 - select a `COM` serial port and draw
-
-## What is not included yet
-
-- no one-click Windows launcher yet
 
 ## Requirements
 
 - Windows 10 or Windows 11 on x64
+- `ESP32-WROOM-32 / ESP-32S`
+- a USB cable that supports data transfer
+- network access for first-time in-app `PlatformIO` setup
+
+If you use the repo-based fallback flow, also prepare:
+
 - `Node.js 20+`
 - `npm 10+`
 - `Python 3.10+`
 - `PlatformIO Core 6+`
-- `ESP32-WROOM-32 / ESP-32S`
 
-Windows ARM64 is not a supported release target.
+Notes:
 
-## One-click install
+- do not install under a Chinese path
+- Windows ARM64 is not a supported release target; it is roughly `1%` of the market, we do not have hardware to validate driver behavior there, and PRs are welcome if you want to add support
 
-You can now install the project by:
+## Preferred path: packaged desktop app
+
+The recommended way to use Friend Maker on Windows is now the packaged `Windows x64` desktop installer.
+
+After installation:
+
+- launch `Friend Maker` from the desktop shortcut or Start menu
+- open the `Firmware Flash` page
+- if the app says `PlatformIO` is missing, click `准备 PlatformIO`
+
+Important first-use notes:
+
+- the `PlatformIO` preparation step needs network access
+- if the app also says `Python` is missing, allow it to download an app-local Python runtime
+- the first firmware flash can take around `5 minutes`, so please wait patiently
+- if no `COM` port appears after `PlatformIO` is ready, use the in-app driver helper described below
+
+## Repo-based one-click install
+
+If you prefer to run from the repository checkout, you can still install the project by:
 
 - double-clicking `Install Friend Maker.cmd`
 - or running it from `CMD` / `PowerShell`
@@ -53,7 +76,7 @@ Notes:
 - the script only installs dependencies and validates the project
 - you still start the UI manually with `npm run ui:dev`
 
-## Install PlatformIO
+## Install PlatformIO manually
 
 Open **PowerShell** and run:
 
@@ -69,7 +92,7 @@ If not, use the full path form:
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe
 ```
 
-## Install project dependencies
+## Install project dependencies manually
 
 If you do not use the one-click installer, run:
 
@@ -93,6 +116,8 @@ After PlatformIO is ready, if Friend Maker still shows no serial devices, use th
 3. Unplug and reconnect the ESP32.
 4. Click **刷新串口**.
 5. If there is still no `COM` port, click **安装 CH340/CH341 驱动（备选）**, click **INSTALL** in the WCH installer, and repeat the unplug/reconnect step.
+
+This in-app driver helper is supported on `Windows x64` only.
 
 Manual CP210x install:
 
@@ -136,7 +161,9 @@ If `pio` is already in `PATH`, you can also run:
 pio run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 
-## Start the web UI
+The first firmware flash can take around `5 minutes`, especially if PlatformIO still needs to download toolchains.
+
+## Start the repo-based web UI
 
 ```powershell
 cd C:\path\to\friendmaker
