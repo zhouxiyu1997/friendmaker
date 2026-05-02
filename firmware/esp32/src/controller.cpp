@@ -266,11 +266,13 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
 
   const int slotIndex = clampPaletteSlotIndex(index);
   const HsvColor hsv = rgbToHsv(red, green, blue);
+  const float hueRatio = hsv.hue <= 0.0f ? 0.0f : ((360.0f - hsv.hue) / 360.0f);
   const uint8_t hueSteps =
-      static_cast<uint8_t>(roundf((hsv.hue / 360.0f) * COLOR_PALETTE_EDITOR_HUE_STEP_COUNT));
+      static_cast<uint8_t>(roundf(hueRatio * COLOR_PALETTE_EDITOR_HUE_STEP_COUNT));
   const uint8_t saturationSteps =
       scaleChannelToSteps(hsv.saturation, COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT);
-  const uint8_t valueSteps = scaleChannelToSteps(hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
+  const uint8_t valueDropSteps =
+      scaleChannelToSteps(1.0f - hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
 
   // Palette selection page.
   if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
@@ -332,9 +334,9 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
     }
   }
 
-  if (valueSteps > 0) {
+  if (valueDropSteps > 0) {
     if (!transport_.moveDirection(
-            0, -1, static_cast<uint16_t>(valueSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+            0, 1, static_cast<uint16_t>(valueDropSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
       return false;
     }
   }
