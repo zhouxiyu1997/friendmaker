@@ -1,4 +1,4 @@
-import type { DrawingProfile, Pixel, PixelMap } from "../types.js";
+import type { DrawingProfile, PathCommandStats, Pixel, PixelMap } from "../types.js";
 import { officialPaletteCellFromIndex } from "../config/officialPalette.js";
 import {
   basicPaletteConfigCommand,
@@ -14,7 +14,7 @@ import {
 } from "../protocol/commands.js";
 
 const PALETTE_SLOT_COUNT = 9;
-const DEFAULT_SMALL_BRUSH_REANCHOR_DRAWS = 500;
+const DEFAULT_SMALL_BRUSH_REANCHOR_DRAWS = 0;
 const SMALL_BRUSH_BUTTON_PRESS_MS = 90;
 const SMALL_BRUSH_INPUT_DELAY_MS = 90;
 const SMALL_BRUSH_HOME_MS = 1800;
@@ -195,6 +195,25 @@ function getOrderedPixelsForColor(
   current: { x: number; y: number },
   profile: DrawingProfile,
 ): Pixel[] {
+  if (profile.brushSize === 1) {
+    const scanlinePixels = getLegacyScanlinePixels(pixelMap, colorIndex);
+    const forwardStart = scanlinePixels[0];
+    const reverseStart = scanlinePixels[scanlinePixels.length - 1];
+
+    if (!forwardStart || !reverseStart) {
+      return scanlinePixels;
+    }
+
+    const forwardPosition = toCanvasPosition(forwardStart, profile);
+    const reversePosition = toCanvasPosition(reverseStart, profile);
+    const forwardDistance =
+      Math.abs(forwardPosition.x - current.x) + Math.abs(forwardPosition.y - current.y);
+    const reverseDistance =
+      Math.abs(reversePosition.x - current.x) + Math.abs(reversePosition.y - current.y);
+
+    return forwardDistance <= reverseDistance ? scanlinePixels : [...scanlinePixels].reverse();
+  }
+
   const components = collectConnectedComponents(pixelMap, colorIndex);
   const legacyPixels = rotatePixelsToNearestStart(
     getLegacyScanlinePixels(pixelMap, colorIndex),
@@ -401,7 +420,10 @@ export function generateScanlineCommands(
   let drawCount = 0;
   const reanchorEveryDraws = resolveReanchorEveryDraws(profile);
 
-  if (shouldStartFromCanvasCenter(profile)) {
+  if (shouldStartFromCanvasCenter(profile) && profile.brushSize === 1) {
+    commands.push(homeCommand());
+    current = { x: 0, y: 0 };
+  } else if (shouldStartFromCanvasCenter(profile)) {
     // The in-game canvas opens with the cursor centered, so the fixed canvas
     // workflow can start directly from the middle instead of re-homing first.
     current = {
@@ -504,6 +526,52 @@ export function generateScanlineCommands(
 
   commands.push(endCommand());
   return commands;
+}
+
+export function getPathCommandStats(commands: DrawCommand[]): PathCommandStats {
+  return commands.reduce<PathCommandStats>(
+    (stats, command, index) => {
+      if (command.type === "home" && commands[index - 1]?.type === "draw") {
+        stats.reanchorCount += 1;
+        return stats;
+      }
+
+      if (command.type !== "move") {
+        return stats;
+      }
+
+      const steps = Math.abs(command.dx) + Math.abs(command.dy);
+
+      if (steps > stats.maxMoveSteps) {
+        stats.maxMoveSteps = steps;
+        stats.maxMoveDx = command.dx;
+        stats.maxMoveDy = command.dy;
+      }
+
+      if (steps > 50) {
+        stats.movesOver50 += 1;
+      }
+
+      if (steps > 100) {
+        stats.movesOver100 += 1;
+      }
+
+      if (steps > 200) {
+        stats.movesOver200 += 1;
+      }
+
+      return stats;
+    },
+    {
+      maxMoveDx: 0,
+      maxMoveDy: 0,
+      maxMoveSteps: 0,
+      movesOver50: 0,
+      movesOver100: 0,
+      movesOver200: 0,
+      reanchorCount: 0,
+    },
+  );
 }
 
 export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfile): number {

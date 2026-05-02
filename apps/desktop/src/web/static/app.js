@@ -76,6 +76,9 @@ const state = {
       baudRate: 115200,
       ackTimeoutMs: 5000,
       commandRetryCount: 1,
+      buttonPressMs: 60,
+      inputDelayMs: 40,
+      homeMs: 1500,
     },
     execution: {
       id: null,
@@ -475,6 +478,18 @@ async function generateStudioCommands({ logPrefix }) {
       els.studioLogOutput,
       `生成完成：${payload.stats.commandCount} 条命令，预计耗时 ${payload.stats.estimatedRuntimeLabel}`,
     );
+    if (payload.stats.path) {
+      appendLog(
+        els.studioLogOutput,
+        [
+          `路径统计：最大移动 ${payload.stats.path.maxMoveSteps} 步`,
+          `>50=${payload.stats.path.movesOver50}`,
+          `>100=${payload.stats.path.movesOver100}`,
+          `>200=${payload.stats.path.movesOver200}`,
+          `回锚=${payload.stats.path.reanchorCount}`,
+        ].join("，"),
+      );
+    }
     return true;
   } catch (error) {
     appendLog(els.studioLogOutput, `生成失败：${getErrorMessage(error)}`);
@@ -530,6 +545,9 @@ function applyGeneratedStudioPayload(payload) {
     baudRate: payload.profile.baudRate ?? 115200,
     ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
     commandRetryCount: payload.profile.commandRetryCount ?? 1,
+    buttonPressMs: payload.profile.buttonPressDuration ?? 60,
+    inputDelayMs: payload.profile.inputDelay ?? 40,
+    homeMs: payload.profile.homeDuration ?? 1500,
   };
   state.studio.brushSize = payload.profile.brushSize ?? state.studio.brushSize;
   state.studio.imageScalePercent =
@@ -727,6 +745,9 @@ async function executeStudioCommands({ logPrefix }) {
         baudRate: state.studio.profile.baudRate,
         ackTimeoutMs: state.studio.profile.ackTimeoutMs,
         retries: state.studio.profile.commandRetryCount,
+        buttonPressMs: state.studio.profile.buttonPressMs,
+        inputDelayMs: state.studio.profile.inputDelayMs,
+        homeMs: state.studio.profile.homeMs,
       }),
     });
     const payload = await response.json();
@@ -1923,6 +1944,9 @@ async function runExecution({
         baudRate,
         ackTimeoutMs,
         retries,
+        buttonPressMs: state.studio.profile.buttonPressMs,
+        inputDelayMs: state.studio.profile.inputDelayMs,
+        homeMs: state.studio.profile.homeMs,
         ackDelayMs: 0,
       }),
     });

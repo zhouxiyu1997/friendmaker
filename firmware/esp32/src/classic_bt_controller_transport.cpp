@@ -576,12 +576,12 @@ bool ClassicBtControllerTransport::pressButtons(
   setButtonBits(buttonsMask);
   updateInputReport();
   const bool pressOk = sendCurrentInputReport(true, true);
-  delay(holdMs);
+  const bool holdOk = pressOk && repeatCurrentInputReportFor(holdMs);
   clearInputs();
   const bool releaseOk = sendCurrentInputReport(true, true);
-  delay(settleMs);
+  const bool settleOk = releaseOk && repeatCurrentInputReportFor(settleMs);
   explicitInputReportActive_ = false;
-  return pressOk && releaseOk;
+  return pressOk && holdOk && releaseOk && settleOk;
 }
 
 bool ClassicBtControllerTransport::moveDirection(
@@ -593,12 +593,12 @@ bool ClassicBtControllerTransport::moveDirection(
   setLeftStickFromVector(x, y);
   updateInputReport();
   const bool moveOk = sendCurrentInputReport(true, true);
-  delay(holdMs);
+  const bool holdOk = moveOk && repeatCurrentInputReportFor(holdMs);
   clearInputs();
   const bool releaseOk = sendCurrentInputReport(true, true);
-  delay(settleMs);
+  const bool settleOk = releaseOk && repeatCurrentInputReportFor(settleMs);
   explicitInputReportActive_ = false;
-  return moveOk && releaseOk;
+  return moveOk && holdOk && releaseOk && settleOk;
 }
 
 bool ClassicBtControllerTransport::resetConnection() {
@@ -733,6 +733,26 @@ bool ClassicBtControllerTransport::waitForInputReportAck() {
 
   inputReportAckReady_ = false;
   return true;
+}
+
+bool ClassicBtControllerTransport::repeatCurrentInputReportFor(uint16_t durationMs) {
+  const uint32_t startMs = millis();
+  bool ok = true;
+
+  while ((millis() - startMs) < durationMs) {
+    const uint32_t elapsedMs = millis() - startMs;
+    const uint32_t remainingMs = durationMs > elapsedMs ? durationMs - elapsedMs : 0;
+    const uint32_t delayMs =
+        remainingMs < HID_INPUT_REPEAT_INTERVAL_MS ? remainingMs : HID_INPUT_REPEAT_INTERVAL_MS;
+    delay(delayMs);
+
+    if (!sendCurrentInputReport(true, true)) {
+      ok = false;
+      break;
+    }
+  }
+
+  return ok;
 }
 
 bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool waitForCallback) {
@@ -1185,6 +1205,10 @@ void ClassicBtControllerTransport::ensureSendTask() {}
 bool ClassicBtControllerTransport::isHidReportChannelOpen() const { return false; }
 bool ClassicBtControllerTransport::isControllerInputReady() const { return false; }
 bool ClassicBtControllerTransport::waitForInputReportAck() { return false; }
+bool ClassicBtControllerTransport::repeatCurrentInputReportFor(uint16_t durationMs) {
+  delay(durationMs);
+  return false;
+}
 bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool waitForCallback) {
   (void)logFailure;
   (void)waitForCallback;

@@ -146,6 +146,9 @@ async function main(): Promise<void> {
         `Pixels: ${plan.totalPixels}`,
         `Commands: ${serializedCommands.length}`,
         `Estimated runtime: ${formatDuration(plan.estimatedRuntimeMs)}`,
+        `Max move: ${plan.pathStats.maxMoveSteps} steps (${plan.pathStats.maxMoveDx}, ${plan.pathStats.maxMoveDy})`,
+        `Long moves: >50=${plan.pathStats.movesOver50}, >100=${plan.pathStats.movesOver100}, >200=${plan.pathStats.movesOver200}`,
+        `Reanchors: ${plan.pathStats.reanchorCount}`,
         cli.preview ? `Preview: ${cli.preview}` : undefined,
         cli.writeCommands ? `Commands file: ${cli.writeCommands}` : undefined,
       ]
@@ -172,6 +175,9 @@ async function main(): Promise<void> {
     const commonOptions = {
       ackTimeoutMs: profile.ackTimeoutMs,
       retries: profile.commandRetryCount,
+      buttonPressMs: profile.buttonPressDuration,
+      inputDelayMs: profile.inputDelay,
+      homeMs: profile.homeDuration,
       onProgress: ({ index, total, command }: { index: number; total: number; command: string }) => {
         output.write(`\r[serial] ${index}/${total} ${command}      `);
       },

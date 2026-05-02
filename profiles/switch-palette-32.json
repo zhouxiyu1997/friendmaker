@@ -16,7 +16,6 @@
   "monoThreshold": 128,
   "palette": ["#000000", "#ffffff", "#ff0000", "#0000ff", "#ffff00", "#00ff00"],
   "brushSize": 1,
-  "reanchorEveryDraws": 500,
   "startCursor": "center",
   "startTool": "pen",
   "startColorIndex": 0,

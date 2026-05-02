@@ -204,6 +204,9 @@ class ManagedSerialSessionSender implements SenderControls {
       baudRate: number;
       ackTimeoutMs: number;
       retries: number;
+      buttonPressMs?: number | undefined;
+      inputDelayMs?: number | undefined;
+      homeMs?: number | undefined;
       onProgress?: (progress: { index: number; total: number; command: string }) => void;
       onDeviceLine?: (line: string) => void;
     },
@@ -216,6 +219,9 @@ class ManagedSerialSessionSender implements SenderControls {
       baudRate: options.baudRate,
       ackTimeoutMs: options.ackTimeoutMs,
       retries: options.retries,
+      buttonPressMs: options.buttonPressMs,
+      inputDelayMs: options.inputDelayMs,
+      homeMs: options.homeMs,
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
       ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
       beforeCommand: () => this.waitWhilePaused(),
@@ -525,6 +531,9 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
       commandRetryCount: profile.commandRetryCount,
+      buttonPressDuration: profile.buttonPressDuration,
+      inputDelay: profile.inputDelay,
+      homeDuration: profile.homeDuration,
       reanchorEveryDraws: profile.reanchorEveryDraws,
     },
     stats: {
@@ -534,6 +543,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       estimatedRuntimeMs: plan.estimatedRuntimeMs,
       estimatedRuntimeLabel: formatDuration(plan.estimatedRuntimeMs),
       imageBounds: plan.imageBounds,
+      path: plan.pathStats,
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,
     commands: plan.commands,
@@ -547,6 +557,9 @@ async function executeCommands(body: {
   baudRate?: number;
   ackTimeoutMs?: number;
   retries?: number;
+  buttonPressMs?: number;
+  inputDelayMs?: number;
+  homeMs?: number;
   ackDelayMs?: number;
   errorAtCommand?: number;
 }): Promise<{
@@ -581,6 +594,9 @@ async function executeCommands(body: {
       baudRate: body.baudRate ?? 115200,
       ackTimeoutMs,
       retries,
+      buttonPressMs: body.buttonPressMs,
+      inputDelayMs: body.inputDelayMs,
+      homeMs: body.homeMs,
       onDeviceLine: (line) => {
         lines.push(line);
       },
@@ -591,6 +607,9 @@ async function executeCommands(body: {
     await sender.send(body.commands, {
       ackTimeoutMs,
       retries,
+      buttonPressMs: body.buttonPressMs,
+      inputDelayMs: body.inputDelayMs,
+      homeMs: body.homeMs,
       ackDelayMs: body.ackDelayMs ?? 0,
       ...(body.errorAtCommand !== undefined ? { errorAtCommand: body.errorAtCommand } : {}),
       onDeviceLine: (line) => {
@@ -619,6 +638,9 @@ async function runManagedExecution(
     baudRate?: number;
     ackTimeoutMs?: number;
     retries?: number;
+    buttonPressMs?: number;
+    inputDelayMs?: number;
+    homeMs?: number;
     ackDelayMs?: number;
     errorAtCommand?: number;
   },
@@ -648,6 +670,9 @@ async function runManagedExecution(
         baudRate: body.baudRate ?? 115200,
         ackTimeoutMs,
         retries,
+        buttonPressMs: body.buttonPressMs,
+        inputDelayMs: body.inputDelayMs,
+        homeMs: body.homeMs,
         onProgress: ({ index, command }) => {
           execution.completedCommands = index;
           execution.currentCommand = command;
@@ -662,6 +687,9 @@ async function runManagedExecution(
       await sender.send(body.commands, {
         ackTimeoutMs,
         retries,
+        buttonPressMs: body.buttonPressMs,
+        inputDelayMs: body.inputDelayMs,
+        homeMs: body.homeMs,
         ackDelayMs: body.ackDelayMs ?? 0,
         ...(body.errorAtCommand !== undefined ? { errorAtCommand: body.errorAtCommand } : {}),
         onProgress: ({ index, command }) => {
@@ -709,6 +737,9 @@ async function startManagedExecution(body: {
   baudRate?: number;
   ackTimeoutMs?: number;
   retries?: number;
+  buttonPressMs?: number;
+  inputDelayMs?: number;
+  homeMs?: number;
   ackDelayMs?: number;
   errorAtCommand?: number;
 }): Promise<Record<string, unknown>> {
@@ -757,6 +788,9 @@ async function startManagedExecution(body: {
       baudRate: body.baudRate,
       ackTimeoutMs: body.ackTimeoutMs,
       retries: body.retries,
+      buttonPressMs: body.buttonPressMs,
+      inputDelayMs: body.inputDelayMs,
+      homeMs: body.homeMs,
       ackDelayMs: body.ackDelayMs,
       errorAtCommand: body.errorAtCommand,
     }) as {
@@ -766,6 +800,9 @@ async function startManagedExecution(body: {
       baudRate?: number;
       ackTimeoutMs?: number;
       retries?: number;
+      buttonPressMs?: number;
+      inputDelayMs?: number;
+      homeMs?: number;
       ackDelayMs?: number;
       errorAtCommand?: number;
     },

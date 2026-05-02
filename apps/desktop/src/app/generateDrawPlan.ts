@@ -1,9 +1,9 @@
 import type { ImageSource } from "../image/loadImage.js";
 import { pixelizeImage } from "../image/pixelize.js";
 import { renderPreviewToBuffer } from "../image/renderPreview.js";
-import { estimateRuntimeMs, generateScanlineCommands } from "../path/scanline.js";
+import { estimateRuntimeMs, generateScanlineCommands, getPathCommandStats } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
-import type { CanvasBounds, DrawingProfile, PixelMap } from "../types.js";
+import type { CanvasBounds, DrawingProfile, PathCommandStats, PixelMap } from "../types.js";
 
 export interface DrawPlan {
   commands: string[];
@@ -12,6 +12,7 @@ export interface DrawPlan {
   paletteHexes: string[];
   totalPixels: number;
   estimatedRuntimeMs: number;
+  pathStats: PathCommandStats;
   previewPng: Buffer;
   imageBounds: CanvasBounds | null;
 }
@@ -51,6 +52,7 @@ export async function generateDrawPlan(
     paletteHexes,
     totalPixels: pixelMap.length * (pixelMap[0]?.length ?? 0),
     estimatedRuntimeMs: estimateRuntimeMs(commands, profile),
+    pathStats: getPathCommandStats(commands),
     previewPng,
     imageBounds,
   };

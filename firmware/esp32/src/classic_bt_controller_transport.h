@@ -28,6 +28,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool isControllerInputReady() const;
   bool waitForInputReportAck();
   bool sendCurrentInputReport(bool logFailure, bool waitForCallback = false);
+  bool repeatCurrentInputReportFor(uint16_t durationMs);
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);
   bool attemptVirtualCablePlug(const uint8_t peerAddress[6], const char *reason);
   void enterReconnectableState(const char *reason);

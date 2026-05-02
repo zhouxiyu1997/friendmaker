@@ -14,6 +14,7 @@ constexpr uint16_t MAX_BUTTON_PRESS_DURATION_MS = 500;
 constexpr uint16_t MIN_HOME_DURATION_MS = 500;
 constexpr uint16_t MAX_HOME_DURATION_MS = 5000;
 constexpr uint16_t HID_REPORT_ACK_TIMEOUT_MS = 750;
+constexpr uint16_t HID_INPUT_REPEAT_INTERVAL_MS = 16;
 constexpr uint8_t COLOR_PALETTE_SLOT_COUNT = 9;
 constexpr uint8_t COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
 constexpr uint16_t COLOR_PALETTE_MENU_OPEN_SETTLE_MS = 180;

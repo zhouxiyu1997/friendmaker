@@ -55,6 +55,16 @@ export interface DrawingProfile {
   centerToTopLeftDy: number;
 }
 
+export interface PathCommandStats {
+  maxMoveDx: number;
+  maxMoveDy: number;
+  maxMoveSteps: number;
+  movesOver50: number;
+  movesOver100: number;
+  movesOver200: number;
+  reanchorCount: number;
+}
+
 export interface PixelizationResult {
   pixelMap: PixelMap;
   usedColorIndexes: number[];

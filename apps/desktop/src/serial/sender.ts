@@ -12,6 +12,11 @@ import type { ProgressUpdate, SenderControls } from "../types.js";
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
 const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
+const DEFAULT_INPUT_TIMING = {
+  buttonPressMs: 60,
+  inputDelayMs: 40,
+  homeMs: 1500,
+};
 
 class DeviceAckError extends Error {
   constructor(message: string) {
@@ -23,11 +28,20 @@ class DeviceAckError extends Error {
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
   retries: number;
+  buttonPressMs?: number | undefined;
+  inputDelayMs?: number | undefined;
+  homeMs?: number | undefined;
   onProgress?: (progress: ProgressUpdate) => void;
   onDeviceLine?: (line: string) => void;
   beforeCommand?: () => Promise<void>;
   shouldStop?: () => boolean;
   onInterruptReady?: (interrupt: (() => void) | null) => void;
+}
+
+interface InputTiming {
+  buttonPressMs: number;
+  inputDelayMs: number;
+  homeMs: number;
 }
 
 export interface SerialSessionSnapshot {
@@ -199,11 +213,45 @@ function waitForAck(
   });
 }
 
-function getAckTimeoutForCommand(command: string, baseTimeoutMs: number): number {
+function toPositiveNumber(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function resolveInputTiming(options: SerialCommandSendOptions): InputTiming {
+  return {
+    buttonPressMs: toPositiveNumber(options.buttonPressMs, DEFAULT_INPUT_TIMING.buttonPressMs),
+    inputDelayMs: toPositiveNumber(options.inputDelayMs, DEFAULT_INPUT_TIMING.inputDelayMs),
+    homeMs: toPositiveNumber(options.homeMs, DEFAULT_INPUT_TIMING.homeMs),
+  };
+}
+
+function parseInputTimingConfig(command: string): InputTiming | null {
+  const match = /^CFG\s+INPUT\s+(\d+)\s+(\d+)\s+(\d+)$/u.exec(command.trim());
+
+  if (!match?.[1] || !match[2] || !match[3]) {
+    return null;
+  }
+
+  const buttonPressMs = Number.parseInt(match[1], 10);
+  const inputDelayMs = Number.parseInt(match[2], 10);
+  const homeMs = Number.parseInt(match[3], 10);
+
+  if (buttonPressMs <= 0 || inputDelayMs <= 0 || homeMs <= 0) {
+    return null;
+  }
+
+  return { buttonPressMs, inputDelayMs, homeMs };
+}
+
+function getAckTimeoutForCommand(
+  command: string,
+  baseTimeoutMs: number,
+  inputTiming: InputTiming,
+): number {
   const trimmed = command.trim();
 
   if (trimmed === "H") {
-    return Math.max(baseTimeoutMs, 6_000);
+    return Math.max(baseTimeoutMs, 2_000 + inputTiming.homeMs * 2 + inputTiming.inputDelayMs);
   }
 
   if (trimmed === "BT RESET") {
@@ -223,7 +271,10 @@ function getAckTimeoutForCommand(command: string, baseTimeoutMs: number): number
 
     // Each move step becomes one D-pad press on the ESP32 side. Give the board
     // enough room to finish long center-to-target moves before we expect `OK`.
-    return Math.max(baseTimeoutMs, 1_500 + steps * 150);
+    return Math.max(
+      baseTimeoutMs,
+      2_000 + steps * (inputTiming.buttonPressMs + inputTiming.inputDelayMs + 100),
+    );
   }
 
   if (trimmed === "BC RESET") {
@@ -503,6 +554,8 @@ export class SerialCommandSession {
       throw new Error("Serial session is not open.");
     }
 
+    let inputTiming = resolveInputTiming(options);
+
     for (const [index, command] of commands.entries()) {
       await options.beforeCommand?.();
 
@@ -517,11 +570,12 @@ export class SerialCommandSession {
 
       while (!sent) {
         try {
+          const ackTimeoutMs = getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming);
           await writeLine(this.port, framedCommand);
           await waitForAck(
             this.parser,
             this.port,
-            getAckTimeoutForCommand(command, options.ackTimeoutMs),
+            ackTimeoutMs,
             {
               sessionId: this.sessionId,
               sequence: commandSequence,
@@ -553,13 +607,15 @@ export class SerialCommandSession {
           }
 
           const message = error instanceof Error ? error.message : String(error);
+          const ackTimeoutMs = getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming);
           options.onDeviceLine?.(
-            `WARN retry command=${index + 1} attempt=${attempt + 1} reason=${message}`,
+            `WARN retry command=${index + 1} attempt=${attempt + 1} command="${command}" timeoutMs=${ackTimeoutMs} reason=${message}`,
           );
           attempt += 1;
         }
       }
 
+      inputTiming = parseInputTimingConfig(command) ?? inputTiming;
       options.onProgress?.({
         index: index + 1,
         total: commands.length,
@@ -720,6 +776,9 @@ export class SerialAckSender implements SenderControls {
       baudRate: number;
       ackTimeoutMs: number;
       retries: number;
+      buttonPressMs?: number | undefined;
+      inputDelayMs?: number | undefined;
+      homeMs?: number | undefined;
       onProgress?: (progress: ProgressUpdate) => void;
       onDeviceLine?: (line: string) => void;
     },
@@ -734,6 +793,9 @@ export class SerialAckSender implements SenderControls {
       await session.send(commands, {
         ackTimeoutMs: options.ackTimeoutMs,
         retries: options.retries,
+        buttonPressMs: options.buttonPressMs,
+        inputDelayMs: options.inputDelayMs,
+        homeMs: options.homeMs,
         ...(options.onProgress ? { onProgress: options.onProgress } : {}),
         ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
         beforeCommand: () => this.waitWhilePaused(),
