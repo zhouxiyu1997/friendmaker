@@ -1,5 +1,8 @@
 const state = {
   activePage: "studio",
+  app: {
+    version: null,
+  },
   imageDataUrl: null,
   commands: [],
   ports: [],
@@ -129,6 +132,7 @@ const state = {
 const els = {
   pageTabs: [...document.querySelectorAll(".page-tab")],
   pages: [...document.querySelectorAll(".page")],
+  appVersion: document.getElementById("app-version"),
   imageInput: document.getElementById("image-input"),
   fileLabel: document.getElementById("file-label"),
   studioConnectionCard: document.getElementById("studio-connection-card"),
@@ -2091,6 +2095,23 @@ function renderPortSelects() {
   });
 }
 
+async function loadAppInfo() {
+  try {
+    const response = await fetch("/api/app/info");
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "应用信息加载失败");
+    }
+
+    state.app.version = typeof payload.version === "string" ? payload.version : null;
+  } catch {
+    state.app.version = null;
+  } finally {
+    els.appVersion.textContent = state.app.version ? `v${state.app.version}` : "版本未知";
+  }
+}
+
 async function loadFirmwareInfo() {
   try {
     const response = await fetch("/api/firmware/info");
@@ -2447,6 +2468,7 @@ async function init() {
   );
   syncStudioColorCountOptions();
   await Promise.all([
+    loadAppInfo(),
     refreshPorts(),
     loadFirmwareInfo(),
     loadWindowsSerialDriversInfo(),

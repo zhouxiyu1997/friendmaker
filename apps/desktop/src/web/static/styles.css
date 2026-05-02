@@ -82,6 +82,20 @@ body {
   font-weight: 700;
 }
 
+.hero-version {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  width: fit-content;
+  padding: 8px 12px;
+  border: 1px solid rgba(19, 34, 56, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--accent-deep);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .hero-side {
   display: grid;
   gap: 14px;

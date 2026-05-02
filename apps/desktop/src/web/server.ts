@@ -32,6 +32,7 @@ const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
 const defaultStaticRoot = path.join(__dirname, "static");
 const defaultFirmwareRoot = resolveDefaultFirmwareRoot();
 const defaultWindowsDriverRoot = resolveDefaultWindowsDriverRoot();
+const defaultPackageJsonPath = resolveDefaultPackageJsonPath();
 const defaultHost = "127.0.0.1";
 const defaultPort = 4307;
 const defaultAppDataRoot = path.join(os.homedir(), ".friend-maker");
@@ -88,6 +89,17 @@ function resolveDefaultWindowsDriverRoot(): string {
   const candidates = [
     fallback,
     path.resolve(__dirname, "..", "..", "..", "..", "..", "drivers", "windows"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? fallback;
+}
+
+function resolveDefaultPackageJsonPath(): string {
+  const fallback = path.join(repoRoot, "package.json");
+  const candidates = [
+    fallback,
+    path.resolve(repoRoot, "..", "package.json"),
+    path.resolve(process.cwd(), "package.json"),
   ];
 
   return candidates.find((candidate) => existsSync(candidate)) ?? fallback;
@@ -247,6 +259,18 @@ async function serveStatic(response: ServerResponse, fileName: string): Promise<
   const content = await readFile(filePath);
   response.writeHead(200, { "content-type": getContentType(filePath) });
   response.end(content);
+}
+
+async function readAppInfo(): Promise<{ version: string }> {
+  const rawPackageJson = await readFile(defaultPackageJsonPath, "utf8");
+  const packageJson = JSON.parse(rawPackageJson) as { version?: unknown };
+  const version = typeof packageJson.version === "string" ? packageJson.version : "";
+
+  if (!version) {
+    throw new Error("Missing package version.");
+  }
+
+  return { version };
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -764,6 +788,10 @@ function handleOfficialPalette(response: ServerResponse): void {
   });
 }
 
+async function handleAppInfo(response: ServerResponse): Promise<void> {
+  json(response, 200, await readAppInfo());
+}
+
 async function handleFirmwareInfo(response: ServerResponse): Promise<void> {
   const tooling = await webRuntime.toolingManager.getInfo();
 
@@ -1087,6 +1115,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
     if (request.method === "GET" && url.pathname === "/styles.css") {
       await serveStatic(response, "styles.css");
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/app/info") {
+      await handleAppInfo(response);
       return;
     }
 
