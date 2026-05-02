@@ -24,6 +24,8 @@ class ClassicBtControllerTransport : public ControllerTransport {
   void setLeftStickFromVector(int x, int y);
   void updateInputReport();
   void ensureSendTask();
+  bool isHidReportChannelOpen() const;
+  bool isControllerInputReady() const;
   bool sendCurrentInputReport(bool logFailure);
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);
   bool attemptVirtualCablePlug(const uint8_t peerAddress[6], const char *reason);
