@@ -139,6 +139,34 @@ void SwitchController::drawStroke() {
   transport_.pressButton(ControllerButton::A, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
 }
 
+void SwitchController::drawLine(int dx, int dy) {
+  waitUntilReady();
+
+  if (dx != 0 && dy != 0) {
+    return;
+  }
+
+  transport_.pressButton(ControllerButton::A, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+
+  const int steps = abs(dx) + abs(dy);
+
+  if (steps == 0) {
+    return;
+  }
+
+  const ControllerButton directionButton =
+      dx < 0
+          ? ControllerButton::DpadLeft
+          : (dx > 0 ? ControllerButton::DpadRight
+                    : (dy < 0 ? ControllerButton::DpadUp : ControllerButton::DpadDown));
+  const uint32_t buttonsMask =
+      controllerButtonMask(ControllerButton::A) | controllerButtonMask(directionButton);
+
+  for (int step = 0; step < steps; step += 1) {
+    transport_.pressButtons(buttonsMask, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+  }
+}
+
 void SwitchController::pressButton(ControllerButton button) {
   waitUntilReady();
   transport_.pressButton(button, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);

@@ -7,10 +7,12 @@ import {
   drawCommand,
   endCommand,
   homeCommand,
+  lineCommand,
   moveCommand,
   paletteConfigCommand,
   type DrawCommand,
 } from "../protocol/commands.js";
+import { gridCellToCanvasCenter, resolveBrushGrid } from "./brushGrid.js";
 
 const PALETTE_SLOT_COUNT = 9;
 const NEIGHBOR_OFFSETS = [
@@ -19,6 +21,12 @@ const NEIGHBOR_OFFSETS = [
   { dx: 0, dy: 1 },
   { dx: 0, dy: -1 },
 ];
+
+interface PixelRun {
+  start: Pixel;
+  end: Pixel;
+  count: number;
+}
 
 function getPixelsByColor(pixelMap: PixelMap, colorIndex: number): Pixel[] {
   return pixelMap.flatMap((row) =>
@@ -256,13 +264,7 @@ function toCanvasPosition(
   point: { x: number; y: number },
   profile: DrawingProfile,
 ): { x: number; y: number } {
-  const step = Math.max(1, profile.brushSize);
-  const brushCenterOffset = Math.floor(step / 2);
-
-  return {
-    x: Math.min(point.x * step + brushCenterOffset, profile.canvasWidth - 1),
-    y: Math.min(point.y * step + brushCenterOffset, profile.canvasHeight - 1),
-  };
+  return gridCellToCanvasCenter(point, resolveBrushGrid(profile));
 }
 
 function moveTo(
@@ -339,6 +341,134 @@ function getUsedPaletteColors(pixelMap: PixelMap): Array<{ colorIndex: number; c
     .map(([colorIndex, colorHex]) => ({ colorIndex, colorHex }));
 }
 
+function buildHorizontalRuns(pixels: Pixel[]): PixelRun[] {
+  const rows = new Map<number, Pixel[]>();
+
+  for (const pixel of pixels) {
+    const row = rows.get(pixel.y);
+
+    if (row) {
+      row.push(pixel);
+    } else {
+      rows.set(pixel.y, [pixel]);
+    }
+  }
+
+  const runs: PixelRun[] = [];
+
+  for (const [, row] of Array.from(rows.entries()).sort((left, right) => left[0] - right[0])) {
+    const sorted = [...row].sort((left, right) => left.x - right.x);
+    let start: Pixel | null = null;
+    let end: Pixel | null = null;
+    let count = 0;
+
+    for (const pixel of sorted) {
+      if (!start || !end || pixel.x !== end.x + 1) {
+        if (start && end) {
+          runs.push({ start, end, count });
+        }
+
+        start = pixel;
+        end = pixel;
+        count = 1;
+        continue;
+      }
+
+      end = pixel;
+      count += 1;
+    }
+
+    if (start && end) {
+      runs.push({ start, end, count });
+    }
+  }
+
+  return runs;
+}
+
+function reverseRun(run: PixelRun): PixelRun {
+  return {
+    start: run.end,
+    end: run.start,
+    count: run.count,
+  };
+}
+
+function getRunStartDistance(
+  run: PixelRun,
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+): number {
+  const start = toCanvasPosition(run.start, profile);
+  return Math.abs(start.x - current.x) + Math.abs(start.y - current.y);
+}
+
+function orderRunsFromCursor(
+  runs: PixelRun[],
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+): PixelRun[] {
+  const remaining = [...runs];
+  const ordered: PixelRun[] = [];
+  let currentPosition = current;
+
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestRun = remaining[0]!;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    remaining.forEach((run, index) => {
+      const forwardDistance = getRunStartDistance(run, currentPosition, profile);
+      const reversed = reverseRun(run);
+      const reverseDistance = getRunStartDistance(reversed, currentPosition, profile);
+
+      if (forwardDistance < bestDistance) {
+        bestDistance = forwardDistance;
+        bestIndex = index;
+        bestRun = run;
+      }
+
+      if (reverseDistance < bestDistance) {
+        bestDistance = reverseDistance;
+        bestIndex = index;
+        bestRun = reversed;
+      }
+    });
+
+    ordered.push(bestRun);
+    currentPosition = toCanvasPosition(bestRun.end, profile);
+    remaining.splice(bestIndex, 1);
+  }
+
+  return ordered;
+}
+
+function appendDrawPixels(
+  commands: DrawCommand[],
+  pixels: Pixel[],
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+): { x: number; y: number } {
+  let currentPosition = current;
+  const runs = orderRunsFromCursor(buildHorizontalRuns(pixels), current, profile);
+
+  for (const run of runs) {
+    commands.push(...moveTo(currentPosition, run.start, profile));
+    const startPosition = toCanvasPosition(run.start, profile);
+    const endPosition = toCanvasPosition(run.end, profile);
+
+    if (run.count <= 1) {
+      commands.push(drawCommand(profile.drawButton));
+    } else {
+      commands.push(lineCommand(endPosition.x - startPosition.x, endPosition.y - startPosition.y));
+    }
+
+    currentPosition = endPosition;
+  }
+
+  return currentPosition;
+}
+
 export function generateScanlineCommands(
   pixelMap: PixelMap,
   profile: DrawingProfile,
@@ -373,12 +503,7 @@ export function generateScanlineCommands(
       }
 
       const orderedPixels = getOrderedPixelsForColor(pixelMap, colorIndex, current, profile);
-
-      for (const pixel of orderedPixels) {
-        commands.push(...moveTo(current, pixel, profile));
-        commands.push(drawCommand(profile.drawButton));
-        current = toCanvasPosition(pixel, profile);
-      }
+      current = appendDrawPixels(commands, orderedPixels, current, profile);
     }
   } else if (profile.colorMode === "palette") {
     const usedColors = getUsedPaletteColors(pixelMap);
@@ -398,12 +523,7 @@ export function generateScanlineCommands(
         }
 
         const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile);
-
-        for (const pixel of orderedPixels) {
-          commands.push(...moveTo(current, pixel, profile));
-          commands.push(drawCommand(profile.drawButton));
-          current = toCanvasPosition(pixel, profile);
-        }
+        current = appendDrawPixels(commands, orderedPixels, current, profile);
       }
     }
   } else {
@@ -431,12 +551,7 @@ export function generateScanlineCommands(
         }
 
         const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile);
-
-        for (const pixel of orderedPixels) {
-          commands.push(...moveTo(current, pixel, profile));
-          commands.push(drawCommand(profile.drawButton));
-          current = toCanvasPosition(pixel, profile);
-        }
+        current = appendDrawPixels(commands, orderedPixels, current, profile);
       }
     }
   }
@@ -459,6 +574,12 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
       case "draw":
       case "press":
         return total + profile.buttonPressDuration + profile.inputDelay;
+      case "line":
+        return (
+          total +
+          (Math.abs(command.dx) + Math.abs(command.dy) + 1) *
+            (profile.buttonPressDuration + profile.inputDelay)
+        );
       case "color":
         return total + profile.colorChangeDuration;
       case "paletteConfig":

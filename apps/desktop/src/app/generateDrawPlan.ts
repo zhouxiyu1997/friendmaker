@@ -4,6 +4,7 @@ import { renderPreviewToBuffer } from "../image/renderPreview.js";
 import { estimateRuntimeMs, generateScanlineCommands } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { CanvasBounds, DrawingProfile, PixelMap } from "../types.js";
+import { gridCellToCanvasRect, resolveBrushGrid } from "../path/brushGrid.js";
 
 export interface DrawPlan {
   commands: string[];
@@ -57,7 +58,7 @@ export async function generateDrawPlan(
 }
 
 function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): CanvasBounds | null {
-  const brushSize = Math.max(1, profile.brushSize);
+  const grid = resolveBrushGrid(profile);
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = -1;
@@ -69,15 +70,12 @@ function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): Can
         continue;
       }
 
-      const startX = pixel.x * brushSize;
-      const startY = pixel.y * brushSize;
-      const endX = Math.min(profile.canvasWidth, startX + brushSize) - 1;
-      const endY = Math.min(profile.canvasHeight, startY + brushSize) - 1;
+      const rect = gridCellToCanvasRect(pixel, grid);
 
-      minX = Math.min(minX, startX);
-      minY = Math.min(minY, startY);
-      maxX = Math.max(maxX, endX);
-      maxY = Math.max(maxY, endY);
+      minX = Math.min(minX, rect.x);
+      minY = Math.min(minY, rect.y);
+      maxX = Math.max(maxX, rect.maxX);
+      maxY = Math.max(maxY, rect.maxY);
     }
   }
 

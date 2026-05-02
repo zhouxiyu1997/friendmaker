@@ -384,6 +384,20 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     return true;
   }
 
+  if (line.startsWith("L ")) {
+    int dx = 0;
+    int dy = 0;
+
+    if (!parseTwoInts(line, dx, dy) || (dx != 0 && dy != 0)) {
+      error = "invalid line";
+      return false;
+    }
+
+    controller.drawLine(dx, dy);
+    Serial.printf("INFO action=line dx=%d dy=%d\n", dx, dy);
+    return true;
+  }
+
   ControllerButton holdButton = ControllerButton::A;
   uint16_t holdMs = 0;
 

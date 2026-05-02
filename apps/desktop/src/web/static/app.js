@@ -1716,6 +1716,7 @@ function syncStudioUi() {
     ? "已开启自动扣背景，会优先去掉白底、浅灰底和棋盘格假透明背景。"
     : "当前不会自动扣背景；如果素材是白底或棋盘格假透明图，建议开启。";
   const squareBrushHint = "建议同时把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。";
+  const firmwareLineHint = "偏移修复和连画脚本需要先刷入最新固件。";
   const scaleHint = `当前导入缩放是 ${state.studio.imageScalePercent}%，100% 表示完整放进画布。`;
   const positionHint = describeImagePosition(
     state.studio.imageOffsetXPercent,
@@ -1723,8 +1724,8 @@ function syncStudioUi() {
   );
   els.studioModeHint.textContent =
     state.studio.colorMode === "mono"
-      ? `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`
-      : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
+      ? `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}${firmwareLineHint}`
+      : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}${firmwareLineHint}`;
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
   els.sizeSelect.disabled = state.studio.busy || executionActive;
@@ -1801,8 +1802,8 @@ function syncStudioUi() {
 
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
-      ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
-      : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`;
+      ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 连画。开始前请刷入最新固件，并把 Switch 里的笔刷切到方块笔刷。`
+      : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先刷入最新固件并保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔连画。`;
   renderStudioConnectionStatus();
 }
 

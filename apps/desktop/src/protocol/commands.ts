@@ -4,6 +4,7 @@ export type DrawCommand =
   | { type: "home" }
   | { type: "move"; dx: number; dy: number }
   | { type: "draw"; button: ControllerButton }
+  | { type: "line"; dx: number; dy: number }
   | { type: "press"; button: ControllerButton }
   | { type: "color"; index: number }
   | { type: "basicPaletteReset" }
@@ -24,6 +25,10 @@ export function moveCommand(dx: number, dy: number): DrawCommand {
 
 export function drawCommand(button: ControllerButton): DrawCommand {
   return { type: "draw", button };
+}
+
+export function lineCommand(dx: number, dy: number): DrawCommand {
+  return { type: "line", dx, dy };
 }
 
 export function pressButtonCommand(button: ControllerButton): DrawCommand {

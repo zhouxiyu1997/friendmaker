@@ -243,6 +243,21 @@ export class SimulatedDevice {
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
+    if (trimmed.startsWith("L ")) {
+      const parsed = parseTwoInts(trimmed);
+
+      if (!parsed || (parsed.first !== 0 && parsed.second !== 0)) {
+        await delay(options.ackDelayMs);
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid line"), lines);
+      }
+
+      this.state.drawCount += Math.abs(parsed.first) + Math.abs(parsed.second) + 1;
+      this.state.x += parsed.first;
+      this.state.y += parsed.second;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
     if (trimmed.startsWith("C ")) {
       const colorIndex = parseOneInt(trimmed);
 

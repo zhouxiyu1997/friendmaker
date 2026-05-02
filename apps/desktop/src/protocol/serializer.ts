@@ -8,6 +8,8 @@ export function serializeCommand(command: DrawCommand): string {
       return `M ${command.dx} ${command.dy}`;
     case "draw":
       return "P";
+    case "line":
+      return `L ${command.dx} ${command.dy}`;
     case "press":
       return command.button;
     case "color":

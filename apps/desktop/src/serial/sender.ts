@@ -201,8 +201,8 @@ function getAckTimeoutForCommand(command: string, baseTimeoutMs: number): number
     return Math.max(baseTimeoutMs, 20_000);
   }
 
-  if (trimmed.startsWith("M ")) {
-    const match = /^M\s+(-?\d+)\s+(-?\d+)$/u.exec(trimmed);
+  if (trimmed.startsWith("M ") || trimmed.startsWith("L ")) {
+    const match = /^[ML]\s+(-?\d+)\s+(-?\d+)$/u.exec(trimmed);
 
     if (!match || match[1] === undefined || match[2] === undefined) {
       return baseTimeoutMs;
@@ -212,8 +212,8 @@ function getAckTimeoutForCommand(command: string, baseTimeoutMs: number): number
     const dy = Number.parseInt(match[2], 10);
     const steps = Math.abs(dx) + Math.abs(dy);
 
-    // Each move step becomes one D-pad press on the ESP32 side. Give the board
-    // enough room to finish long center-to-target moves before we expect `OK`.
+    // Each move/line step becomes one D-pad press on the ESP32 side. Give the
+    // board enough room to finish long center-to-target moves before `OK`.
     return Math.max(baseTimeoutMs, 1_500 + steps * 150);
   }
 
