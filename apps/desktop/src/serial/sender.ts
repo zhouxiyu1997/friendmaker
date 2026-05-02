@@ -7,6 +7,12 @@ import {
   formatSequencedCommand,
   parseSequencedAck,
 } from "../protocol/sequencing.js";
+import {
+  DEFAULT_SAFE_INPUT_TIMING,
+  isControllerInputReportFailure,
+  parseInputConfigCommand,
+  type InputTiming,
+} from "../protocol/timing.js";
 import type { ProgressUpdate, SenderControls } from "../types.js";
 
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
@@ -190,11 +196,19 @@ function waitForAck(
   });
 }
 
-function getAckTimeoutForCommand(command: string, baseTimeoutMs: number): number {
+export function getAckTimeoutForCommand(
+  command: string,
+  baseTimeoutMs: number,
+  timing: InputTiming = DEFAULT_SAFE_INPUT_TIMING,
+): number {
   const trimmed = command.trim();
 
+  if (trimmed.startsWith("CFG INPUT ")) {
+    return baseTimeoutMs;
+  }
+
   if (trimmed === "H") {
-    return Math.max(baseTimeoutMs, 6_000);
+    return Math.max(baseTimeoutMs, 1_000 + timing.homeMs * 2 + timing.inputDelayMs);
   }
 
   if (trimmed === "BT RESET") {
@@ -214,7 +228,24 @@ function getAckTimeoutForCommand(command: string, baseTimeoutMs: number): number
 
     // Each move step becomes one D-pad press on the ESP32 side. Give the board
     // enough room to finish long center-to-target moves before we expect `OK`.
-    return Math.max(baseTimeoutMs, 1_500 + steps * 150);
+    return Math.max(baseTimeoutMs, 1_000 + steps * (timing.buttonPressMs + timing.inputDelayMs));
+  }
+
+  if (trimmed.startsWith("L ")) {
+    const match = /^L\s+(-?\d+)\s+(-?\d+)$/u.exec(trimmed);
+
+    if (!match || match[1] === undefined || match[2] === undefined) {
+      return baseTimeoutMs;
+    }
+
+    const dx = Number.parseInt(match[1], 10);
+    const dy = Number.parseInt(match[2], 10);
+    const steps = Math.abs(dx) + Math.abs(dy);
+
+    return Math.max(
+      baseTimeoutMs,
+      1_000 + (steps + 1) * (timing.buttonPressMs + timing.inputDelayMs),
+    );
   }
 
   if (trimmed === "BC RESET") {
@@ -494,6 +525,8 @@ export class SerialCommandSession {
       throw new Error("Serial session is not open.");
     }
 
+    let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
+
     for (const [index, command] of commands.entries()) {
       await options.beforeCommand?.();
 
@@ -512,7 +545,7 @@ export class SerialCommandSession {
           await waitForAck(
             this.parser,
             this.port,
-            getAckTimeoutForCommand(command, options.ackTimeoutMs),
+            getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming),
             {
               sessionId: this.sessionId,
               sequence: commandSequence,
@@ -529,6 +562,10 @@ export class SerialCommandSession {
         } catch (error) {
           if (options.shouldStop?.()) {
             throw new Error("Execution stopped.");
+          }
+
+          if (isControllerInputReportFailure(error)) {
+            throw error;
           }
 
           if (attempt >= options.retries) {
@@ -548,6 +585,7 @@ export class SerialCommandSession {
         total: commands.length,
         command,
       });
+      inputTiming = parseInputConfigCommand(command) ?? inputTiming;
       this.sequence += 1;
       this.lastUsedAtValue = Date.now();
     }

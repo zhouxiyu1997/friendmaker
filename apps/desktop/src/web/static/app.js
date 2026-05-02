@@ -548,7 +548,9 @@ function applyGeneratedStudioPayload(payload) {
       ? "黑 / 白"
       : `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`;
   els.statPixels.textContent = String(payload.stats.totalPixels);
-  els.statCommands.textContent = String(payload.stats.commandCount);
+  els.statCommands.textContent = payload.stats.pathStats
+    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}`
+    : String(payload.stats.commandCount);
   els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
   void updatePreviewBounds(payload);
   renderOfficialPalettePreview();
@@ -2314,7 +2316,13 @@ function clearLog(element) {
 }
 
 function getErrorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/controller input report failed/i.test(message)) {
+    return `${message}。请重新连接手柄，或改用更慢的输入时序后再开始。`;
+  }
+
+  return message;
 }
 
 function clampNumber(value, min, max) {

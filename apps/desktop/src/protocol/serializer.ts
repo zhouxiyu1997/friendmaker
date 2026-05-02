@@ -2,10 +2,14 @@ import type { DrawCommand } from "./commands.js";
 
 export function serializeCommand(command: DrawCommand): string {
   switch (command.type) {
+    case "inputConfig":
+      return `CFG INPUT ${command.buttonPressMs} ${command.inputDelayMs} ${command.homeMs}`;
     case "home":
       return "H";
     case "move":
       return `M ${command.dx} ${command.dy}`;
+    case "line":
+      return `L ${command.dx} ${command.dy}`;
     case "draw":
       return "P";
     case "press":

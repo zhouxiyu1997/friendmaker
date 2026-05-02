@@ -509,6 +509,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       estimatedRuntimeMs: plan.estimatedRuntimeMs,
       estimatedRuntimeLabel: formatDuration(plan.estimatedRuntimeMs),
       imageBounds: plan.imageBounds,
+      pathStats: plan.pathStats,
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,
     commands: plan.commands,

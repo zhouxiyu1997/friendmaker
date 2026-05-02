@@ -71,13 +71,13 @@ class ControllerTransport {
   virtual ~ControllerTransport() = default;
 
   virtual void begin() = 0;
-  virtual void pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) = 0;
-  virtual void moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) = 0;
+  virtual bool pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) = 0;
+  virtual bool moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) = 0;
   virtual bool resetConnection() = 0;
   virtual void printStatus(Print &output) const = 0;
   virtual const char *name() const = 0;
 
-  void pressButton(ControllerButton button, uint16_t holdMs, uint16_t settleMs) {
-    pressButtons(controllerButtonMask(button), holdMs, settleMs);
+  bool pressButton(ControllerButton button, uint16_t holdMs, uint16_t settleMs) {
+    return pressButtons(controllerButtonMask(button), holdMs, settleMs);
   }
 };

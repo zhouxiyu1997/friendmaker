@@ -4,6 +4,12 @@ import {
   formatSequencedCommand,
   parseSequencedAck,
 } from "../protocol/sequencing.js";
+import {
+  DEFAULT_SAFE_INPUT_TIMING,
+  isControllerInputReportFailure,
+  parseInputConfigCommand,
+} from "../protocol/timing.js";
+import { getAckTimeoutForCommand } from "../serial/sender.js";
 import { SimulatedDevice } from "./device.js";
 
 function delay(ms: number): Promise<void> {
@@ -59,12 +65,14 @@ export class SimulatedAckSender implements SenderControls {
       retries: number;
       ackDelayMs: number;
       errorAtCommand?: number;
+      inputReportFailureAtCommand?: number;
       onProgress?: (progress: ProgressUpdate) => void;
       onDeviceLine?: (line: string) => void;
     },
   ): Promise<void> {
     const sessionId = createSessionId();
     let sequence = 1;
+    let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
 
     for (const [index, command] of commands.entries()) {
       await this.waitWhilePaused();
@@ -86,8 +94,11 @@ export class SimulatedAckSender implements SenderControls {
             ...(options.errorAtCommand !== undefined
               ? { errorAtCommand: options.errorAtCommand }
               : {}),
+            ...(options.inputReportFailureAtCommand !== undefined
+              ? { inputReportFailureAtCommand: options.inputReportFailureAtCommand }
+              : {}),
           }),
-          options.ackTimeoutMs,
+          getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming),
         );
 
         for (const line of response.lines) {
@@ -101,6 +112,10 @@ export class SimulatedAckSender implements SenderControls {
         }
 
         if (ack.type !== "ok") {
+          if (isControllerInputReportFailure(response.ack)) {
+            throw new Error(`Device returned ${response.ack}`);
+          }
+
           if (attempt >= options.retries) {
             throw new Error(`Device returned ${response.ack}`);
           }
@@ -120,6 +135,7 @@ export class SimulatedAckSender implements SenderControls {
         total: commands.length,
         command,
       });
+      inputTiming = parseInputConfigCommand(command) ?? inputTiming;
       sequence += 1;
     }
 

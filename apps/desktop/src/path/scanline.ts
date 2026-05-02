@@ -1,4 +1,9 @@
 import type { DrawingProfile, Pixel, PixelMap } from "../types.js";
+import {
+  createBrushGrid,
+  gridCellToCanvasCenter,
+  type BrushGrid,
+} from "../brushGrid.js";
 import { officialPaletteCellFromIndex } from "../config/officialPalette.js";
 import {
   basicPaletteConfigCommand,
@@ -7,10 +12,13 @@ import {
   drawCommand,
   endCommand,
   homeCommand,
+  inputConfigCommand,
+  lineCommand,
   moveCommand,
   paletteConfigCommand,
   type DrawCommand,
 } from "../protocol/commands.js";
+import { DEFAULT_SAFE_INPUT_TIMING } from "../protocol/timing.js";
 
 const PALETTE_SLOT_COUNT = 9;
 const NEIGHBOR_OFFSETS = [
@@ -76,7 +84,7 @@ function buildSerpentineRows(pixels: Pixel[], fromBottom = false): Pixel[] {
 function rotatePixelsToNearestStart(
   pixels: Pixel[],
   current: { x: number; y: number },
-  profile: DrawingProfile,
+  grid: BrushGrid,
 ): Pixel[] {
   if (pixels.length <= 1) {
     return pixels;
@@ -86,7 +94,7 @@ function rotatePixelsToNearestStart(
   let nearestDistance = Number.POSITIVE_INFINITY;
 
   pixels.forEach((pixel, index) => {
-    const target = toCanvasPosition(pixel, profile);
+    const target = toCanvasPosition(pixel, grid);
     const distance = Math.abs(target.x - current.x) + Math.abs(target.y - current.y);
 
     if (distance < nearestDistance) {
@@ -105,14 +113,14 @@ function rotatePixelsToNearestStart(
 function chooseBestSerpentineOrder(
   pixels: Pixel[],
   current: { x: number; y: number },
-  profile: DrawingProfile,
+  grid: BrushGrid,
 ): Pixel[] {
   if (pixels.length <= 1) {
     return pixels;
   }
 
-  const topDown = rotatePixelsToNearestStart(buildSerpentineRows(pixels, false), current, profile);
-  const bottomUp = rotatePixelsToNearestStart(buildSerpentineRows(pixels, true), current, profile);
+  const topDown = rotatePixelsToNearestStart(buildSerpentineRows(pixels, false), current, grid);
+  const bottomUp = rotatePixelsToNearestStart(buildSerpentineRows(pixels, true), current, grid);
 
   const topFirst = topDown[0];
   const bottomFirst = bottomUp[0];
@@ -125,8 +133,8 @@ function chooseBestSerpentineOrder(
     return topDown;
   }
 
-  const topStart = toCanvasPosition(topFirst, profile);
-  const bottomStart = toCanvasPosition(bottomFirst, profile);
+  const topStart = toCanvasPosition(topFirst, grid);
+  const bottomStart = toCanvasPosition(bottomFirst, grid);
   const topDistance = Math.abs(topStart.x - current.x) + Math.abs(topStart.y - current.y);
   const bottomDistance = Math.abs(bottomStart.x - current.x) + Math.abs(bottomStart.y - current.y);
 
@@ -189,12 +197,17 @@ function getOrderedPixelsForColor(
   colorIndex: number,
   current: { x: number; y: number },
   profile: DrawingProfile,
+  grid: BrushGrid,
 ): Pixel[] {
+  if (profile.brushSize === 1) {
+    return getLegacyScanlinePixels(pixelMap, colorIndex);
+  }
+
   const components = collectConnectedComponents(pixelMap, colorIndex);
   const legacyPixels = rotatePixelsToNearestStart(
     getLegacyScanlinePixels(pixelMap, colorIndex),
     current,
-    profile,
+    grid,
   );
 
   if (components.length <= 1) {
@@ -211,7 +224,7 @@ function getOrderedPixelsForColor(
     let selectedOrder: Pixel[] = [];
 
     remaining.forEach((component, index) => {
-      const candidate = chooseBestSerpentineOrder(component, currentPosition, profile);
+      const candidate = chooseBestSerpentineOrder(component, currentPosition, grid);
 
       if (candidate.length === 0) {
         return;
@@ -223,7 +236,7 @@ function getOrderedPixelsForColor(
         return;
       }
 
-      const start = toCanvasPosition(firstPixel, profile);
+      const start = toCanvasPosition(firstPixel, grid);
       const distance = Math.abs(start.x - currentPosition.x) + Math.abs(start.y - currentPosition.y);
 
       if (distance < selectedDistance) {
@@ -240,37 +253,31 @@ function getOrderedPixelsForColor(
     }
 
     if (lastPixel) {
-      currentPosition = toCanvasPosition(lastPixel, profile);
+      currentPosition = toCanvasPosition(lastPixel, grid);
     }
 
     remaining.splice(selectedIndex, 1);
   }
 
-  const optimizedDistance = estimateTravelDistance(current, orderedPixels, profile);
-  const legacyDistance = estimateTravelDistance(current, legacyPixels, profile);
+  const optimizedDistance = estimateTravelDistance(current, orderedPixels, grid);
+  const legacyDistance = estimateTravelDistance(current, legacyPixels, grid);
 
   return optimizedDistance < legacyDistance ? orderedPixels : legacyPixels;
 }
 
 function toCanvasPosition(
   point: { x: number; y: number },
-  profile: DrawingProfile,
+  grid: BrushGrid,
 ): { x: number; y: number } {
-  const step = Math.max(1, profile.brushSize);
-  const brushCenterOffset = Math.floor(step / 2);
-
-  return {
-    x: Math.min(point.x * step + brushCenterOffset, profile.canvasWidth - 1),
-    y: Math.min(point.y * step + brushCenterOffset, profile.canvasHeight - 1),
-  };
+  return gridCellToCanvasCenter(grid, point);
 }
 
 function moveTo(
   current: { x: number; y: number },
   target: { x: number; y: number },
-  profile: DrawingProfile,
+  grid: BrushGrid,
 ): DrawCommand[] {
-  const canvasTarget = toCanvasPosition(target, profile);
+  const canvasTarget = toCanvasPosition(target, grid);
   const dx = canvasTarget.x - current.x;
   const dy = canvasTarget.y - current.y;
 
@@ -284,13 +291,13 @@ function moveTo(
 function estimateTravelDistance(
   current: { x: number; y: number },
   pixels: Pixel[],
-  profile: DrawingProfile,
+  grid: BrushGrid,
 ): number {
   let total = 0;
   let currentPosition = current;
 
   for (const pixel of pixels) {
-    const next = toCanvasPosition(pixel, profile);
+    const next = toCanvasPosition(pixel, grid);
     total += Math.abs(next.x - currentPosition.x) + Math.abs(next.y - currentPosition.y);
     currentPosition = next;
   }
@@ -339,12 +346,81 @@ function getUsedPaletteColors(pixelMap: PixelMap): Array<{ colorIndex: number; c
     .map(([colorIndex, colorHex]) => ({ colorIndex, colorHex }));
 }
 
+function canExtendHorizontalRun(run: Pixel[], pixel: Pixel): boolean {
+  const previous = run[run.length - 1];
+
+  if (!previous) {
+    return true;
+  }
+
+  return previous.y === pixel.y && Math.abs(previous.x - pixel.x) === 1;
+}
+
+function appendPixelRun(
+  commands: DrawCommand[],
+  run: Pixel[],
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+  grid: BrushGrid,
+): { x: number; y: number } {
+  const firstPixel = run[0];
+  const lastPixel = run[run.length - 1];
+
+  if (!firstPixel || !lastPixel) {
+    return current;
+  }
+
+  commands.push(...moveTo(current, firstPixel, grid));
+
+  if (run.length === 1) {
+    commands.push(drawCommand(profile.drawButton));
+  } else {
+    const firstPosition = toCanvasPosition(firstPixel, grid);
+    const lastPosition = toCanvasPosition(lastPixel, grid);
+    commands.push(lineCommand(lastPosition.x - firstPosition.x, 0));
+  }
+
+  return toCanvasPosition(lastPixel, grid);
+}
+
+function appendOrderedPixels(
+  commands: DrawCommand[],
+  orderedPixels: Pixel[],
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+  grid: BrushGrid,
+): { x: number; y: number } {
+  let currentPosition = current;
+  let run: Pixel[] = [];
+
+  for (const pixel of orderedPixels) {
+    if (canExtendHorizontalRun(run, pixel)) {
+      run.push(pixel);
+      continue;
+    }
+
+    currentPosition = appendPixelRun(commands, run, currentPosition, profile, grid);
+    run = [pixel];
+  }
+
+  return appendPixelRun(commands, run, currentPosition, profile, grid);
+}
+
 export function generateScanlineCommands(
   pixelMap: PixelMap,
   profile: DrawingProfile,
 ): DrawCommand[] {
   const commands: DrawCommand[] = [];
+  const grid = createBrushGrid(profile);
   let current = { x: 0, y: 0 };
+
+  commands.push(
+    inputConfigCommand(
+      DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
+      DEFAULT_SAFE_INPUT_TIMING.inputDelayMs,
+      DEFAULT_SAFE_INPUT_TIMING.homeMs,
+    ),
+  );
 
   if (shouldStartFromCanvasCenter(profile)) {
     // The in-game canvas opens with the cursor centered, so the fixed canvas
@@ -372,13 +448,8 @@ export function generateScanlineCommands(
         selectedColor = colorIndex;
       }
 
-      const orderedPixels = getOrderedPixelsForColor(pixelMap, colorIndex, current, profile);
-
-      for (const pixel of orderedPixels) {
-        commands.push(...moveTo(current, pixel, profile));
-        commands.push(drawCommand(profile.drawButton));
-        current = toCanvasPosition(pixel, profile);
-      }
+      const orderedPixels = getOrderedPixelsForColor(pixelMap, colorIndex, current, profile, grid);
+      current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
     }
   } else if (profile.colorMode === "palette") {
     const usedColors = getUsedPaletteColors(pixelMap);
@@ -397,13 +468,8 @@ export function generateScanlineCommands(
           selectedSlot = slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile);
-
-        for (const pixel of orderedPixels) {
-          commands.push(...moveTo(current, pixel, profile));
-          commands.push(drawCommand(profile.drawButton));
-          current = toCanvasPosition(pixel, profile);
-        }
+        const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile, grid);
+        current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
       }
     }
   } else {
@@ -430,13 +496,8 @@ export function generateScanlineCommands(
           selectedSlot = slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile);
-
-        for (const pixel of orderedPixels) {
-          commands.push(...moveTo(current, pixel, profile));
-          commands.push(drawCommand(profile.drawButton));
-          current = toCanvasPosition(pixel, profile);
-        }
+        const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile, grid);
+        current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
       }
     }
   }
@@ -446,19 +507,38 @@ export function generateScanlineCommands(
 }
 
 export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfile): number {
+  let timing = {
+    buttonPressMs: profile.buttonPressDuration,
+    inputDelayMs: profile.inputDelay,
+    homeMs: profile.homeDuration,
+  };
+
   return commands.reduce((total, command) => {
     switch (command.type) {
+      case "inputConfig":
+        timing = {
+          buttonPressMs: command.buttonPressMs,
+          inputDelayMs: command.inputDelayMs,
+          homeMs: command.homeMs,
+        };
+        return total;
       case "home":
-        return total + profile.homeDuration * 2 + profile.inputDelay;
+        return total + timing.homeMs * 2 + timing.inputDelayMs;
       case "move":
         return (
           total +
           (Math.abs(command.dx) + Math.abs(command.dy)) *
-            (profile.buttonPressDuration + profile.inputDelay)
+            (timing.buttonPressMs + timing.inputDelayMs)
+        );
+      case "line":
+        return (
+          total +
+          (Math.abs(command.dx) + Math.abs(command.dy) + 1) *
+            (timing.buttonPressMs + timing.inputDelayMs)
         );
       case "draw":
       case "press":
-        return total + profile.buttonPressDuration + profile.inputDelay;
+        return total + timing.buttonPressMs + timing.inputDelayMs;
       case "color":
         return total + profile.colorChangeDuration;
       case "paletteConfig":
@@ -466,13 +546,13 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
       case "basicPaletteConfig":
         return total + profile.colorChangeDuration * 4;
       case "basicPaletteReset":
-        return total + profile.inputDelay;
+        return total + timing.inputDelayMs;
       case "wait":
         return total + command.ms;
       case "pause":
       case "resume":
       case "end":
-        return total + profile.inputDelay;
+        return total + timing.inputDelayMs;
       default:
         return total;
     }

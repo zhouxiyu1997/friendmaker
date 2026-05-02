@@ -93,8 +93,8 @@ HsvColor rgbToHsv(uint8_t red, uint8_t green, uint8_t blue) {
   };
 }
 
-void pressPaletteMenuButton(ControllerTransport &transport, ControllerButton button) {
-  transport.pressButton(
+bool pressPaletteMenuButton(ControllerTransport &transport, ControllerButton button) {
+  return transport.pressButton(
       button, COLOR_PALETTE_MENU_PRESS_DURATION_MS, COLOR_PALETTE_MENU_INPUT_DELAY_MS);
 }
 
@@ -107,59 +107,108 @@ void SwitchController::begin() {
   resetBasicPaletteTracking();
 }
 
+void SwitchController::configureInputTiming(
+    uint16_t buttonPressMs, uint16_t inputDelayMs, uint16_t homeMs) {
+  buttonPressMs_ = buttonPressMs;
+  inputDelayMs_ = inputDelayMs;
+  homeMs_ = homeMs;
+}
+
 void SwitchController::waitUntilReady() const {
   while (paused_) {
     delay(10);
   }
 }
 
-void SwitchController::moveHome() {
+bool SwitchController::moveHome() {
   waitUntilReady();
-  transport_.moveDirection(-1, 0, HOME_DURATION_MS, INPUT_DELAY_MS);
-  transport_.moveDirection(0, -1, HOME_DURATION_MS, INPUT_DELAY_MS);
+  if (!transport_.moveDirection(-1, 0, homeMs_, inputDelayMs_)) {
+    return false;
+  }
+
+  return transport_.moveDirection(0, -1, homeMs_, inputDelayMs_);
 }
 
-void SwitchController::moveCursor(int dx, int dy) {
+bool SwitchController::moveCursor(int dx, int dy) {
   waitUntilReady();
 
   const ControllerButton horizontalButton = dx < 0 ? ControllerButton::DpadLeft : ControllerButton::DpadRight;
   const ControllerButton verticalButton = dy < 0 ? ControllerButton::DpadUp : ControllerButton::DpadDown;
 
   for (int index = 0; index < abs(dx); index += 1) {
-    transport_.pressButton(horizontalButton, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+    if (!transport_.pressButton(horizontalButton, buttonPressMs_, inputDelayMs_)) {
+      return false;
+    }
   }
 
   for (int index = 0; index < abs(dy); index += 1) {
-    transport_.pressButton(verticalButton, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+    if (!transport_.pressButton(verticalButton, buttonPressMs_, inputDelayMs_)) {
+      return false;
+    }
   }
+
+  return true;
 }
 
-void SwitchController::drawStroke() {
+bool SwitchController::drawStroke() {
   waitUntilReady();
-  transport_.pressButton(ControllerButton::A, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+  return transport_.pressButton(ControllerButton::A, buttonPressMs_, inputDelayMs_);
 }
 
-void SwitchController::pressButton(ControllerButton button) {
+bool SwitchController::drawLine(int dx, int dy) {
   waitUntilReady();
-  transport_.pressButton(button, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+
+  const bool horizontal = dx != 0;
+  const int steps = abs(horizontal ? dx : dy);
+
+  if (steps == 0) {
+    return false;
+  }
+
+  const ControllerButton directionButton = horizontal
+      ? (dx < 0 ? ControllerButton::DpadLeft : ControllerButton::DpadRight)
+      : (dy < 0 ? ControllerButton::DpadUp : ControllerButton::DpadDown);
+  const uint32_t comboMask =
+      controllerButtonMask(ControllerButton::A) | controllerButtonMask(directionButton);
+
+  if (!transport_.pressButton(ControllerButton::A, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
+
+  for (int step = 0; step < steps; step += 1) {
+    if (!transport_.pressButtons(comboMask, buttonPressMs_, inputDelayMs_)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-void SwitchController::holdButton(ControllerButton button, uint16_t holdMs) {
+bool SwitchController::pressButton(ControllerButton button) {
   waitUntilReady();
-  transport_.pressButton(button, holdMs, INPUT_DELAY_MS);
+  return transport_.pressButton(button, buttonPressMs_, inputDelayMs_);
 }
 
-void SwitchController::tapButton(ControllerButton button, uint16_t count) {
+bool SwitchController::holdButton(ControllerButton button, uint16_t holdMs) {
+  waitUntilReady();
+  return transport_.pressButton(button, holdMs, inputDelayMs_);
+}
+
+bool SwitchController::tapButton(ControllerButton button, uint16_t count) {
   waitUntilReady();
 
   for (uint16_t step = 0; step < count; step += 1) {
-    transport_.pressButton(button, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+    if (!transport_.pressButton(button, buttonPressMs_, inputDelayMs_)) {
+      return false;
+    }
   }
+
+  return true;
 }
 
-void SwitchController::pressButtons(uint32_t buttonsMask) {
+bool SwitchController::pressButtons(uint32_t buttonsMask) {
   waitUntilReady();
-  transport_.pressButtons(buttonsMask, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+  return transport_.pressButtons(buttonsMask, buttonPressMs_, inputDelayMs_);
 }
 
 void SwitchController::resetBasicPaletteTracking() {
@@ -171,7 +220,7 @@ void SwitchController::resetBasicPaletteTracking() {
   basicPaletteTrackingReady_ = true;
 }
 
-void SwitchController::selectColor(int index) {
+bool SwitchController::selectColor(int index) {
   waitUntilReady();
   const int slotIndex = clampPaletteSlotIndex(index);
 
@@ -182,23 +231,32 @@ void SwitchController::selectColor(int index) {
   // 3. Up moves back to the requested palette slot.
   // 3. A applies the current slot.
   // 4. B closes the palette selector and returns to drawing.
-  transport_.pressButton(ControllerButton::Y, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
 
   for (int step = 0; step < COLOR_PALETTE_RESET_TO_BOTTOM_STEPS; step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadDown);
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadDown)) {
+      return false;
+    }
   }
 
   for (int step = 0; step < (COLOR_PALETTE_SLOT_COUNT - 1 - slotIndex); step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadUp);
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadUp)) {
+      return false;
+    }
   }
 
-  pressPaletteMenuButton(transport_, ControllerButton::A);
-  pressPaletteMenuButton(transport_, ControllerButton::B);
-  delay(INPUT_DELAY_MS);
+  if (!pressPaletteMenuButton(transport_, ControllerButton::A) ||
+      !pressPaletteMenuButton(transport_, ControllerButton::B)) {
+    return false;
+  }
+  delay(inputDelayMs_);
+  return true;
 }
 
-void SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue) {
+bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue) {
   waitUntilReady();
 
   const int slotIndex = clampPaletteSlotIndex(index);
@@ -210,52 +268,73 @@ void SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
   const uint8_t valueSteps = scaleChannelToSteps(hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
 
   // Palette selection page.
-  transport_.pressButton(ControllerButton::Y, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
 
   for (int step = 0; step < COLOR_PALETTE_RESET_TO_BOTTOM_STEPS; step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadDown);
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadDown)) {
+      return false;
+    }
   }
 
   for (int step = 0; step < (COLOR_PALETTE_SLOT_COUNT - 1 - slotIndex); step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadUp);
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadUp)) {
+      return false;
+    }
   }
 
   // Enter palette editor for the current slot.
-  pressPaletteMenuButton(transport_, ControllerButton::Y);
+  if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
+    return false;
+  }
   delay(COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS);
 
   // Reset the editor state so every slot starts from the same origin:
   // move the analog cursor to the bottom-left of the color square and
   // drive the hue slider back to its left-most stop.
-  transport_.moveDirection(-1, 1, COLOR_PALETTE_EDITOR_RESET_STICK_HOLD_MS, INPUT_DELAY_MS);
+  if (!transport_.moveDirection(-1, 1, COLOR_PALETTE_EDITOR_RESET_STICK_HOLD_MS, inputDelayMs_)) {
+    return false;
+  }
 
   for (int step = 0; step < COLOR_PALETTE_EDITOR_HUE_RESET_STEPS; step += 1) {
-    transport_.pressButton(ControllerButton::ZL, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+    if (!transport_.pressButton(ControllerButton::ZL, buttonPressMs_, inputDelayMs_)) {
+      return false;
+    }
   }
 
   for (int step = 0; step < hueSteps; step += 1) {
-    transport_.pressButton(ControllerButton::ZR, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+    if (!transport_.pressButton(ControllerButton::ZR, buttonPressMs_, inputDelayMs_)) {
+      return false;
+    }
   }
 
   if (saturationSteps > 0) {
-    transport_.moveDirection(
-        1, 0, static_cast<uint16_t>(saturationSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, INPUT_DELAY_MS);
+    if (!transport_.moveDirection(
+            1, 0, static_cast<uint16_t>(saturationSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+      return false;
+    }
   }
 
   if (valueSteps > 0) {
-    transport_.moveDirection(
-        0, -1, static_cast<uint16_t>(valueSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, INPUT_DELAY_MS);
+    if (!transport_.moveDirection(
+            0, -1, static_cast<uint16_t>(valueSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+      return false;
+    }
   }
 
   // Exit editor, apply the slot, then go back to drawing mode.
-  transport_.pressButton(ControllerButton::B, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
-  transport_.pressButton(ControllerButton::A, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
-  transport_.pressButton(ControllerButton::B, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
-  delay(INPUT_DELAY_MS);
+  if (!transport_.pressButton(ControllerButton::B, buttonPressMs_, inputDelayMs_) ||
+      !transport_.pressButton(ControllerButton::A, buttonPressMs_, inputDelayMs_) ||
+      !transport_.pressButton(ControllerButton::B, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
+  delay(inputDelayMs_);
+  return true;
 }
 
-void SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t col) {
+bool SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t col) {
   waitUntilReady();
 
   const int slotIndex = clampPaletteSlotIndex(index);
@@ -266,46 +345,63 @@ void SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t
   const int rowDelta = basicColorDelta(currentRow, targetRow);
   const int colDelta = basicColorDelta(currentCol, targetCol);
 
-  transport_.pressButton(ControllerButton::Y, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
+  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
 
   for (int step = 0; step < COLOR_PALETTE_RESET_TO_BOTTOM_STEPS; step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadDown);
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadDown)) {
+      return false;
+    }
   }
 
   for (int step = 0; step < (COLOR_PALETTE_SLOT_COUNT - 1 - slotIndex); step += 1) {
-    pressPaletteMenuButton(transport_, ControllerButton::DpadUp);
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadUp)) {
+      return false;
+    }
   }
 
-  pressPaletteMenuButton(transport_, ControllerButton::Y);
+  if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
+    return false;
+  }
   delay(COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS);
 
   // Keep track of each slot's current row/column and move by direct deltas.
   // We intentionally do not treat the basic-color page as a circular grid,
   // because some game states can expose extra swatches outside the regular
   // 7x12 arrangement and wrap-around assumptions become unsafe.
-  pressPaletteMenuButton(transport_, ControllerButton::L);
+  if (!pressPaletteMenuButton(transport_, ControllerButton::L)) {
+    return false;
+  }
   delay(BASIC_COLOR_TAB_SETTLE_MS);
 
   const ControllerButton verticalButton = rowDelta < 0 ? ControllerButton::DpadUp : ControllerButton::DpadDown;
   const ControllerButton horizontalButton = colDelta < 0 ? ControllerButton::DpadLeft : ControllerButton::DpadRight;
 
   for (int step = 0; step < abs(rowDelta); step += 1) {
-    pressPaletteMenuButton(transport_, verticalButton);
+    if (!pressPaletteMenuButton(transport_, verticalButton)) {
+      return false;
+    }
   }
 
   for (int step = 0; step < abs(colDelta); step += 1) {
-    pressPaletteMenuButton(transport_, horizontalButton);
+    if (!pressPaletteMenuButton(transport_, horizontalButton)) {
+      return false;
+    }
   }
 
   // In the basic-color picker, pressing A on the target swatch immediately
   // applies the color and returns to the canvas.
-  pressPaletteMenuButton(transport_, ControllerButton::A);
+  if (!pressPaletteMenuButton(transport_, ControllerButton::A)) {
+    return false;
+  }
 
   basicPaletteSlotRows_[slotIndex] = targetRow;
   basicPaletteSlotCols_[slotIndex] = targetCol;
   basicPaletteTrackingReady_ = true;
-  delay(INPUT_DELAY_MS);
+  delay(inputDelayMs_);
+  return true;
 }
 
 bool SwitchController::resetBluetooth() {

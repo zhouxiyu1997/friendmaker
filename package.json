@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx apps/desktop/src/index.ts",
     "ui:dev": "tsx apps/desktop/src/web/server.ts",
+    "test:desktop": "node --import tsx --test apps/desktop/test/*.test.ts",
     "start:mac": "bash scripts/macos-launch.sh",
     "build": "tsc -p tsconfig.json && node scripts/copy-web-static.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
