@@ -11,6 +11,7 @@ class SwitchController {
   void begin();
   void moveHome();
   void moveCursor(int dx, int dy);
+  void moveStick(int x, int y, uint16_t holdMs);
   void drawStroke();
   void pressButton(ControllerButton button);
   void holdButton(ControllerButton button, uint16_t holdMs);

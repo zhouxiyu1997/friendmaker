@@ -134,6 +134,11 @@ void SwitchController::moveCursor(int dx, int dy) {
   }
 }
 
+void SwitchController::moveStick(int x, int y, uint16_t holdMs) {
+  waitUntilReady();
+  transport_.moveDirection(x, y, holdMs, INPUT_DELAY_MS);
+}
+
 void SwitchController::drawStroke() {
   waitUntilReady();
   transport_.pressButton(ControllerButton::A, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
@@ -225,14 +230,17 @@ void SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
   pressPaletteMenuButton(transport_, ControllerButton::Y);
   delay(COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS);
 
-  // Reset the editor state so every slot starts from the same origin:
-  // move the analog cursor to the bottom-left of the color square and
-  // drive the hue slider back to its left-most stop.
-  transport_.moveDirection(-1, 1, COLOR_PALETTE_EDITOR_RESET_STICK_HOLD_MS, INPUT_DELAY_MS);
+  // The editor opens on the basic-color tab by default. Switch to the
+  // custom-color tab before starting the reset and HSV adjustment flow.
+  pressPaletteMenuButton(transport_, ControllerButton::R);
+  delay(BASIC_COLOR_TAB_SETTLE_MS);
 
-  for (int step = 0; step < COLOR_PALETTE_EDITOR_HUE_RESET_STEPS; step += 1) {
-    transport_.pressButton(ControllerButton::ZL, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
-  }
+  // Reset the editor state so every slot starts from the same origin:
+  // move the analog cursor to the top-left of the color square, then
+  // drive the hue slider back to its left-most stop.
+  transport_.moveDirection(0, -1, COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS, INPUT_DELAY_MS);
+  transport_.moveDirection(-1, 0, COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS, INPUT_DELAY_MS);
+  transport_.pressButton(ControllerButton::ZL, COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS, INPUT_DELAY_MS);
 
   for (int step = 0; step < hueSteps; step += 1) {
     transport_.pressButton(ControllerButton::ZR, BUTTON_PRESS_DURATION_MS, INPUT_DELAY_MS);
