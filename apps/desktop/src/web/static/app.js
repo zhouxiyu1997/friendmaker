@@ -1404,6 +1404,10 @@ function boolLabel(value, labels) {
   return "未知";
 }
 
+function isControllerSendableStatus({ connected, paired, ready }) {
+  return ready === true || (connected === true && paired === true);
+}
+
 function applySerialSessionSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     return;
@@ -1487,7 +1491,9 @@ function updateControllerStatusFromLines(lines) {
   const authComplete = boolFromInfo(info.bt_auth_complete);
   const connected = boolFromInfo(info.bt_connected);
   const paired = boolFromInfo(info.bt_paired);
-  const ready = boolFromInfo(info.bt_ready_for_reports);
+  const rawReady = boolFromInfo(info.bt_ready_for_reports);
+  const ready = isControllerSendableStatus({ connected, paired, ready: rawReady });
+  const readyInferredFromPairing = rawReady !== true && connected === true && paired === true;
   const initError = info.bt_init_error ?? "-";
 
   let tone = "idle";
@@ -1504,7 +1510,9 @@ function updateControllerStatusFromLines(lines) {
     tone = "success";
     pill = "已就绪";
     title = "手柄已连接";
-    detail = "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+    detail = readyInferredFromPairing
+      ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
+      : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
   } else if (connected === true) {
     tone = "running";
     pill = "已连接";
@@ -1836,12 +1844,7 @@ function syncWindowsSerialDriverUi() {
   const driverInstallStatus = state.windowsSerialDrivers.install?.status ?? "idle";
   const driverInstalling = driverInstallStatus === "running";
   const isWindows = state.windowsSerialDrivers.platform === "win32";
-  const mainlineEnvironmentSelected = state.firmware.environmentId === "esp32dev_wireless";
-  const shouldShowDriverPanel =
-    isWindows &&
-    mainlineEnvironmentSelected &&
-    state.firmwareTooling.available &&
-    state.ports.length === 0;
+  const shouldShowDriverPanel = isWindows;
   const cp210xDriver = getWindowsSerialDriver("cp210x");
   const ch341Driver = getWindowsSerialDriver("ch341");
 
@@ -1854,9 +1857,12 @@ function syncWindowsSerialDriverUi() {
   if (!state.windowsSerialDrivers.supported) {
     els.windowsDriverHint.textContent =
       state.windowsSerialDrivers.reason ?? "当前仅支持 Windows x64 的一键串口驱动安装。";
+  } else if (state.ports.length > 0) {
+    els.windowsDriverHint.textContent =
+      "如果当前开发板仍未识别，或更换板子后仍没有新的串口出现，可以重装 CP210x 驱动；如果仍无效果，再安装 CH340/CH341 驱动。";
   } else {
     els.windowsDriverHint.textContent =
-      "PlatformIO 已就绪但仍未检测到串口。请先确认使用可传输数据的 USB 线并重新插拔 ESP32；仍无串口时优先安装 CP210x 驱动，如果仍检测不到再安装 CH340/CH341 驱动。";
+      "如果还没有检测到串口，请先确认使用可传输数据的 USB 线并重新插拔 ESP32；仍无串口时优先安装 CP210x 驱动，如果仍检测不到再安装 CH340/CH341 驱动。";
   }
 
   els.installCp210xDriverButton.disabled =
