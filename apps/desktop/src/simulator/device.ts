@@ -1,4 +1,5 @@
 import { parseSequencedFrame, type SequencedFrame } from "../protocol/sequencing.js";
+import { DEFAULT_SAFE_INPUT_TIMING, parseInputConfigCommand, type InputTiming } from "../protocol/timing.js";
 
 function parseTwoInts(line: string): { first: number; second: number } | null {
   const parts = line.trim().split(/\s+/u);
@@ -44,6 +45,7 @@ interface SimulatedDeviceState {
   drawCount: number;
   paused: boolean;
   ended: boolean;
+  timing: InputTiming;
 }
 
 interface SequencedDeviceState {
@@ -63,6 +65,7 @@ export class SimulatedDevice {
     drawCount: 0,
     paused: false,
     ended: false,
+    timing: { ...DEFAULT_SAFE_INPUT_TIMING },
   };
   private sequenceState: SequencedDeviceState = {
     sessionId: null,
@@ -145,6 +148,7 @@ export class SimulatedDevice {
       commandIndex: number;
       ackDelayMs: number;
       errorAtCommand?: number;
+      inputReportFailureAtCommand?: number;
     },
   ): Promise<SimulatedDeviceResponse> {
     const frame = parseSequencedFrame(line);
@@ -180,6 +184,14 @@ export class SimulatedDevice {
       };
     }
 
+    if (options.inputReportFailureAtCommand === options.commandIndex) {
+      await delay(options.ackDelayMs);
+      return {
+        ack: this.makeError(frame, "controller input report failed"),
+        lines,
+      };
+    }
+
     if (trimmed.length === 0) {
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
@@ -196,6 +208,17 @@ export class SimulatedDevice {
     if (trimmed === "H") {
       this.state.x = 0;
       this.state.y = 0;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
+    const inputTiming = parseInputConfigCommand(trimmed);
+
+    if (inputTiming) {
+      this.state.timing = inputTiming;
+      lines.push(
+        `INFO input-timing button=${inputTiming.buttonPressMs} delay=${inputTiming.inputDelayMs} home=${inputTiming.homeMs}`,
+      );
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
@@ -239,6 +262,22 @@ export class SimulatedDevice {
 
       this.state.x += parsed.first;
       this.state.y += parsed.second;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
+    if (trimmed.startsWith("L ")) {
+      const parsed = parseTwoInts(trimmed);
+
+      if (!parsed || (parsed.first === 0 && parsed.second === 0) || (parsed.first !== 0 && parsed.second !== 0)) {
+        await delay(options.ackDelayMs);
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid line"), lines);
+      }
+
+      this.state.drawCount += 1;
+      this.state.x += parsed.first;
+      this.state.y += parsed.second;
+      this.state.drawCount += Math.abs(parsed.first) + Math.abs(parsed.second);
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }

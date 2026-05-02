@@ -1,6 +1,7 @@
 import sharp from "sharp";
 
 import type { DrawingProfile, PixelMap } from "../types.js";
+import { createBrushGrid, gridCellBounds, isGridCellInBounds } from "../brushGrid.js";
 import { ensureParentDirectory } from "../utils/fs.js";
 import { parseHexColor } from "../utils/colors.js";
 
@@ -13,7 +14,7 @@ function buildPreviewBuffer(pixelMap: PixelMap, profile: DrawingProfile): Buffer
   }
 
   const buffer = Buffer.alloc(width * height * 4);
-  const brushSize = Math.max(1, profile.brushSize);
+  const grid = createBrushGrid(profile);
 
   for (const row of pixelMap) {
     for (const pixel of row) {
@@ -21,23 +22,15 @@ function buildPreviewBuffer(pixelMap: PixelMap, profile: DrawingProfile): Buffer
         continue;
       }
 
+      if (!isGridCellInBounds(grid, pixel)) {
+        continue;
+      }
+
       const color = parseHexColor(pixel.colorHex);
-      const originX = pixel.x * brushSize;
-      const originY = pixel.y * brushSize;
+      const bounds = gridCellBounds(grid, pixel);
 
-      for (let dy = 0; dy < brushSize; dy += 1) {
-        const canvasY = originY + dy;
-
-        if (canvasY >= height) {
-          break;
-        }
-
-        for (let dx = 0; dx < brushSize; dx += 1) {
-          const canvasX = originX + dx;
-
-          if (canvasX >= width) {
-            break;
-          }
+      for (let canvasY = bounds.y; canvasY <= bounds.maxY; canvasY += 1) {
+        for (let canvasX = bounds.x; canvasX <= bounds.maxX; canvasX += 1) {
 
           const offset = (canvasY * width + canvasX) * 4;
           buffer[offset] = color.r;

@@ -1,4 +1,5 @@
 import type { DrawingProfile, PixelizationResult } from "../types.js";
+import { createBrushGrid } from "../brushGrid.js";
 import type { ImageSource } from "./loadImage.js";
 import { autoRemoveBackground } from "./removeBackground.js";
 import { resizeImage } from "./resizeImage.js";
@@ -8,22 +9,15 @@ function collapsePixelMapForBrush(
   pixelMap: PixelizationResult["pixelMap"],
   profile: DrawingProfile,
 ): PixelizationResult["pixelMap"] {
-  const brushSize = Math.max(1, profile.brushSize);
-
-  if (brushSize === 1) {
-    return pixelMap;
-  }
-
-  const logicalWidth = Math.max(1, Math.ceil(profile.canvasWidth / brushSize));
-  const logicalHeight = Math.max(1, Math.ceil(profile.canvasHeight / brushSize));
+  const grid = createBrushGrid(profile);
   const collapsed: PixelizationResult["pixelMap"] = [];
 
-  for (let logicalY = 0; logicalY < logicalHeight; logicalY += 1) {
+  for (let logicalY = 0; logicalY < grid.gridHeight; logicalY += 1) {
     const row = [];
-    const originY = logicalY * brushSize;
+    const originY = grid.originY + logicalY * grid.brushSize;
 
-    for (let logicalX = 0; logicalX < logicalWidth; logicalX += 1) {
-      const originX = logicalX * brushSize;
+    for (let logicalX = 0; logicalX < grid.gridWidth; logicalX += 1) {
+      const originX = grid.originX + logicalX * grid.brushSize;
       const colorCounts = new Map<
         number,
         {
@@ -39,7 +33,7 @@ function collapsePixelMapForBrush(
           }
         | null = null;
 
-      for (let dy = 0; dy < brushSize; dy += 1) {
+      for (let dy = 0; dy < grid.brushSize; dy += 1) {
         const y = originY + dy;
 
         if (y >= pixelMap.length) {
@@ -52,7 +46,7 @@ function collapsePixelMapForBrush(
           continue;
         }
 
-        for (let dx = 0; dx < brushSize; dx += 1) {
+        for (let dx = 0; dx < grid.brushSize; dx += 1) {
           const x = originX + dx;
 
           if (x >= sourceRow.length) {

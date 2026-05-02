@@ -30,6 +30,41 @@ bool parseOneInt(const String &value, int &result) {
   return true;
 }
 
+bool parseInputConfigCommand(
+    const String &line, uint16_t &buttonPressMs, uint16_t &inputDelayMs, uint16_t &homeMs) {
+  if (!line.startsWith("CFG INPUT ")) {
+    return false;
+  }
+
+  const int firstSpace = line.indexOf(' ');
+  const int secondSpace = line.indexOf(' ', firstSpace + 1);
+  const int thirdSpace = line.indexOf(' ', secondSpace + 1);
+  const int fourthSpace = line.indexOf(' ', thirdSpace + 1);
+
+  if (secondSpace < 0 || thirdSpace < 0 || fourthSpace < 0) {
+    return false;
+  }
+
+  const int buttonPress = line.substring(secondSpace + 1, thirdSpace).toInt();
+  const int inputDelay = line.substring(thirdSpace + 1, fourthSpace).toInt();
+  const int home = line.substring(fourthSpace + 1).toInt();
+
+  if (buttonPress <= 0 || buttonPress > 60000 || inputDelay <= 0 || inputDelay > 60000 ||
+      home <= 0 || home > 60000) {
+    return false;
+  }
+
+  buttonPressMs = static_cast<uint16_t>(buttonPress);
+  inputDelayMs = static_cast<uint16_t>(inputDelay);
+  homeMs = static_cast<uint16_t>(home);
+  return true;
+}
+
+bool failControllerInput(String &error) {
+  error = "controller input report failed";
+  return false;
+}
+
 bool parseHexColorToken(const String &value, uint8_t &red, uint8_t &green, uint8_t &blue) {
   String token = value;
   token.trim();
@@ -317,21 +352,46 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     return true;
   }
 
+  uint16_t buttonPressMs = 0;
+  uint16_t inputDelayMs = 0;
+  uint16_t homeMs = 0;
+
+  if (parseInputConfigCommand(line, buttonPressMs, inputDelayMs, homeMs)) {
+    controller.configureInputTiming(buttonPressMs, inputDelayMs, homeMs);
+    Serial.printf(
+        "INFO action=input-config button=%u delay=%u home=%u\n",
+        buttonPressMs,
+        inputDelayMs,
+        homeMs);
+    return true;
+  }
+
+  if (line.startsWith("CFG INPUT")) {
+    error = "invalid input config";
+    return false;
+  }
+
   if (line == "H") {
-    controller.moveHome();
+    if (!controller.moveHome()) {
+      return failControllerInput(error);
+    }
     Serial.println("INFO action=home");
     return true;
   }
 
   if (line == "P") {
-    controller.drawStroke();
+    if (!controller.drawStroke()) {
+      return failControllerInput(error);
+    }
     Serial.println("INFO action=draw button=A");
     return true;
   }
 
   if (line == "LR" || line == "L+R") {
-    controller.pressButtons(controllerButtonMask(ControllerButton::L) |
-                            controllerButtonMask(ControllerButton::R));
+    if (!controller.pressButtons(controllerButtonMask(ControllerButton::L) |
+                                 controllerButtonMask(ControllerButton::R))) {
+      return failControllerInput(error);
+    }
     Serial.println("INFO action=combo name=L+R");
     return true;
   }
@@ -342,12 +402,16 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
 
   if (parseButtonCommand(line, commandButton, commandButtonsMask, isComboCommand)) {
     if (isComboCommand) {
-      controller.pressButtons(commandButtonsMask);
+      if (!controller.pressButtons(commandButtonsMask)) {
+        return failControllerInput(error);
+      }
       Serial.println("INFO action=combo name=L+R");
       return true;
     }
 
-    controller.pressButton(commandButton);
+    if (!controller.pressButton(commandButton)) {
+      return failControllerInput(error);
+    }
     Serial.printf("INFO action=button name=%s\n", buttonName(commandButton));
     return true;
   }
@@ -379,8 +443,27 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
       return false;
     }
 
-    controller.moveCursor(dx, dy);
+    if (!controller.moveCursor(dx, dy)) {
+      return failControllerInput(error);
+    }
     Serial.printf("INFO action=move dx=%d dy=%d\n", dx, dy);
+    return true;
+  }
+
+  if (line.startsWith("L ")) {
+    int dx = 0;
+    int dy = 0;
+
+    if (!parseTwoInts(line, dx, dy) || (dx == 0 && dy == 0) || (dx != 0 && dy != 0)) {
+      error = "invalid line";
+      return false;
+    }
+
+    if (!controller.drawLine(dx, dy)) {
+      return failControllerInput(error);
+    }
+
+    Serial.printf("INFO action=line dx=%d dy=%d\n", dx, dy);
     return true;
   }
 
@@ -388,7 +471,9 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
   uint16_t holdMs = 0;
 
   if (parseHoldButtonCommand(line, holdButton, holdMs)) {
-    controller.holdButton(holdButton, holdMs);
+    if (!controller.holdButton(holdButton, holdMs)) {
+      return failControllerInput(error);
+    }
     Serial.printf("INFO action=hold button=%s ms=%u\n", buttonName(holdButton), holdMs);
     return true;
   }
@@ -396,7 +481,9 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
   uint16_t tapCount = 0;
 
   if (parseTapButtonCommand(line, holdButton, tapCount)) {
-    controller.tapButton(holdButton, tapCount);
+    if (!controller.tapButton(holdButton, tapCount)) {
+      return failControllerInput(error);
+    }
     Serial.printf("INFO action=tap button=%s count=%u\n", buttonName(holdButton), tapCount);
     return true;
   }
@@ -407,7 +494,9 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
   int paletteSlotIndex = 0;
 
   if (parsePaletteConfigCommand(line, paletteSlotIndex, paletteRed, paletteGreen, paletteBlue)) {
-    controller.configurePaletteSlot(paletteSlotIndex, paletteRed, paletteGreen, paletteBlue);
+    if (!controller.configurePaletteSlot(paletteSlotIndex, paletteRed, paletteGreen, paletteBlue)) {
+      return failControllerInput(error);
+    }
     Serial.printf(
         "INFO action=palette-config slot=%d hex=#%02X%02X%02X\n",
         paletteSlotIndex,
@@ -427,8 +516,10 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
   }
 
   if (parseBasicColorConfigCommand(line, paletteSlotIndex, basicColorRow, basicColorCol)) {
-    controller.configureBasicPaletteSlot(
-        paletteSlotIndex, static_cast<uint8_t>(basicColorRow), static_cast<uint8_t>(basicColorCol));
+    if (!controller.configureBasicPaletteSlot(
+            paletteSlotIndex, static_cast<uint8_t>(basicColorRow), static_cast<uint8_t>(basicColorCol))) {
+      return failControllerInput(error);
+    }
     Serial.printf(
         "INFO action=basic-color-config slot=%d row=%d col=%d\n",
         paletteSlotIndex,
@@ -445,7 +536,9 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
       return false;
     }
 
-    controller.selectColor(index);
+    if (!controller.selectColor(index)) {
+      return failControllerInput(error);
+    }
     Serial.printf("INFO action=color slot=%d\n", index);
     return true;
   }
@@ -467,7 +560,9 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
   const ControllerButton button = parseButton(line, ok);
 
   if (ok) {
-    controller.pressButton(button);
+    if (!controller.pressButton(button)) {
+      return failControllerInput(error);
+    }
     Serial.printf("INFO action=button name=%s\n", buttonName(button));
     return true;
   }

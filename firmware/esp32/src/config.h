@@ -3,10 +3,12 @@
 #include <Arduino.h>
 
 constexpr uint32_t SERIAL_BAUD_RATE = 115200;
-constexpr uint16_t HOME_DURATION_MS = 1500;
+constexpr uint16_t HOME_DURATION_MS = 1800;
 constexpr uint16_t CELL_MOVE_DURATION_MS = 80;
-constexpr uint16_t INPUT_DELAY_MS = 40;
-constexpr uint16_t BUTTON_PRESS_DURATION_MS = 60;
+constexpr uint16_t INPUT_DELAY_MS = 100;
+constexpr uint16_t BUTTON_PRESS_DURATION_MS = 100;
+constexpr uint16_t HID_REPEAT_INTERVAL_MS = 16;
+constexpr uint16_t HID_SEND_REPORT_TIMEOUT_MS = 250;
 constexpr uint8_t COLOR_PALETTE_SLOT_COUNT = 9;
 constexpr uint8_t COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
 constexpr uint16_t COLOR_PALETTE_MENU_OPEN_SETTLE_MS = 180;

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "config.h"
 #include "controller_transport.h"
 
 class SwitchController {
@@ -9,17 +10,19 @@ class SwitchController {
   explicit SwitchController(ControllerTransport &transport);
 
   void begin();
-  void moveHome();
-  void moveCursor(int dx, int dy);
-  void drawStroke();
-  void pressButton(ControllerButton button);
-  void holdButton(ControllerButton button, uint16_t holdMs);
-  void tapButton(ControllerButton button, uint16_t count);
-  void pressButtons(uint32_t buttonsMask);
-  void selectColor(int index);
+  void configureInputTiming(uint16_t buttonPressMs, uint16_t inputDelayMs, uint16_t homeMs);
+  bool moveHome();
+  bool moveCursor(int dx, int dy);
+  bool drawStroke();
+  bool drawLine(int dx, int dy);
+  bool pressButton(ControllerButton button);
+  bool holdButton(ControllerButton button, uint16_t holdMs);
+  bool tapButton(ControllerButton button, uint16_t count);
+  bool pressButtons(uint32_t buttonsMask);
+  bool selectColor(int index);
   void resetBasicPaletteTracking();
-  void configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue);
-  void configureBasicPaletteSlot(int index, uint8_t row, uint8_t col);
+  bool configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue);
+  bool configureBasicPaletteSlot(int index, uint8_t row, uint8_t col);
   bool resetBluetooth();
   void pause();
   void resume();
@@ -33,6 +36,9 @@ class SwitchController {
   uint8_t basicPaletteSlotRows_[9] = {};
   uint8_t basicPaletteSlotCols_[9] = {};
   bool basicPaletteTrackingReady_ = false;
+  uint16_t buttonPressMs_ = BUTTON_PRESS_DURATION_MS;
+  uint16_t inputDelayMs_ = INPUT_DELAY_MS;
+  uint16_t homeMs_ = HOME_DURATION_MS;
 
   void waitUntilReady() const;
 };

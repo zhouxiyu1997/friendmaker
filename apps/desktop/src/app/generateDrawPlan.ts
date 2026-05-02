@@ -1,9 +1,19 @@
 import type { ImageSource } from "../image/loadImage.js";
+import { createBrushGrid, gridCellBounds, isGridCellInBounds } from "../brushGrid.js";
 import { pixelizeImage } from "../image/pixelize.js";
 import { renderPreviewToBuffer } from "../image/renderPreview.js";
 import { estimateRuntimeMs, generateScanlineCommands } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
+import type { DrawCommand } from "../protocol/commands.js";
 import type { CanvasBounds, DrawingProfile, PixelMap } from "../types.js";
+
+export interface DrawPlanPathStats {
+  lineRunCount: number;
+  maxMoveSteps: number;
+  longMoveOver50: number;
+  longMoveOver100: number;
+  longMoveOver200: number;
+}
 
 export interface DrawPlan {
   commands: string[];
@@ -14,6 +24,7 @@ export interface DrawPlan {
   estimatedRuntimeMs: number;
   previewPng: Buffer;
   imageBounds: CanvasBounds | null;
+  pathStats: DrawPlanPathStats;
 }
 
 export async function generateDrawPlan(
@@ -29,8 +40,9 @@ export async function generateDrawPlan(
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
-  const commands = generateScanlineCommands(pixelMap, profile);
+  const drawCommands = generateScanlineCommands(pixelMap, profile);
   const imageBounds = calculateCanvasBounds(pixelMap, profile);
+  const pathStats = calculatePathStats(drawCommands);
   const paletteHexes = Array.from(
     pixelMap
       .flatMap((row) =>
@@ -45,19 +57,20 @@ export async function generateDrawPlan(
     .map(([, colorHex]) => colorHex);
 
   return {
-    commands: serializeCommands(commands),
+    commands: serializeCommands(drawCommands),
     pixelMap,
     usedColorIndexes,
     paletteHexes,
     totalPixels: pixelMap.length * (pixelMap[0]?.length ?? 0),
-    estimatedRuntimeMs: estimateRuntimeMs(commands, profile),
+    estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),
     previewPng,
     imageBounds,
+    pathStats,
   };
 }
 
-function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): CanvasBounds | null {
-  const brushSize = Math.max(1, profile.brushSize);
+export function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): CanvasBounds | null {
+  const grid = createBrushGrid(profile);
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = -1;
@@ -69,15 +82,16 @@ function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): Can
         continue;
       }
 
-      const startX = pixel.x * brushSize;
-      const startY = pixel.y * brushSize;
-      const endX = Math.min(profile.canvasWidth, startX + brushSize) - 1;
-      const endY = Math.min(profile.canvasHeight, startY + brushSize) - 1;
+      if (!isGridCellInBounds(grid, pixel)) {
+        continue;
+      }
 
-      minX = Math.min(minX, startX);
-      minY = Math.min(minY, startY);
-      maxX = Math.max(maxX, endX);
-      maxY = Math.max(maxY, endY);
+      const bounds = gridCellBounds(grid, pixel);
+
+      minX = Math.min(minX, bounds.x);
+      minY = Math.min(minY, bounds.y);
+      maxX = Math.max(maxX, bounds.maxX);
+      maxY = Math.max(maxY, bounds.maxY);
     }
   }
 
@@ -92,5 +106,47 @@ function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): Can
     height: maxY - minY + 1,
     maxX,
     maxY,
+  };
+}
+
+export function calculatePathStats(commands: DrawCommand[]): DrawPlanPathStats {
+  let lineRunCount = 0;
+  let maxMoveSteps = 0;
+  let longMoveOver50 = 0;
+  let longMoveOver100 = 0;
+  let longMoveOver200 = 0;
+
+  for (const command of commands) {
+    if (command.type === "line") {
+      lineRunCount += 1;
+      continue;
+    }
+
+    if (command.type !== "move") {
+      continue;
+    }
+
+    const steps = Math.abs(command.dx) + Math.abs(command.dy);
+    maxMoveSteps = Math.max(maxMoveSteps, steps);
+
+    if (steps > 50) {
+      longMoveOver50 += 1;
+    }
+
+    if (steps > 100) {
+      longMoveOver100 += 1;
+    }
+
+    if (steps > 200) {
+      longMoveOver200 += 1;
+    }
+  }
+
+  return {
+    lineRunCount,
+    maxMoveSteps,
+    longMoveOver50,
+    longMoveOver100,
+    longMoveOver200,
   };
 }

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog } from "electron";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,11 +62,54 @@ function getPlatformIoSafeDataRoot(): string {
   return homeRoot;
 }
 
+async function hashDirectory(root: string, current = root, files: string[] = []): Promise<string[]> {
+  const entries = await readdir(current, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.name === ".pio") {
+      continue;
+    }
+
+    const fullPath = path.join(current, entry.name);
+
+    if (entry.isDirectory()) {
+      await hashDirectory(root, fullPath, files);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(path.relative(root, fullPath));
+    }
+  }
+
+  return files;
+}
+
+async function getFirmwareSourceFingerprint(sourceRoot: string): Promise<string> {
+  const hash = createHash("sha256");
+  const files = (await hashDirectory(sourceRoot)).sort();
+
+  for (const file of files) {
+    const fullPath = path.join(sourceRoot, file);
+    const info = await stat(fullPath);
+
+    hash.update(file);
+    hash.update("\0");
+    hash.update(String(info.size));
+    hash.update("\0");
+    hash.update(await readFile(fullPath));
+    hash.update("\0");
+  }
+
+  return hash.digest("hex");
+}
+
 async function ensureWritableFirmwareRoot(): Promise<string> {
   const dataRoot = getPlatformIoSafeDataRoot();
   const targetRoot = path.join(dataRoot, "firmware", "esp32");
   const markerPath = path.join(dataRoot, "firmware", ".friend-maker-version");
   const sourceRoot = getBundledFirmwareRoot();
+  const expectedMarker = `${app.getVersion()}:${await getFirmwareSourceFingerprint(sourceRoot)}`;
   let marker = "";
 
   try {
@@ -74,7 +118,7 @@ async function ensureWritableFirmwareRoot(): Promise<string> {
     marker = "";
   }
 
-  if (marker === app.getVersion() && existsSync(path.join(targetRoot, "platformio.ini"))) {
+  if (marker === expectedMarker && existsSync(path.join(targetRoot, "platformio.ini"))) {
     return targetRoot;
   }
 
@@ -84,7 +128,7 @@ async function ensureWritableFirmwareRoot(): Promise<string> {
     recursive: true,
     filter: (source) => !source.includes(`${path.sep}.pio${path.sep}`),
   });
-  await writeFile(markerPath, `${app.getVersion()}\n`, "utf8");
+  await writeFile(markerPath, `${expectedMarker}\n`, "utf8");
 
   return targetRoot;
 }
