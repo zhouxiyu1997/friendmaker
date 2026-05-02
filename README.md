@@ -26,15 +26,6 @@
 
 关键词：`Friend Maker`、`朋友制作器`、`Tomodachi Life`、`朋友收集：梦想生活`、`Nintendo Switch auto draw`、`ESP32 Pro Controller emulator`、`pixel art drawing automation`、`Bluetooth Classic HID`。
 
-### 提醒
-
-这个项目仍在持续完善中，当前版本在部分图片或设备环境下可能出现 `颜色偏差`，复杂图片偶尔可能出现 `色块偏移`，建议优先从 `简单图片` 开始尝试。
-
-目前已知改善的解决方法：
-
-- 尽量远离附近的蓝牙设备，或先关闭不必要的蓝牙设备
-- 在连接上虚拟手柄后，不再使用实体手柄和屏幕操作
-
 ### 平台支持
 
 - 支持桌面端一键安装启动：`macOS`
@@ -369,15 +360,6 @@ docs/media/          README 展示图片与视频
 It converts images into pixel grids and controller action scripts, then uses an ESP32 to emulate Switch Pro Controller input and draw automatically on the in-game canvas. The current version is primarily tailored for drawing workflows in `Tomodachi Life` and 《朋友收集：梦想生活》.
 
 Keywords: `Friend Maker`, `Tomodachi Life`, `Nintendo Switch auto draw`, `ESP32 Pro Controller emulator`, `pixel art drawing automation`, `Bluetooth Classic HID`.
-
-### Note
-
-This project is still being improved; the current version may show `color deviation` on some images or device setups, and complex drawings may occasionally produce `misaligned color blocks`, so starting with `simple images` is recommended.
-
-Known ways to improve stability:
-
-- keep nearby Bluetooth devices away, or turn off unnecessary Bluetooth devices first
-- after the virtual controller is connected, stop using the physical controller and the touch screen
 
 ### Compatibility
 
