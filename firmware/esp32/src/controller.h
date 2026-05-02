@@ -13,7 +13,6 @@ class SwitchController {
   void configureInputTiming(uint16_t buttonPressMs, uint16_t inputDelayMs, uint16_t homeMs);
   bool moveHome();
   bool moveCursor(int dx, int dy);
-  bool moveStick(int x, int y, uint16_t holdMs);
   bool drawStroke();
   bool drawLine(int dx, int dy);
   bool pressButton(ControllerButton button);

@@ -28,7 +28,7 @@
           </p>
           <p class="subcopy">
             推荐顺序是先刷固件，再做手柄测试，最后回到“脚本生成”页导入图片并先点“仅生成命令”。手柄测试未通过时，不允许开始正式绘制。开始前请确认
-            Switch 处于初始绘画页面、画笔停在画布中心、侧边色彩槽保持默认；“自定义多色（自动量化）”已开放实验入口，但稳定性仍弱于“官方色绘制”。建议首次先用简单图和大画笔测试，开始绘制后不要再操作手柄或触碰屏幕，以免错位。
+            Switch 处于初始绘画页面、画笔停在画布中心、侧边色彩槽保持默认；彩色模式请使用“官方色绘制”，自定义调色板暂未开放。建议首次先用简单图和大画笔测试，开始绘制后不要再操作手柄或触碰屏幕，以免错位。
           </p>
         </div>
         <div class="hero-side">
@@ -104,7 +104,7 @@
           <section class="panel panel-form">
             <div class="panel-head">
               <h2>输入</h2>
-              <p>导入图片，设定单色、官方色或自定义多色（自动量化）参数，然后发送到 ESP32 开始绘制。</p>
+              <p>导入图片，设定单色或官方色绘制参数，然后发送到 ESP32 开始绘制。</p>
             </div>
 
             <label class="file-drop" for="image-input">
@@ -127,7 +127,7 @@
             <div class="execution-box mono-note-box">
               <div class="panel-head compact">
                 <h2>绘制模式</h2>
-                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；自定义多色模式会先自动量化颜色，再按批次写入 9 个自定义色槽。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
+                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；画笔大小按下方选择生成。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
               </div>
 
               <p class="hint" id="studio-mode-hint">
@@ -159,7 +159,6 @@
                 <span>绘制模式</span>
                 <select id="color-mode-select">
                   <option value="mono" selected>单色绘制</option>
-                  <option value="palette">自定义多色（测试中）</option>
                   <option value="official">官方色绘制</option>
                 </select>
               </label>
@@ -351,9 +350,9 @@
 
           <section id="official-palette-panel" class="panel panel-official-palette hidden">
             <div class="panel-head">
-              <h2>当前预览用色</h2>
+              <h2>官方色盘预览</h2>
               <p id="official-palette-summary">
-                这里会显示程序当前使用的颜色集合，并高亮或完整列出这张图实际量化到的颜色。
+                这里会显示程序当前使用的 7x12 官方色盘，并高亮这张图实际量化到的颜色格。
               </p>
             </div>
 
@@ -363,7 +362,7 @@
           <section class="panel panel-script">
             <div class="panel-head">
               <h2>脚本</h2>
-              <p>这是当前协议下可直接发送给设备的动作脚本。官方色绘制和自定义多色（自动量化）都会额外插入色盘配置命令。</p>
+              <p>这是当前协议下可直接发送给设备的动作脚本。官方色绘制会额外插入内置色盘配置命令。</p>
             </div>
 
             <textarea id="commands-output" class="code-block" spellcheck="false" placeholder="生成后会在这里显示命令脚本"></textarea>
