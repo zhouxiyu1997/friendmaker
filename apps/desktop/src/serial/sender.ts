@@ -13,6 +13,13 @@ const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
 const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
 
+class DeviceAckError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DeviceAckError";
+  }
+}
+
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
   retries: number;
@@ -137,7 +144,9 @@ function waitForAck(
           return;
         }
 
-        finish(() => reject(new Error(`Device returned ERR ${ack.sessionId} ${ack.sequence} ${ack.message}`)));
+        finish(() =>
+          reject(new DeviceAckError(`Device returned ERR ${ack.sessionId} ${ack.sequence} ${ack.message}`)),
+        );
         return;
       }
 
@@ -152,7 +161,7 @@ function waitForAck(
 
         finish(() =>
           reject(
-            new Error(
+            new DeviceAckError(
               `Device returned an unsequenced or malformed ACK: ${line}. Reflash the ESP32 firmware for the SEQ protocol.`,
             ),
           ),
@@ -529,6 +538,14 @@ export class SerialCommandSession {
         } catch (error) {
           if (options.shouldStop?.()) {
             throw new Error("Execution stopped.");
+          }
+
+          if (error instanceof DeviceAckError) {
+            const message = error.message;
+            options.onDeviceLine?.(
+              `ERR fatal command=${index + 1} sequence=${commandSequence} command="${command}" reason=${message}`,
+            );
+            throw error;
           }
 
           if (attempt >= options.retries) {

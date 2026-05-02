@@ -380,6 +380,11 @@ void ClassicBtControllerTransport::clearConnectionState() {
   lastSendReportReason_ = 0;
   lastSendReportId_ = 0;
   sendReportFailureCount_ = 0;
+  explicitInputReportActive_ = false;
+  inputReportAckPending_ = false;
+  inputReportAckReady_ = false;
+  inputReportAckStatus_ = -1;
+  inputReportAckReason_ = 0;
   lastDropReason_ = "none";
 }
 
@@ -558,34 +563,42 @@ void ClassicBtControllerTransport::ensureSendTask() {
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   while (true) {
-    transport->sendCurrentInputReport(false);
+    if (!transport->explicitInputReportActive_) {
+      transport->sendCurrentInputReport(false);
+    }
     vTaskDelay(pdMS_TO_TICKS((transport->connected_ || transport->paired_) ? 15 : 100));
   }
 }
 
-void ClassicBtControllerTransport::pressButtons(
+bool ClassicBtControllerTransport::pressButtons(
     uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
+  explicitInputReportActive_ = true;
   setButtonBits(buttonsMask);
   updateInputReport();
-  sendCurrentInputReport(true);
+  const bool pressOk = sendCurrentInputReport(true, true);
   delay(holdMs);
   clearInputs();
-  sendCurrentInputReport(true);
+  const bool releaseOk = sendCurrentInputReport(true, true);
   delay(settleMs);
+  explicitInputReportActive_ = false;
+  return pressOk && releaseOk;
 }
 
-void ClassicBtControllerTransport::moveDirection(
+bool ClassicBtControllerTransport::moveDirection(
     int x, int y, uint16_t holdMs, uint16_t settleMs) {
+  explicitInputReportActive_ = true;
   buttonsRight_ = 0;
   buttonsShared_ = 0;
   buttonsLeft_ = 0;
   setLeftStickFromVector(x, y);
   updateInputReport();
-  sendCurrentInputReport(true);
+  const bool moveOk = sendCurrentInputReport(true, true);
   delay(holdMs);
   clearInputs();
-  sendCurrentInputReport(true);
+  const bool releaseOk = sendCurrentInputReport(true, true);
   delay(settleMs);
+  explicitInputReportActive_ = false;
+  return moveOk && releaseOk;
 }
 
 bool ClassicBtControllerTransport::resetConnection() {
@@ -651,7 +664,7 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.print("INFO bt_paired=");
   output.println(boolName(paired_));
   output.print("INFO bt_ready_for_reports=");
-  output.println(boolName(readyForReports_));
+  output.println(boolName(isControllerInputReady()));
   output.print("INFO bt_init_step=");
   output.println(initStep_);
   output.print("INFO bt_init_error=");
@@ -687,8 +700,45 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
 
 const char *ClassicBtControllerTransport::name() const { return CONTROL_TRANSPORT; }
 
-bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
-  if (!readyForReports_) {
+bool ClassicBtControllerTransport::isHidReportChannelOpen() const {
+  return connected_ && appRegistered_ && hidReady_;
+}
+
+bool ClassicBtControllerTransport::isControllerInputReady() const {
+  return isHidReportChannelOpen() && paired_;
+}
+
+bool ClassicBtControllerTransport::waitForInputReportAck() {
+  const uint32_t startMs = millis();
+
+  while (inputReportAckPending_ && (millis() - startMs) < HID_REPORT_ACK_TIMEOUT_MS) {
+    delay(1);
+  }
+
+  if (inputReportAckPending_) {
+    inputReportAckPending_ = false;
+    inputReportAckReady_ = false;
+    sendReportFailureCount_ += 1;
+    Serial.printf("WARN bt send_report ack timeout ms=%u\n", HID_REPORT_ACK_TIMEOUT_MS);
+    return false;
+  }
+
+  if (!inputReportAckReady_ || inputReportAckStatus_ != ESP_HIDD_SUCCESS) {
+    Serial.printf(
+        "WARN bt send_report ack failed status=%d reason=%u\n",
+        inputReportAckStatus_,
+        inputReportAckReason_);
+    return false;
+  }
+
+  inputReportAckReady_ = false;
+  return true;
+}
+
+bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool waitForCallback) {
+  readyForReports_ = isHidReportChannelOpen();
+
+  if (!readyForReports_ || (logFailure && !isControllerInputReady())) {
     if (logFailure) {
       Serial.println("WARN bt report skipped reason=not-ready");
     }
@@ -701,6 +751,13 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
   const uint8_t *payload = shouldSendFullReport ? report30_ : dummyReport_;
   const size_t payloadLength = shouldSendFullReport ? sizeof(report30_) : sizeof(dummyReport_);
 
+  if (waitForCallback) {
+    inputReportAckPending_ = true;
+    inputReportAckReady_ = false;
+    inputReportAckStatus_ = -1;
+    inputReportAckReason_ = 0;
+  }
+
   const esp_err_t err = esp_bt_hid_device_send_report(
       ESP_HIDD_REPORT_TYPE_INTRDATA,
       0x30,
@@ -711,7 +768,8 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = 0x30;
-    readyForReports_ = false;
+    readyForReports_ = isHidReportChannelOpen();
+    inputReportAckPending_ = false;
     if (logFailure) {
       Serial.printf(
           "WARN bt send_report failed err=%s connected=%s fail_count=%lu\n",
@@ -722,12 +780,19 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
     return false;
   }
 
+  if (waitForCallback && !waitForInputReportAck()) {
+    readyForReports_ = isHidReportChannelOpen();
+    return false;
+  }
+
   timer_ = static_cast<uint8_t>(timer_ + 1);
   return true;
 }
 
 bool ClassicBtControllerTransport::sendSubcommandReply(
     uint8_t reportId, const uint8_t *data, size_t length, const char *label) {
+  readyForReports_ = isHidReportChannelOpen();
+
   if (!readyForReports_) {
     Serial.printf("WARN bt reply skipped reason=not-ready label=%s\n", label);
     return false;
@@ -743,7 +808,7 @@ bool ClassicBtControllerTransport::sendSubcommandReply(
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = reportId;
-    readyForReports_ = false;
+    readyForReports_ = isHidReportChannelOpen();
     Serial.printf(
         "WARN bt reply failed label=%s err=%s fail_count=%lu\n",
         label,
@@ -986,7 +1051,13 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;
       lastSendReportId_ = param->send_report.report_id;
-      readyForReports_ = param->send_report.status == ESP_HIDD_SUCCESS && connected_;
+      readyForReports_ = isHidReportChannelOpen();
+      if (inputReportAckPending_ && param->send_report.report_id == 0x30) {
+        inputReportAckStatus_ = param->send_report.status;
+        inputReportAckReason_ = param->send_report.reason;
+        inputReportAckReady_ = true;
+        inputReportAckPending_ = false;
+      }
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
         Serial.printf(
             "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
@@ -1076,19 +1147,21 @@ ClassicBtControllerTransport *ClassicBtControllerTransport::instance_ = nullptr;
 
 void ClassicBtControllerTransport::begin() {}
 
-void ClassicBtControllerTransport::pressButtons(
+bool ClassicBtControllerTransport::pressButtons(
     uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
   (void)buttonsMask;
   delay(holdMs);
   delay(settleMs);
+  return false;
 }
 
-void ClassicBtControllerTransport::moveDirection(
+bool ClassicBtControllerTransport::moveDirection(
     int x, int y, uint16_t holdMs, uint16_t settleMs) {
   (void)x;
   (void)y;
   delay(holdMs);
   delay(settleMs);
+  return false;
 }
 
 bool ClassicBtControllerTransport::resetConnection() { return false; }
@@ -1109,8 +1182,12 @@ void ClassicBtControllerTransport::setLeftStickFromVector(int x, int y) {
 }
 void ClassicBtControllerTransport::updateInputReport() {}
 void ClassicBtControllerTransport::ensureSendTask() {}
-bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
+bool ClassicBtControllerTransport::isHidReportChannelOpen() const { return false; }
+bool ClassicBtControllerTransport::isControllerInputReady() const { return false; }
+bool ClassicBtControllerTransport::waitForInputReportAck() { return false; }
+bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool waitForCallback) {
   (void)logFailure;
+  (void)waitForCallback;
   return false;
 }
 bool ClassicBtControllerTransport::sendSubcommandReply(

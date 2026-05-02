@@ -8,8 +8,8 @@
 class ClassicBtControllerTransport : public ControllerTransport {
  public:
   void begin() override;
-  void pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) override;
-  void moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) override;
+  bool pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) override;
+  bool moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) override;
   bool resetConnection() override;
   void printStatus(Print &output) const override;
   const char *name() const override;
@@ -24,7 +24,10 @@ class ClassicBtControllerTransport : public ControllerTransport {
   void setLeftStickFromVector(int x, int y);
   void updateInputReport();
   void ensureSendTask();
-  bool sendCurrentInputReport(bool logFailure);
+  bool isHidReportChannelOpen() const;
+  bool isControllerInputReady() const;
+  bool waitForInputReportAck();
+  bool sendCurrentInputReport(bool logFailure, bool waitForCallback = false);
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);
   bool attemptVirtualCablePlug(const uint8_t peerAddress[6], const char *reason);
   void enterReconnectableState(const char *reason);
@@ -74,5 +77,10 @@ class ClassicBtControllerTransport : public ControllerTransport {
   uint8_t lastSendReportReason_ = 0;
   uint8_t lastSendReportId_ = 0;
   uint32_t sendReportFailureCount_ = 0;
+  volatile bool explicitInputReportActive_ = false;
+  volatile bool inputReportAckPending_ = false;
+  volatile bool inputReportAckReady_ = false;
+  volatile int inputReportAckStatus_ = -1;
+  volatile uint8_t inputReportAckReason_ = 0;
   const char *lastDropReason_ = "none";
 };

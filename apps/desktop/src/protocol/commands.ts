@@ -9,6 +9,7 @@ export type DrawCommand =
   | { type: "basicPaletteReset" }
   | { type: "paletteConfig"; slot: number; colorHex: string }
   | { type: "basicPaletteConfig"; slot: number; row: number; col: number }
+  | { type: "inputConfig"; buttonPressMs: number; inputDelayMs: number; homeMs: number }
   | { type: "wait"; ms: number }
   | { type: "pause" }
   | { type: "resume" }
@@ -44,6 +45,14 @@ export function paletteConfigCommand(slot: number, colorHex: string): DrawComman
 
 export function basicPaletteConfigCommand(slot: number, row: number, col: number): DrawCommand {
   return { type: "basicPaletteConfig", slot, row, col };
+}
+
+export function inputConfigCommand(
+  buttonPressMs: number,
+  inputDelayMs: number,
+  homeMs: number,
+): DrawCommand {
+  return { type: "inputConfig", buttonPressMs, inputDelayMs, homeMs };
 }
 
 export function waitCommand(ms: number): DrawCommand {

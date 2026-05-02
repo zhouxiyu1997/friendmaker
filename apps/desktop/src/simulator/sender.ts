@@ -79,16 +79,30 @@ export class SimulatedAckSender implements SenderControls {
       const framedCommand = formatSequencedCommand(sessionId, commandSequence, command);
 
       while (!sent) {
-        const response = await withTimeout(
-          this.device.executeCommand(framedCommand, {
-            commandIndex: index + 1,
-            ackDelayMs: options.ackDelayMs,
-            ...(options.errorAtCommand !== undefined
-              ? { errorAtCommand: options.errorAtCommand }
-              : {}),
-          }),
-          options.ackTimeoutMs,
-        );
+        let response;
+        try {
+          response = await withTimeout(
+            this.device.executeCommand(framedCommand, {
+              commandIndex: index + 1,
+              ackDelayMs: options.ackDelayMs,
+              ...(options.errorAtCommand !== undefined
+                ? { errorAtCommand: options.errorAtCommand }
+                : {}),
+            }),
+            options.ackTimeoutMs,
+          );
+        } catch (error) {
+          if (attempt >= options.retries) {
+            throw error;
+          }
+
+          const message = error instanceof Error ? error.message : String(error);
+          options.onDeviceLine?.(
+            `WARN retry command=${index + 1} attempt=${attempt + 1} reason=${message}`,
+          );
+          attempt += 1;
+          continue;
+        }
 
         for (const line of response.lines) {
           options.onDeviceLine?.(line);
@@ -101,15 +115,10 @@ export class SimulatedAckSender implements SenderControls {
         }
 
         if (ack.type !== "ok") {
-          if (attempt >= options.retries) {
-            throw new Error(`Device returned ${response.ack}`);
-          }
-
           options.onDeviceLine?.(
-            `WARN retry command=${index + 1} attempt=${attempt + 1} reason=${response.ack}`,
+            `ERR fatal command=${index + 1} sequence=${commandSequence} command="${command}" reason=${response.ack}`,
           );
-          attempt += 1;
-          continue;
+          throw new Error(`Device returned ${response.ack}`);
         }
 
         sent = true;

@@ -33,6 +33,10 @@ function toNonNegativeNumber(value: unknown, fallback: number): number {
   return normalized >= 0 ? normalized : fallback;
 }
 
+function toOptionalNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 function toBrushSize(value: unknown, fallback: DrawingProfile["brushSize"]): DrawingProfile["brushSize"] {
   return typeof value === "number" && VALID_BRUSH_SIZES.has(value as DrawingProfile["brushSize"])
     ? (value as DrawingProfile["brushSize"])
@@ -53,6 +57,7 @@ export async function loadProfile(profilePath?: string): Promise<DrawingProfile>
       : parsed.colorMode === "official"
         ? OFFICIAL_PALETTE.slice()
         : DEFAULT_PALETTE.slice();
+  const reanchorEveryDraws = toOptionalNonNegativeNumber(parsed.reanchorEveryDraws);
 
   return {
     profileName: toString(parsed.profileName, DEFAULT_PROFILE.profileName),
@@ -67,6 +72,7 @@ export async function loadProfile(profilePath?: string): Promise<DrawingProfile>
     colorChangeDuration: toNumber(parsed.colorChangeDuration, DEFAULT_PROFILE.colorChangeDuration),
     ackTimeoutMs: toNumber(parsed.ackTimeoutMs, DEFAULT_PROFILE.ackTimeoutMs),
     commandRetryCount: toNumber(parsed.commandRetryCount, DEFAULT_PROFILE.commandRetryCount),
+    ...(reanchorEveryDraws !== undefined ? { reanchorEveryDraws } : {}),
     drawButton: parsed.drawButton ?? DEFAULT_PROFILE.drawButton,
     colorMode:
       parsed.colorMode === "palette" || parsed.colorMode === "official"

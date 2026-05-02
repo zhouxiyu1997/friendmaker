@@ -41,6 +41,7 @@ export interface DrawingProfile {
   colorChangeDuration: number;
   ackTimeoutMs: number;
   commandRetryCount: number;
+  reanchorEveryDraws?: number;
   drawButton: ControllerButton;
   colorMode: ColorMode;
   colorCount: number;

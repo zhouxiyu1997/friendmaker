@@ -501,6 +501,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
       commandRetryCount: profile.commandRetryCount,
+      reanchorEveryDraws: profile.reanchorEveryDraws,
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,

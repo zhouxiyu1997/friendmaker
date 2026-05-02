@@ -193,6 +193,12 @@ export class SimulatedDevice {
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
+    if (trimmed.startsWith("CFG INPUT ")) {
+      lines.push(`INFO action=input-config ${trimmed.slice("CFG INPUT ".length)}`);
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
     if (trimmed === "H") {
       this.state.x = 0;
       this.state.y = 0;

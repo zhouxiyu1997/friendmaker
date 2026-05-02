@@ -7,12 +7,17 @@ import {
   drawCommand,
   endCommand,
   homeCommand,
+  inputConfigCommand,
   moveCommand,
   paletteConfigCommand,
   type DrawCommand,
 } from "../protocol/commands.js";
 
 const PALETTE_SLOT_COUNT = 9;
+const DEFAULT_SMALL_BRUSH_REANCHOR_DRAWS = 500;
+const SMALL_BRUSH_BUTTON_PRESS_MS = 90;
+const SMALL_BRUSH_INPUT_DELAY_MS = 90;
+const SMALL_BRUSH_HOME_MS = 1800;
 const NEIGHBOR_OFFSETS = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
@@ -319,6 +324,51 @@ function shouldStartFromCanvasCenter(profile: DrawingProfile): boolean {
   return profile.startCursor === "center";
 }
 
+function resolveReanchorEveryDraws(profile: DrawingProfile): number {
+  if (profile.reanchorEveryDraws !== undefined) {
+    return Math.floor(Math.max(0, profile.reanchorEveryDraws));
+  }
+
+  return profile.brushSize === 1 ? DEFAULT_SMALL_BRUSH_REANCHOR_DRAWS : 0;
+}
+
+function resolveInputTiming(profile: DrawingProfile): {
+  buttonPressMs: number;
+  inputDelayMs: number;
+  homeMs: number;
+} {
+  if (profile.brushSize !== 1) {
+    return {
+      buttonPressMs: profile.buttonPressDuration,
+      inputDelayMs: profile.inputDelay,
+      homeMs: profile.homeDuration,
+    };
+  }
+
+  return {
+    buttonPressMs: Math.max(profile.buttonPressDuration, SMALL_BRUSH_BUTTON_PRESS_MS),
+    inputDelayMs: Math.max(profile.inputDelay, SMALL_BRUSH_INPUT_DELAY_MS),
+    homeMs: Math.max(profile.homeDuration, SMALL_BRUSH_HOME_MS),
+  };
+}
+
+function appendPeriodicReanchor(
+  commands: DrawCommand[],
+  current: { x: number; y: number },
+  drawCount: number,
+  reanchorEveryDraws: number,
+): void {
+  if (reanchorEveryDraws <= 0 || drawCount <= 0 || drawCount % reanchorEveryDraws !== 0) {
+    return;
+  }
+
+  commands.push(homeCommand());
+
+  if (current.x !== 0 || current.y !== 0) {
+    commands.push(moveCommand(current.x, current.y));
+  }
+}
+
 function getUsedPaletteColors(pixelMap: PixelMap): Array<{ colorIndex: number; colorHex: string }> {
   const colorByIndex = new Map<number, string>();
 
@@ -343,8 +393,13 @@ export function generateScanlineCommands(
   pixelMap: PixelMap,
   profile: DrawingProfile,
 ): DrawCommand[] {
-  const commands: DrawCommand[] = [];
+  const inputTiming = resolveInputTiming(profile);
+  const commands: DrawCommand[] = [
+    inputConfigCommand(inputTiming.buttonPressMs, inputTiming.inputDelayMs, inputTiming.homeMs),
+  ];
   let current = { x: 0, y: 0 };
+  let drawCount = 0;
+  const reanchorEveryDraws = resolveReanchorEveryDraws(profile);
 
   if (shouldStartFromCanvasCenter(profile)) {
     // The in-game canvas opens with the cursor centered, so the fixed canvas
@@ -378,6 +433,8 @@ export function generateScanlineCommands(
         commands.push(...moveTo(current, pixel, profile));
         commands.push(drawCommand(profile.drawButton));
         current = toCanvasPosition(pixel, profile);
+        drawCount += 1;
+        appendPeriodicReanchor(commands, current, drawCount, reanchorEveryDraws);
       }
     }
   } else if (profile.colorMode === "palette") {
@@ -403,6 +460,8 @@ export function generateScanlineCommands(
           commands.push(...moveTo(current, pixel, profile));
           commands.push(drawCommand(profile.drawButton));
           current = toCanvasPosition(pixel, profile);
+          drawCount += 1;
+          appendPeriodicReanchor(commands, current, drawCount, reanchorEveryDraws);
         }
       }
     }
@@ -436,6 +495,8 @@ export function generateScanlineCommands(
           commands.push(...moveTo(current, pixel, profile));
           commands.push(drawCommand(profile.drawButton));
           current = toCanvasPosition(pixel, profile);
+          drawCount += 1;
+          appendPeriodicReanchor(commands, current, drawCount, reanchorEveryDraws);
         }
       }
     }
@@ -446,19 +507,21 @@ export function generateScanlineCommands(
 }
 
 export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfile): number {
+  const inputTiming = resolveInputTiming(profile);
+
   return commands.reduce((total, command) => {
     switch (command.type) {
       case "home":
-        return total + profile.homeDuration * 2 + profile.inputDelay;
+        return total + inputTiming.homeMs * 2 + inputTiming.inputDelayMs;
       case "move":
         return (
           total +
           (Math.abs(command.dx) + Math.abs(command.dy)) *
-            (profile.buttonPressDuration + profile.inputDelay)
+            (inputTiming.buttonPressMs + inputTiming.inputDelayMs)
         );
       case "draw":
       case "press":
-        return total + profile.buttonPressDuration + profile.inputDelay;
+        return total + inputTiming.buttonPressMs + inputTiming.inputDelayMs;
       case "color":
         return total + profile.colorChangeDuration;
       case "paletteConfig":
@@ -466,13 +529,15 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
       case "basicPaletteConfig":
         return total + profile.colorChangeDuration * 4;
       case "basicPaletteReset":
-        return total + profile.inputDelay;
+        return total + inputTiming.inputDelayMs;
+      case "inputConfig":
+        return total + inputTiming.inputDelayMs;
       case "wait":
         return total + command.ms;
       case "pause":
       case "resume":
       case "end":
-        return total + profile.inputDelay;
+        return total + inputTiming.inputDelayMs;
       default:
         return total;
     }

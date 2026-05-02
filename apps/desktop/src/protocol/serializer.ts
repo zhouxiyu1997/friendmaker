@@ -18,6 +18,8 @@ export function serializeCommand(command: DrawCommand): string {
       return `PC ${command.slot} ${command.colorHex}`;
     case "basicPaletteConfig":
       return `BC ${command.slot} ${command.row} ${command.col}`;
+    case "inputConfig":
+      return `CFG INPUT ${command.buttonPressMs} ${command.inputDelayMs} ${command.homeMs}`;
     case "wait":
       return `W ${command.ms}`;
     case "pause":
