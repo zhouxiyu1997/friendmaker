@@ -150,6 +150,11 @@ bool SwitchController::moveCursor(int dx, int dy) {
   return true;
 }
 
+bool SwitchController::moveStick(int x, int y, uint16_t holdMs) {
+  waitUntilReady();
+  return transport_.moveDirection(x, y, holdMs, inputDelayMs_);
+}
+
 bool SwitchController::drawStroke() {
   waitUntilReady();
   return transport_.pressButton(ControllerButton::A, buttonPressMs_, inputDelayMs_);
@@ -261,11 +266,13 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
 
   const int slotIndex = clampPaletteSlotIndex(index);
   const HsvColor hsv = rgbToHsv(red, green, blue);
+  const float hueRatio = hsv.hue <= 0.0f ? 0.0f : ((360.0f - hsv.hue) / 360.0f);
   const uint8_t hueSteps =
-      static_cast<uint8_t>(roundf((hsv.hue / 360.0f) * COLOR_PALETTE_EDITOR_HUE_STEP_COUNT));
+      static_cast<uint8_t>(roundf(hueRatio * COLOR_PALETTE_EDITOR_HUE_STEP_COUNT));
   const uint8_t saturationSteps =
       scaleChannelToSteps(hsv.saturation, COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT);
-  const uint8_t valueSteps = scaleChannelToSteps(hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
+  const uint8_t valueDropSteps =
+      scaleChannelToSteps(1.0f - hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
 
   // Palette selection page.
   if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
@@ -291,17 +298,27 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
   }
   delay(COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS);
 
+  // The editor opens on the basic-color tab by default. Switch to the
+  // custom-color tab before starting the reset and HSV adjustment flow.
+  if (!pressPaletteMenuButton(transport_, ControllerButton::R)) {
+    return false;
+  }
+  delay(BASIC_COLOR_TAB_SETTLE_MS);
+
   // Reset the editor state so every slot starts from the same origin:
-  // move the analog cursor to the bottom-left of the color square and
+  // move the analog cursor to the top-left of the color square, then
   // drive the hue slider back to its left-most stop.
-  if (!transport_.moveDirection(-1, 1, COLOR_PALETTE_EDITOR_RESET_STICK_HOLD_MS, inputDelayMs_)) {
+  if (!transport_.moveDirection(0, -1, COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS, inputDelayMs_)) {
     return false;
   }
 
-  for (int step = 0; step < COLOR_PALETTE_EDITOR_HUE_RESET_STEPS; step += 1) {
-    if (!transport_.pressButton(ControllerButton::ZL, buttonPressMs_, inputDelayMs_)) {
-      return false;
-    }
+  if (!transport_.moveDirection(-1, 0, COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS, inputDelayMs_)) {
+    return false;
+  }
+
+  if (!transport_.pressButton(
+          ControllerButton::ZL, COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS, inputDelayMs_)) {
+    return false;
   }
 
   for (int step = 0; step < hueSteps; step += 1) {
@@ -317,9 +334,9 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
     }
   }
 
-  if (valueSteps > 0) {
+  if (valueDropSteps > 0) {
     if (!transport_.moveDirection(
-            0, -1, static_cast<uint16_t>(valueSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+            0, 1, static_cast<uint16_t>(valueDropSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
       return false;
     }
   }
