@@ -420,10 +420,7 @@ export function generateScanlineCommands(
   let drawCount = 0;
   const reanchorEveryDraws = resolveReanchorEveryDraws(profile);
 
-  if (shouldStartFromCanvasCenter(profile) && profile.brushSize === 1) {
-    commands.push(homeCommand());
-    current = { x: 0, y: 0 };
-  } else if (shouldStartFromCanvasCenter(profile)) {
+  if (shouldStartFromCanvasCenter(profile)) {
     // The in-game canvas opens with the cursor centered, so the fixed canvas
     // workflow can start directly from the middle instead of re-homing first.
     current = {
