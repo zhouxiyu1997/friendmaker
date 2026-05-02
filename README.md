@@ -30,6 +30,11 @@
 
 这个项目仍在持续完善中，当前版本在部分图片或设备环境下可能出现 `颜色偏差`，复杂图片偶尔可能出现 `色块偏移`，建议优先从 `简单图片` 开始尝试。
 
+目前已知改善的解决方法：
+
+- 尽量远离附近的蓝牙设备，或先关闭不必要的蓝牙设备
+- 在连接上虚拟手柄后，不再使用实体手柄和屏幕操作
+
 ### 平台支持
 
 - 支持桌面端一键安装启动：`macOS`
@@ -325,11 +330,8 @@ docs/media/          README 展示图片与视频
 
 ### 当前限制
 
-- 当前 UI 是轻量 Web 原型，不是 Electron 桌面应用
 - Switch 连接和绘图流程仍然依赖固定场景假设
-- 官方 `7x12` 色盘仍在持续校准中
 - 自定义颜色自动调色还不稳定，当前更推荐 `官方色绘制`
-- 实验性的 `多色绘制` 已从前端试用版中隐藏，避免对试用者造成误导
 - 第一优先级仍然是输入稳定性，而不是绘制速度
 
 ### 当前状态
@@ -371,6 +373,11 @@ Keywords: `Friend Maker`, `Tomodachi Life`, `Nintendo Switch auto draw`, `ESP32 
 ### Note
 
 This project is still being improved; the current version may show `color deviation` on some images or device setups, and complex drawings may occasionally produce `misaligned color blocks`, so starting with `simple images` is recommended.
+
+Known ways to improve stability:
+
+- keep nearby Bluetooth devices away, or turn off unnecessary Bluetooth devices first
+- after the virtual controller is connected, stop using the physical controller and the touch screen
 
 ### Compatibility
 
@@ -664,12 +671,9 @@ docs/media/          README images and videos
 
 ### Current Limitations
 
-- The desktop release now wraps the current lightweight local workspace UI in Electron
 - The Switch connection and drawing workflow still depend on fixed scenario assumptions
-- The official `7x12` palette is still being calibrated
 - Automatic custom-color tuning is not stable yet, so `official palette drawing` is currently recommended
-- Experimental `multi-color drawing` has been hidden from the frontend trial build to avoid misleading trial users
-- The highest priority is still **input stability**, not drawing speed
+- The highest priority is still input stability, not drawing speed
 
 ### Development Status
 
