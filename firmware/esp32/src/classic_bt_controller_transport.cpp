@@ -651,7 +651,7 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.print("INFO bt_paired=");
   output.println(boolName(paired_));
   output.print("INFO bt_ready_for_reports=");
-  output.println(boolName(readyForReports_));
+  output.println(boolName(isControllerInputReady()));
   output.print("INFO bt_init_step=");
   output.println(initStep_);
   output.print("INFO bt_init_error=");
@@ -687,7 +687,17 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
 
 const char *ClassicBtControllerTransport::name() const { return CONTROL_TRANSPORT; }
 
+bool ClassicBtControllerTransport::isHidReportChannelOpen() const {
+  return connected_ && appRegistered_ && hidReady_;
+}
+
+bool ClassicBtControllerTransport::isControllerInputReady() const {
+  return isHidReportChannelOpen() && paired_;
+}
+
 bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
+  readyForReports_ = isHidReportChannelOpen();
+
   if (!readyForReports_) {
     if (logFailure) {
       Serial.println("WARN bt report skipped reason=not-ready");
@@ -711,7 +721,7 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = 0x30;
-    readyForReports_ = false;
+    readyForReports_ = isHidReportChannelOpen();
     if (logFailure) {
       Serial.printf(
           "WARN bt send_report failed err=%s connected=%s fail_count=%lu\n",
@@ -728,6 +738,8 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
 
 bool ClassicBtControllerTransport::sendSubcommandReply(
     uint8_t reportId, const uint8_t *data, size_t length, const char *label) {
+  readyForReports_ = isHidReportChannelOpen();
+
   if (!readyForReports_) {
     Serial.printf("WARN bt reply skipped reason=not-ready label=%s\n", label);
     return false;
@@ -743,7 +755,7 @@ bool ClassicBtControllerTransport::sendSubcommandReply(
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = reportId;
-    readyForReports_ = false;
+    readyForReports_ = isHidReportChannelOpen();
     Serial.printf(
         "WARN bt reply failed label=%s err=%s fail_count=%lu\n",
         label,
@@ -986,7 +998,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;
       lastSendReportId_ = param->send_report.report_id;
-      readyForReports_ = param->send_report.status == ESP_HIDD_SUCCESS && connected_;
+      readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
         Serial.printf(
             "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
@@ -1109,6 +1121,8 @@ void ClassicBtControllerTransport::setLeftStickFromVector(int x, int y) {
 }
 void ClassicBtControllerTransport::updateInputReport() {}
 void ClassicBtControllerTransport::ensureSendTask() {}
+bool ClassicBtControllerTransport::isHidReportChannelOpen() const { return false; }
+bool ClassicBtControllerTransport::isControllerInputReady() const { return false; }
 bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
   (void)logFailure;
   return false;

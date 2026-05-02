@@ -1404,6 +1404,10 @@ function boolLabel(value, labels) {
   return "未知";
 }
 
+function isControllerSendableStatus({ connected, paired, ready }) {
+  return ready === true || (connected === true && paired === true);
+}
+
 function applySerialSessionSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     return;
@@ -1487,7 +1491,9 @@ function updateControllerStatusFromLines(lines) {
   const authComplete = boolFromInfo(info.bt_auth_complete);
   const connected = boolFromInfo(info.bt_connected);
   const paired = boolFromInfo(info.bt_paired);
-  const ready = boolFromInfo(info.bt_ready_for_reports);
+  const rawReady = boolFromInfo(info.bt_ready_for_reports);
+  const ready = isControllerSendableStatus({ connected, paired, ready: rawReady });
+  const readyInferredFromPairing = rawReady !== true && connected === true && paired === true;
   const initError = info.bt_init_error ?? "-";
 
   let tone = "idle";
@@ -1504,7 +1510,9 @@ function updateControllerStatusFromLines(lines) {
     tone = "success";
     pill = "已就绪";
     title = "手柄已连接";
-    detail = "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+    detail = readyInferredFromPairing
+      ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
+      : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
   } else if (connected === true) {
     tone = "running";
     pill = "已连接";
