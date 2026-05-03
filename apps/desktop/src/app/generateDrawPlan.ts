@@ -2,7 +2,7 @@ import type { ImageSource } from "../image/loadImage.js";
 import { createBrushGrid, gridCellBounds, isGridCellInBounds } from "../brushGrid.js";
 import { pixelizeImage } from "../image/pixelize.js";
 import { renderPreviewToBuffer } from "../image/renderPreview.js";
-import { estimateRuntimeMs, generateScanlineCommands } from "../path/scanline.js";
+import { estimateRuntimeMs, generateScanlineCommands, type PathStrategy } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
 import type { CanvasBounds, DrawingProfile, PixelMap } from "../types.js";
@@ -36,11 +36,12 @@ export async function generateDrawPlan(
     imageOffsetXPercent?: number;
     imageOffsetYPercent?: number;
     removeBackground?: boolean;
+    pathStrategy?: PathStrategy;
   },
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
-  const drawCommands = generateScanlineCommands(pixelMap, profile);
+  const drawCommands = generateScanlineCommands(pixelMap, profile, options?.pathStrategy);
   const imageBounds = calculateCanvasBounds(pixelMap, profile);
   const pathStats = calculatePathStats(drawCommands);
   const paletteHexes = Array.from(

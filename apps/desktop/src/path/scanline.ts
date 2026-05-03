@@ -20,6 +20,8 @@ import {
 } from "../protocol/commands.js";
 import { DEFAULT_SAFE_INPUT_TIMING } from "../protocol/timing.js";
 
+export type PathStrategy = "scanline" | "nearest";
+
 const PALETTE_SLOT_COUNT = 9;
 const NEIGHBOR_OFFSETS = [
   { dx: 1, dy: 0 },
@@ -210,15 +212,79 @@ function collectConnectedComponents(pixels: Pixel[]): Pixel[][] {
   return components;
 }
 
+function getNearestNeighborPixels(
+  pixels: Pixel[],
+  current: { x: number; y: number },
+  grid: BrushGrid,
+): Pixel[] {
+  if (pixels.length === 0) return [];
+
+  const remaining = new Map<string, Pixel>(pixels.map((pixel) => [pixelKey(pixel), pixel]));
+  const ordered: Pixel[] = [];
+  let lastDir: { dx: number; dy: number } | null = null;
+  let last: Pixel | null = null;
+  let position = current;
+
+  while (remaining.size > 0) {
+    let next: Pixel | null = null;
+
+    if (last && lastDir) {
+      const candidate = remaining.get(pixelKey({ x: last.x + lastDir.dx, y: last.y + lastDir.dy }));
+      if (candidate) {
+        next = candidate;
+      }
+    }
+
+    if (!next && last) {
+      for (const offset of NEIGHBOR_OFFSETS) {
+        const candidate = remaining.get(pixelKey({ x: last.x + offset.dx, y: last.y + offset.dy }));
+        if (candidate) {
+          next = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!next) {
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const candidate of remaining.values()) {
+        const target = toCanvasPosition(candidate, grid);
+        const distance = Math.abs(target.x - position.x) + Math.abs(target.y - position.y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          next = candidate;
+        }
+      }
+    }
+
+    if (!next) break;
+
+    if (last) {
+      lastDir = { dx: next.x - last.x, dy: next.y - last.y };
+    }
+    ordered.push(next);
+    remaining.delete(pixelKey(next));
+    position = toCanvasPosition(next, grid);
+    last = next;
+  }
+
+  return ordered;
+}
+
 function getOrderedPixelsForColor(
   pixelsByColor: Map<number, Pixel[]>,
   colorIndex: number,
   current: { x: number; y: number },
   profile: DrawingProfile,
   grid: BrushGrid,
+  pathStrategy: PathStrategy,
 ): Pixel[] {
   const pixels = pixelsByColor.get(colorIndex);
   if (!pixels || pixels.length === 0) return [];
+
+  if (pathStrategy === "nearest") {
+    return getNearestNeighborPixels(pixels, current, grid);
+  }
 
   if (profile.brushSize === 1) {
     return getLegacyScanlinePixels(pixels);
@@ -558,6 +624,7 @@ function appendOrderedPixels(
 export function generateScanlineCommands(
   pixelMap: PixelMap,
   profile: DrawingProfile,
+  pathStrategy: PathStrategy = "scanline",
 ): DrawCommand[] {
   const commands: DrawCommand[] = [];
   const grid = createBrushGrid(profile);
@@ -598,7 +665,7 @@ export function generateScanlineCommands(
         selectedColor = colorIndex;
       }
 
-      const orderedPixels = getOrderedPixelsForColor(pixelsByColor, colorIndex, current, profile, grid);
+      const orderedPixels = getOrderedPixelsForColor(pixelsByColor, colorIndex, current, profile, grid, pathStrategy);
       current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
     }
   } else if (profile.colorMode === "palette") {
@@ -618,7 +685,7 @@ export function generateScanlineCommands(
           selectedSlot = slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid);
+        const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
         current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
       }
     }
@@ -646,7 +713,7 @@ export function generateScanlineCommands(
           selectedSlot = slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid);
+        const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
         current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
       }
     }
