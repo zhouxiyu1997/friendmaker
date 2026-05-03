@@ -260,7 +260,10 @@ function getNearestNeighborPixels(
     if (!next) break;
 
     if (last) {
-      lastDir = { dx: next.x - last.x, dy: next.y - last.y };
+      const dx = next.x - last.x;
+      const dy = next.y - last.y;
+      const isUnitStep = Math.abs(dx) + Math.abs(dy) === 1;
+      lastDir = isUnitStep ? { dx, dy } : null;
     }
     ordered.push(next);
     remaining.delete(pixelKey(next));
