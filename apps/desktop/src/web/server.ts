@@ -24,7 +24,7 @@ import {
   type SerialSessionSnapshot,
 } from "../serial/sender.js";
 import { SimulatedAckSender } from "../simulator/sender.js";
-import type { SenderControls } from "../types.js";
+import type { ColorDistanceMode, DitherMode, SenderControls } from "../types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -350,6 +350,47 @@ function normalizeBrushSize(value: unknown, fallback: 1 | 3 | 7 | 13 | 19 | 27):
     : fallback;
 }
 
+function normalizeTimingMs(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(16, Math.min(500, Math.round(value)));
+}
+
+function normalizeAdjustment(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(-100, Math.min(100, Math.round(value)));
+}
+
+function normalizeDitherMode(value: unknown): DitherMode {
+  return value === "fs" || value === "atkinson" || value === "ordered" ? value : "none";
+}
+
+function normalizeColorDistanceMode(value: unknown): ColorDistanceMode {
+  return value === "rgb" || value === "lab" ? value : "weighted";
+}
+
+function normalizeDitherAmount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeMergeThreshold(value: unknown, fallback = 40): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(100, parsed));
+}
+
 function normalizeImageScalePercent(value: unknown, fallback = 100): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return fallback;
@@ -401,7 +442,7 @@ function makeCliOverrides(input: {
   height?: number;
   colors?: number;
   threshold?: number;
-  resizeMode?: "contain" | "cover";
+  resizeMode?: "contain" | "cover" | "stretch";
   mode?: "mono" | "palette" | "official";
   palette?: string[];
 }): CliOptions {
@@ -438,10 +479,21 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     threshold?: number;
     mode?: "mono" | "palette" | "official";
     colors?: number;
-    resizeMode?: "contain" | "cover";
+    resizeMode?: "contain" | "cover" | "stretch";
     palette?: string[];
     previewScale?: number;
     removeBackground?: boolean;
+    buttonPressMs?: number;
+    inputDelayMs?: number;
+    ditherMode?: DitherMode;
+    ditherAmount?: number;
+    colorDistanceMode?: ColorDistanceMode;
+    brightness?: number;
+    contrast?: number;
+    saturation?: number;
+    mergeSimilarColors?: boolean;
+    mergeThreshold?: number;
+    pathStrategy?: "scanline" | "nearest";
   };
 
   if (!body.imageDataUrl) {
@@ -471,19 +523,27 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const profile = {
     ...baseProfile,
     brushSize: normalizeBrushSize(body.brushSize, baseProfile.brushSize),
+    buttonPressDuration: normalizeTimingMs(body.buttonPressMs, baseProfile.buttonPressDuration),
+    inputDelay: normalizeTimingMs(body.inputDelayMs, baseProfile.inputDelay),
   };
 
-  const plan = await generateDrawPlan(
-    decodeDataUrl(body.imageDataUrl),
-    profile,
-    body.previewScale ?? 12,
-    {
-      imageScalePercent,
-      imageOffsetXPercent,
-      imageOffsetYPercent,
-      removeBackground: body.removeBackground === true,
-    },
-  );
+  const generationOptions = {
+    imageScalePercent,
+    imageOffsetXPercent,
+    imageOffsetYPercent,
+    removeBackground: body.removeBackground === true,
+    brightness: normalizeAdjustment(body.brightness),
+    contrast: normalizeAdjustment(body.contrast),
+    saturation: normalizeAdjustment(body.saturation),
+    ditherMode: normalizeDitherMode(body.ditherMode),
+    ditherAmount: normalizeDitherAmount(body.ditherAmount),
+    colorDistanceMode: normalizeColorDistanceMode(body.colorDistanceMode),
+    mergeSimilarColors: body.mergeSimilarColors === true,
+    mergeThreshold: normalizeMergeThreshold(body.mergeThreshold),
+    pathStrategy: body.pathStrategy === "nearest" ? ("nearest" as const) : ("scanline" as const),
+  };
+  const imageSource = decodeDataUrl(body.imageDataUrl);
+  const plan = await generateDrawPlan(imageSource, profile, body.previewScale ?? 12, generationOptions);
 
   json(response, 200, {
     profile: {
@@ -501,9 +561,21 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
       commandRetryCount: profile.commandRetryCount,
+      buttonPressMs: profile.buttonPressDuration,
+      inputDelayMs: profile.inputDelay,
+      ditherMode: generationOptions.ditherMode,
+      ditherAmount: generationOptions.ditherAmount,
+      colorDistanceMode: generationOptions.colorDistanceMode,
+      brightness: generationOptions.brightness,
+      contrast: generationOptions.contrast,
+      saturation: generationOptions.saturation,
+      mergeSimilarColors: generationOptions.mergeSimilarColors,
+      mergeThreshold: generationOptions.mergeThreshold,
+      pathStrategy: generationOptions.pathStrategy,
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,
+      colorCounts: plan.colorCounts,
       totalPixels: plan.totalPixels,
       commandCount: plan.commands.length,
       estimatedRuntimeMs: plan.estimatedRuntimeMs,

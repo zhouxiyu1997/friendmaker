@@ -680,9 +680,9 @@ export function generateScanlineCommands(
 
   commands.push(
     inputConfigCommand(
-      DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
-      DEFAULT_SAFE_INPUT_TIMING.inputDelayMs,
-      DEFAULT_SAFE_INPUT_TIMING.homeMs,
+      profile.buttonPressDuration || DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
+      profile.inputDelay || DEFAULT_SAFE_INPUT_TIMING.inputDelayMs,
+      profile.homeDuration || DEFAULT_SAFE_INPUT_TIMING.homeMs,
     ),
   );
 

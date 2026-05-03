@@ -5,7 +5,7 @@ import { renderPreviewToBuffer } from "../image/renderPreview.js";
 import { estimateRuntimeMs, generateScanlineCommands, type PathStrategy } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
-import type { CanvasBounds, DrawingProfile, PixelMap } from "../types.js";
+import type { CanvasBounds, ColorDistanceMode, DitherMode, DrawingProfile, PixelMap } from "../types.js";
 
 export interface DrawPlanPathStats {
   lineRunCount: number;
@@ -19,6 +19,7 @@ export interface DrawPlan {
   commands: string[];
   pixelMap: PixelMap;
   usedColorIndexes: number[];
+  colorCounts: Record<number, number>;
   paletteHexes: string[];
   totalPixels: number;
   estimatedRuntimeMs: number;
@@ -36,10 +37,18 @@ export async function generateDrawPlan(
     imageOffsetXPercent?: number;
     imageOffsetYPercent?: number;
     removeBackground?: boolean;
+    brightness?: number;
+    contrast?: number;
+    saturation?: number;
+    ditherMode?: DitherMode;
+    ditherAmount?: number;
+    colorDistanceMode?: ColorDistanceMode;
+    mergeSimilarColors?: boolean;
+    mergeThreshold?: number;
     pathStrategy?: PathStrategy;
   },
 ): Promise<DrawPlan> {
-  const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
+  const { pixelMap, usedColorIndexes, colorCounts } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
   const drawCommands = generateScanlineCommands(pixelMap, profile, options?.pathStrategy);
   const imageBounds = calculateCanvasBounds(pixelMap, profile);
@@ -61,6 +70,7 @@ export async function generateDrawPlan(
     commands: serializeCommands(drawCommands),
     pixelMap,
     usedColorIndexes,
+    colorCounts,
     paletteHexes,
     totalPixels: pixelMap.length * (pixelMap[0]?.length ?? 0),
     estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),

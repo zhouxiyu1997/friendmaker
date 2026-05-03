@@ -1,5 +1,7 @@
-export type ResizeMode = "contain" | "cover";
+export type ResizeMode = "contain" | "cover" | "stretch";
 export type ColorMode = "mono" | "palette" | "official";
+export type DitherMode = "none" | "fs" | "atkinson" | "ordered";
+export type ColorDistanceMode = "weighted" | "rgb" | "lab";
 export type ControllerButton = "A" | "B" | "X" | "Y";
 export type StartCursor = "center" | "top-left";
 export type DrawingTool = "pen" | "eraser" | "fill" | "stamp" | "text" | "shape";
@@ -57,6 +59,7 @@ export interface DrawingProfile {
 export interface PixelizationResult {
   pixelMap: PixelMap;
   usedColorIndexes: number[];
+  colorCounts: Record<number, number>;
 }
 
 export interface CanvasBounds {

@@ -14,7 +14,8 @@ export async function resizeImage(
     offsetYPercent?: number;
   },
 ): Promise<RawImageData> {
-  const fit = options.resizeMode === "cover" ? "outside" : "inside";
+  const fit =
+    options.resizeMode === "cover" ? "outside" : options.resizeMode === "stretch" ? "fill" : "inside";
   const scalePercent = normalizeScalePercent(options.scalePercent);
   const offsetXPercent = normalizeOffsetPercent(options.offsetXPercent);
   const offsetYPercent = normalizeOffsetPercent(options.offsetYPercent);

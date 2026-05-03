@@ -28,7 +28,7 @@
           </p>
           <p class="subcopy">
             推荐顺序是先刷固件，再做手柄测试，最后回到“脚本生成”页导入图片并先点“仅生成命令”。手柄测试未通过时，不允许开始正式绘制。开始前请确认
-            Switch 处于初始绘画页面、画笔停在画布中心、侧边色彩槽保持默认；“自定义多色（自动量化）”已开放实验入口，但稳定性仍弱于“官方色绘制”。建议首次先用简单图和大画笔测试，开始绘制后不要再操作手柄或触碰屏幕，以免错位。
+            Switch 处于初始绘画页面、画笔停在画布中心、侧边色彩槽保持默认；”自定义多色（自动量化）”已开放实验入口，但稳定性仍弱于”官方色绘制”。建议首次先用简单图和大画笔测试，开始绘制后不要再操作手柄或触碰屏幕，以免错位。
           </p>
         </div>
         <div class="hero-side">
@@ -65,6 +65,10 @@
           <button class="page-tab" data-page-target="firmware" type="button">
             <span class="page-tab-title">刷入固件</span>
             <small class="page-tab-meta">编译、烧录、排错</small>
+          </button>
+          <button class="page-tab" data-page-target="custom" type="button">
+            <span class="page-tab-title">自定义命令</span>
+            <small class="page-tab-meta">粘贴、预览、执行</small>
           </button>
           <button class="page-tab" data-page-target="controller" type="button">
             <span class="page-tab-title">手柄测试</span>
@@ -178,7 +182,104 @@
                   <option value="128">128 色</option>
                 </select>
               </label>
+
+
+              <label>
+                <span>绘制速度</span>
+                <select id="speed-preset-select">
+                  <option value="100,100">默认 100/100（最稳）</option>
+                  <option value="60,60" selected>较快 60/60</option>
+                  <option value="40,40">激进 40/40</option>
+                  <option value="25,25">极限 25/25</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+
+              <label>
+                <span>抖动算法</span>
+                <select id="dither-mode-select">
+                  <option value="none">无</option>
+                  <option value="fs" selected>Floyd-Steinberg</option>
+                  <option value="atkinson">Atkinson</option>
+                  <option value="ordered">Bayer</option>
+                </select>
+              </label>
+
+              <label>
+                <span>颜色距离</span>
+                <select id="color-distance-select">
+                  <option value="weighted" selected>加权 RGB</option>
+                  <option value="rgb">欧氏 RGB</option>
+                  <option value="lab">Lab</option>
+                </select>
+              </label>
+
+              <label>
+                <span>裁剪方式</span>
+                <select id="resize-mode-select">
+                  <option value="cover">cover</option>
+                  <option value="contain" selected>contain</option>
+                  <option value="stretch">stretch</option>
+                </select>
+              </label>
+
+              <label class="checkbox-card" for="merge-similar-checkbox">
+                <input id="merge-similar-checkbox" type="checkbox" />
+                <span class="checkbox-copy">
+                  <strong>合并同类色</strong>
+                  <small>将官方色盘中颜色相近的色块合并，减少换色次数以缩短绘制时间。</small>
+                </span>
+              </label>
+
+              <label class="checkbox-card" for="path-strategy-checkbox">
+                <input id="path-strategy-checkbox" type="checkbox" />
+                <span class="checkbox-copy">
+                  <strong>最近邻路径（实验）</strong>
+                  <small>画完一点后优先去附近同色像素，替代默认的蛇形扫描排序。</small>
+                </span>
+              </label>
             </div>
+
+            <label class="range-row">
+              <span>合并阈值</span>
+              <input id="merge-threshold-range" type="range" min="0" max="100" step="1" value="40" />
+              <strong id="merge-threshold-value">40</strong>
+            </label>
+
+            <div id="speed-custom-row" class="field-grid studio-settings-grid hidden">
+              <label>
+                <span>按键时长 ms</span>
+                <input id="speed-press-input" type="number" min="16" max="500" step="1" value="60" />
+              </label>
+              <label>
+                <span>按键间隔 ms</span>
+                <input id="speed-delay-input" type="number" min="16" max="500" step="1" value="60" />
+              </label>
+            </div>
+
+            <label class="range-row">
+              <span>抖动强度</span>
+              <input id="dither-amount-range" type="range" min="0" max="100" step="1" value="100" />
+              <strong id="dither-amount-value">100%</strong>
+            </label>
+
+            <label class="range-row">
+              <span>亮度</span>
+              <input id="brightness-range" type="range" min="-100" max="100" step="1" value="0" />
+              <strong id="brightness-value">0</strong>
+            </label>
+
+            <label class="range-row">
+              <span>对比度</span>
+              <input id="contrast-range" type="range" min="-100" max="100" step="1" value="0" />
+              <strong id="contrast-value">0</strong>
+            </label>
+
+            <label class="range-row">
+              <span>饱和度</span>
+              <input id="saturation-range" type="range" min="-100" max="100" step="1" value="0" />
+              <strong id="saturation-value">0</strong>
+            </label>
 
             <label class="range-row">
               <span id="threshold-label">单色阈值</span>
@@ -311,6 +412,14 @@
               </div>
             </div>
 
+            <div id="script-replay-row" class="preview-meta-strip hidden">
+              <div class="preview-meta-card">
+                <span>脚本回放</span>
+                <canvas id="script-replay-canvas" width="256" height="256" style="width:100%;image-rendering:pixelated;border-radius:8px;"></canvas>
+                <small id="script-replay-meta">-</small>
+              </div>
+            </div>
+
             <div class="preview-meta-strip">
               <div class="preview-meta-card">
                 <span>画布范围</span>
@@ -372,6 +481,7 @@
               <button id="copy-button" class="ghost" disabled>复制脚本</button>
               <button id="download-button" class="ghost" disabled>下载脚本</button>
             </div>
+
           </section>
 
           <section class="panel panel-log">
@@ -385,6 +495,111 @@
             </div>
 
             <pre id="log-output" class="log-output" data-empty-log="等待生成命令...">等待生成命令...</pre>
+          </section>
+        </main>
+      </section>
+
+      <section class="page" data-page="custom">
+        <section class="page-intro">
+          <div class="page-intro-copy">
+            <p class="page-kicker">自定义命令</p>
+            <h2>粘贴外部脚本，先回放确认，再直接执行</h2>
+            <p>适合导入外部生成的 Friend Maker 命令。</p>
+          </div>
+          <div class="page-step-row" aria-label="自定义命令步骤">
+            <span class="page-step">1. 粘贴命令</span>
+            <span class="page-step">2. 预览回放</span>
+            <span class="page-step">3. 发送到设备</span>
+          </div>
+        </section>
+
+        <main class="grid">
+          <section class="panel panel-form">
+            <div class="panel-head">
+              <h2>命令输入</h2>
+              <p>每行一条命令。空行和以 # 开头的注释会被忽略。</p>
+            </div>
+
+            <div class="field-grid studio-settings-grid">
+              <label>
+                <span>单段回放画笔</span>
+                <select id="custom-brush-size-select">
+                  <option value="1">1</option>
+                  <option value="3" selected>3</option>
+                  <option value="7">7</option>
+                  <option value="13">13</option>
+                  <option value="19">19</option>
+                  <option value="27">27</option>
+                </select>
+              </label>
+              <label>
+                <span>串口设备</span>
+                <select id="custom-port-select">
+                  <option value="">未检测到串口</option>
+                </select>
+              </label>
+            </div>
+
+            <textarea id="custom-commands-input" class="code-block" rows="14" spellcheck="false" placeholder="CFG INPUT 60 60 1800&#10;BC RESET&#10;BC 0 0 0&#10;C 0&#10;M -10 -10&#10;P&#10;E"></textarea>
+
+            <div class="action-row slim">
+              <button id="custom-preview-button" class="ghost" type="button">预览回放</button>
+              <button id="custom-normalize-button" class="ghost" type="button">整理命令</button>
+              <button id="custom-clear-button" class="ghost" type="button">清空</button>
+            </div>
+
+            <div class="action-row">
+              <button id="custom-execute-button" class="primary" type="button" disabled>执行脚本</button>
+            </div>
+
+            <div class="action-row slim">
+              <button id="custom-pause-button" class="ghost" type="button" disabled>暂停</button>
+              <button id="custom-resume-button" class="ghost" type="button" disabled>继续</button>
+              <button id="custom-stop-button" class="ghost" type="button" disabled>中断</button>
+            </div>
+
+            <p class="hint" id="custom-execution-status">当前未开始执行。</p>
+          </section>
+
+          <section class="panel panel-preview">
+            <div class="panel-head">
+              <h2>自定义预览</h2>
+              <p>按命令模拟移动、换色和绘制，不会连接设备。</p>
+            </div>
+            <div class="preview-frame">
+              <canvas id="custom-replay-canvas" width="256" height="256" style="width:100%;image-rendering:pixelated;border-radius:8px;"></canvas>
+            </div>
+            <div class="stat-strip">
+              <div class="stat-card">
+                <span>命令</span>
+                <strong id="custom-stat-commands">0</strong>
+              </div>
+              <div class="stat-card">
+                <span>绘制</span>
+                <strong id="custom-stat-drawn">0</strong>
+              </div>
+              <div class="stat-card">
+                <span>模式</span>
+                <strong id="custom-stat-mode">单段</strong>
+              </div>
+            </div>
+
+            <div class="action-row slim">
+              <button id="custom-copy-button" class="ghost" type="button" disabled>复制脚本</button>
+              <button id="custom-download-button" class="ghost" type="button" disabled>下载脚本</button>
+            </div>
+          </section>
+
+          <section class="panel panel-log">
+            <div class="panel-head">
+              <h2>执行日志</h2>
+              <p>这里显示自定义脚本的发送状态和设备返回信息。</p>
+            </div>
+            <div class="action-row slim log-toolbar">
+              <button id="custom-refresh-ports-button" class="ghost" type="button">刷新串口</button>
+              <button id="custom-clear-log-button" class="ghost" type="button">清空日志</button>
+            </div>
+            <pre id="custom-log-output" class="log-output" data-empty-log="等待自定义命令...">等待自定义命令...</pre>
           </section>
         </main>
       </section>
