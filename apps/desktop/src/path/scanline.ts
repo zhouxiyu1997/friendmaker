@@ -28,23 +28,43 @@ const NEIGHBOR_OFFSETS = [
   { dx: 0, dy: -1 },
 ];
 
-function getPixelsByColor(pixelMap: PixelMap, colorIndex: number): Pixel[] {
-  return pixelMap.flatMap((row) =>
-    row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex === colorIndex),
-  );
+function groupPixelsByColor(pixelMap: PixelMap): Map<number, Pixel[]> {
+  const byColor = new Map<number, Pixel[]>();
+
+  for (const row of pixelMap) {
+    for (const pixel of row) {
+      if (pixel.alpha <= 0 || pixel.colorIndex < 0) continue;
+
+      let arr = byColor.get(pixel.colorIndex);
+      if (!arr) {
+        arr = [];
+        byColor.set(pixel.colorIndex, arr);
+      }
+      arr.push(pixel);
+    }
+  }
+
+  return byColor;
 }
 
-function getLegacyScanlinePixels(pixelMap: PixelMap, colorIndex: number): Pixel[] {
-  const rows = pixelMap.map((row) =>
-    row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex === colorIndex),
-  );
+function getLegacyScanlinePixels(pixels: Pixel[]): Pixel[] {
+  if (pixels.length === 0) return [];
 
-  return rows.flatMap((row, rowIndex) => {
-    if (rowIndex % 2 === 0) {
-      return row;
+  const rowsByY = new Map<number, Pixel[]>();
+  for (const p of pixels) {
+    let row = rowsByY.get(p.y);
+    if (!row) {
+      row = [];
+      rowsByY.set(p.y, row);
     }
+    row.push(p);
+  }
 
-    return [...row].reverse();
+  const sortedY = [...rowsByY.keys()].sort((a, b) => a - b);
+  return sortedY.flatMap((y) => {
+    const row = rowsByY.get(y)!;
+    const sorted = [...row].sort((a, b) => a.x - b.x);
+    return y % 2 === 0 ? sorted : sorted.reverse();
   });
 }
 
@@ -141,9 +161,7 @@ function chooseBestSerpentineOrder(
   return topDistance <= bottomDistance ? topDown : bottomUp;
 }
 
-function collectConnectedComponents(pixelMap: PixelMap, colorIndex: number): Pixel[][] {
-  const pixels = getPixelsByColor(pixelMap, colorIndex);
-
+function collectConnectedComponents(pixels: Pixel[]): Pixel[][] {
   if (pixels.length === 0) {
     return [];
   }
@@ -193,19 +211,22 @@ function collectConnectedComponents(pixelMap: PixelMap, colorIndex: number): Pix
 }
 
 function getOrderedPixelsForColor(
-  pixelMap: PixelMap,
+  pixelsByColor: Map<number, Pixel[]>,
   colorIndex: number,
   current: { x: number; y: number },
   profile: DrawingProfile,
   grid: BrushGrid,
 ): Pixel[] {
+  const pixels = pixelsByColor.get(colorIndex);
+  if (!pixels || pixels.length === 0) return [];
+
   if (profile.brushSize === 1) {
-    return getLegacyScanlinePixels(pixelMap, colorIndex);
+    return getLegacyScanlinePixels(pixels);
   }
 
-  const components = collectConnectedComponents(pixelMap, colorIndex);
+  const components = collectConnectedComponents(pixels);
   const legacyPixels = rotatePixelsToNearestStart(
-    getLegacyScanlinePixels(pixelMap, colorIndex),
+    getLegacyScanlinePixels(pixels),
     current,
     grid,
   );
@@ -214,6 +235,25 @@ function getOrderedPixelsForColor(
     return legacyPixels;
   }
 
+  let orderedPixels: Pixel[];
+
+  if (components.length <= 8) {
+    orderedPixels = findOptimalComponentOrder(components, current, grid);
+  } else {
+    orderedPixels = greedyComponentOrder(components, current, grid);
+  }
+
+  const optimizedDistance = estimateTravelDistance(current, orderedPixels, grid);
+  const legacyDistance = estimateTravelDistance(current, legacyPixels, grid);
+
+  return optimizedDistance < legacyDistance ? orderedPixels : legacyPixels;
+}
+
+function greedyComponentOrder(
+  components: Pixel[][],
+  current: { x: number; y: number },
+  grid: BrushGrid,
+): Pixel[] {
   const remaining = [...components];
   const orderedPixels: Pixel[] = [];
   let currentPosition = current;
@@ -226,18 +266,14 @@ function getOrderedPixelsForColor(
     remaining.forEach((component, index) => {
       const candidate = chooseBestSerpentineOrder(component, currentPosition, grid);
 
-      if (candidate.length === 0) {
-        return;
-      }
+      if (candidate.length === 0) return;
 
       const firstPixel = candidate[0];
-
-      if (!firstPixel) {
-        return;
-      }
+      if (!firstPixel) return;
 
       const start = toCanvasPosition(firstPixel, grid);
-      const distance = Math.abs(start.x - currentPosition.x) + Math.abs(start.y - currentPosition.y);
+      const distance =
+        Math.abs(start.x - currentPosition.x) + Math.abs(start.y - currentPosition.y);
 
       if (distance < selectedDistance) {
         selectedDistance = distance;
@@ -259,10 +295,103 @@ function getOrderedPixelsForColor(
     remaining.splice(selectedIndex, 1);
   }
 
-  const optimizedDistance = estimateTravelDistance(current, orderedPixels, grid);
-  const legacyDistance = estimateTravelDistance(current, legacyPixels, grid);
+  return orderedPixels;
+}
 
-  return optimizedDistance < legacyDistance ? orderedPixels : legacyPixels;
+function findOptimalComponentOrder(
+  components: Pixel[][],
+  current: { x: number; y: number },
+  grid: BrushGrid,
+): Pixel[] {
+  if (components.length <= 1) {
+    return chooseBestSerpentineOrder(components[0] ?? [], current, grid);
+  }
+
+  // Pre-compute top-down and bottom-up serpentine rows for each component
+  const precomputed = components.map((comp) => ({
+    topDown: buildSerpentineRows(comp, false),
+    bottomUp: buildSerpentineRows(comp, true),
+  }));
+
+  function bestVariant(
+    pre: (typeof precomputed)[number],
+    pos: { x: number; y: number },
+  ): { pixels: Pixel[]; endPos: { x: number; y: number } } {
+    const td = rotatePixelsToNearestStart(pre.topDown, pos, grid);
+    const bu = rotatePixelsToNearestStart(pre.bottomUp, pos, grid);
+
+    const tdStart = td[0];
+    const buStart = bu[0];
+
+    if (!tdStart) {
+      const last = bu[bu.length - 1];
+      return { pixels: bu, endPos: last ? toCanvasPosition(last, grid) : pos };
+    }
+    if (!buStart) {
+      const last = td[td.length - 1];
+      return { pixels: td, endPos: last ? toCanvasPosition(last, grid) : pos };
+    }
+
+    const tdPos = toCanvasPosition(tdStart, grid);
+    const buPos = toCanvasPosition(buStart, grid);
+    const tdDist = Math.abs(tdPos.x - pos.x) + Math.abs(tdPos.y - pos.y);
+    const buDist = Math.abs(buPos.x - pos.x) + Math.abs(buPos.y - pos.y);
+
+    if (tdDist <= buDist) {
+      const last = td[td.length - 1];
+      return { pixels: td, endPos: last ? toCanvasPosition(last, grid) : pos };
+    }
+    const last = bu[bu.length - 1];
+    return { pixels: bu, endPos: last ? toCanvasPosition(last, grid) : pos };
+  }
+
+  let bestOrder: Pixel[] = [];
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  function* permute<T>(arr: T[]): Generator<T[]> {
+    if (arr.length <= 1) {
+      yield arr;
+      return;
+    }
+    for (let i = 0; i < arr.length; i++) {
+      const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+      for (const p of permute(rest)) {
+        yield [arr[i]!, ...p];
+      }
+    }
+  }
+
+  const indices = [...Array(components.length).keys()];
+
+  for (const order of permute(indices)) {
+    let pos = current;
+    let totalDist = 0;
+    const ordered: Pixel[] = [];
+
+    for (const idx of order) {
+      const pre = precomputed[idx];
+      if (!pre) continue;
+      const variant = bestVariant(pre, pos);
+
+      if (variant.pixels.length === 0) continue;
+
+      const first = variant.pixels[0];
+      if (first) {
+        const startPos = toCanvasPosition(first, grid);
+        totalDist += Math.abs(startPos.x - pos.x) + Math.abs(startPos.y - pos.y);
+      }
+
+      ordered.push(...variant.pixels);
+      pos = variant.endPos;
+    }
+
+    if (totalDist < bestDistance) {
+      bestDistance = totalDist;
+      bestOrder = ordered;
+    }
+  }
+
+  return bestOrder;
 }
 
 function toCanvasPosition(
@@ -346,14 +475,34 @@ function getUsedPaletteColors(pixelMap: PixelMap): Array<{ colorIndex: number; c
     .map(([colorIndex, colorHex]) => ({ colorIndex, colorHex }));
 }
 
-function canExtendHorizontalRun(run: Pixel[], pixel: Pixel): boolean {
+function canExtendRun(run: Pixel[], pixel: Pixel): boolean {
   const previous = run[run.length - 1];
 
   if (!previous) {
     return true;
   }
 
-  return previous.y === pixel.y && Math.abs(previous.x - pixel.x) === 1;
+  if (run.length === 1) {
+    return (
+      (previous.y === pixel.y && Math.abs(previous.x - pixel.x) === 1) ||
+      (previous.x === pixel.x && Math.abs(previous.y - pixel.y) === 1)
+    );
+  }
+
+  const prevPrev = run[run.length - 2];
+  if (!prevPrev) {
+    return (
+      previous.y === pixel.y && Math.abs(previous.x - pixel.x) === 1
+    );
+  }
+
+  const isHorizontal = prevPrev.y === previous.y;
+
+  if (isHorizontal) {
+    return previous.y === pixel.y && Math.abs(previous.x - pixel.x) === 1;
+  }
+
+  return previous.x === pixel.x && Math.abs(previous.y - pixel.y) === 1;
 }
 
 function appendPixelRun(
@@ -377,7 +526,7 @@ function appendPixelRun(
   } else {
     const firstPosition = toCanvasPosition(firstPixel, grid);
     const lastPosition = toCanvasPosition(lastPixel, grid);
-    commands.push(lineCommand(lastPosition.x - firstPosition.x, 0));
+    commands.push(lineCommand(lastPosition.x - firstPosition.x, lastPosition.y - firstPosition.y));
   }
 
   return toCanvasPosition(lastPixel, grid);
@@ -394,7 +543,7 @@ function appendOrderedPixels(
   let run: Pixel[] = [];
 
   for (const pixel of orderedPixels) {
-    if (canExtendHorizontalRun(run, pixel)) {
+    if (canExtendRun(run, pixel)) {
       run.push(pixel);
       continue;
     }
@@ -423,8 +572,6 @@ export function generateScanlineCommands(
   );
 
   if (shouldStartFromCanvasCenter(profile)) {
-    // The in-game canvas opens with the cursor centered, so the fixed canvas
-    // workflow can start directly from the middle instead of re-homing first.
     current = {
       x: Math.floor(profile.canvasWidth / 2),
       y: Math.floor(profile.canvasHeight / 2),
@@ -438,6 +585,9 @@ export function generateScanlineCommands(
     }
   }
 
+  // Pre-group pixels by color to avoid repeated full-map scans
+  const pixelsByColor = groupPixelsByColor(pixelMap);
+
   if (profile.colorMode === "mono") {
     const usedColorIndexes = [profile.startColorIndex];
     let selectedColor: number | null = profile.startColorIndex;
@@ -448,7 +598,7 @@ export function generateScanlineCommands(
         selectedColor = colorIndex;
       }
 
-      const orderedPixels = getOrderedPixelsForColor(pixelMap, colorIndex, current, profile, grid);
+      const orderedPixels = getOrderedPixelsForColor(pixelsByColor, colorIndex, current, profile, grid);
       current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
     }
   } else if (profile.colorMode === "palette") {
@@ -468,7 +618,7 @@ export function generateScanlineCommands(
           selectedSlot = slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile, grid);
+        const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid);
         current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
       }
     }
@@ -496,7 +646,7 @@ export function generateScanlineCommands(
           selectedSlot = slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(pixelMap, color.colorIndex, current, profile, grid);
+        const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid);
         current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
       }
     }
