@@ -498,6 +498,7 @@ function findStudioTemplateById(templateId) {
       id: "none",
       label: "无模板（正方形）",
       category: "base",
+      maskUrl: "",
       previewUrl: "",
     }
   );
@@ -585,23 +586,36 @@ function renderStudioTemplatePreview() {
   els.templatePreviewLabel.textContent = template?.label ?? "无模板（正方形）";
 }
 
+function clearPreviewTemplateOverlay() {
+  els.previewTemplateOverlay.removeAttribute("src");
+  els.previewTemplateOverlay.classList.remove("visible");
+}
+
 async function updatePreviewTemplateOverlay() {
   const template = findStudioTemplateById(state.studio.templateId);
+  const maskUrl = template?.maskUrl ?? "";
 
-  if (!template || template.id === "none" || !template.previewUrl) {
-    els.previewTemplateOverlay.removeAttribute("src");
-    els.previewTemplateOverlay.classList.remove("visible");
+  if (!template || template.id === "none" || !maskUrl) {
+    clearPreviewTemplateOverlay();
     return;
   }
 
-  const overlayUrl = await buildTemplateOverlayDataUrl(template.previewUrl);
+  try {
+    const overlayUrl = await buildTemplateOverlayDataUrl(maskUrl);
 
-  if (template.id !== state.studio.templateId) {
-    return;
+    if (template.id !== state.studio.templateId) {
+      return;
+    }
+
+    els.previewTemplateOverlay.src = overlayUrl;
+    els.previewTemplateOverlay.classList.add("visible");
+  } catch (error) {
+    if (template.id === state.studio.templateId) {
+      clearPreviewTemplateOverlay();
+    }
+
+    console.warn(`Failed to build template overlay for ${template.id}.`, error);
   }
-
-  els.previewTemplateOverlay.src = overlayUrl;
-  els.previewTemplateOverlay.classList.add("visible");
 }
 
 async function buildTemplateOverlayDataUrl(previewUrl) {
@@ -653,6 +667,7 @@ async function loadDrawingTemplates() {
         id: "none",
         label: "无模板（正方形）",
         category: "base",
+        maskUrl: "",
         previewUrl: "",
       },
     ];

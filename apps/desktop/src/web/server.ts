@@ -590,6 +590,7 @@ function handleDrawingTemplates(response: ServerResponse): void {
   json(response, 200, {
     templates: listDrawingTemplates().map((template) => ({
       ...template,
+      maskUrl: `/${template.maskAssetPath}`,
       previewUrl: `/${template.previewAssetPath}`,
     })),
   });
