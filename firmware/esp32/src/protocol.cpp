@@ -20,6 +20,28 @@ bool parseTwoInts(const String &value, int &first, int &second) {
   return true;
 }
 
+bool parseThreeInts(const String &value, int &first, int &second, int &third) {
+  const int firstSpace = value.indexOf(' ');
+  if (firstSpace < 0) {
+    return false;
+  }
+
+  const int secondSpace = value.indexOf(' ', firstSpace + 1);
+  if (secondSpace < 0) {
+    return false;
+  }
+
+  const int thirdSpace = value.indexOf(' ', secondSpace + 1);
+  if (thirdSpace < 0) {
+    return false;
+  }
+
+  first = value.substring(firstSpace + 1, secondSpace).toInt();
+  second = value.substring(secondSpace + 1, thirdSpace).toInt();
+  third = value.substring(thirdSpace + 1).toInt();
+  return true;
+}
+
 bool parseOneInt(const String &value, int &result) {
   const int firstSpace = value.indexOf(' ');
   if (firstSpace < 0) {
@@ -121,6 +143,28 @@ bool parseBasicColorConfigCommand(const String &line, int &slotIndex, int &row, 
 }
 
 bool isBasicColorResetCommand(const String &line) { return line == "BC RESET"; }
+
+bool parseStickCommand(const String &line, int &x, int &y, uint16_t &holdMs) {
+  if (!line.startsWith("STICK ")) {
+    return false;
+  }
+
+  int parsedHoldMs = 0;
+  if (!parseThreeInts(line, x, y, parsedHoldMs)) {
+    return false;
+  }
+
+  if (x < -1 || x > 1 || y < -1 || y > 1 || (x == 0 && y == 0)) {
+    return false;
+  }
+
+  if (parsedHoldMs <= 0 || parsedHoldMs > 60000) {
+    return false;
+  }
+
+  holdMs = static_cast<uint16_t>(parsedHoldMs);
+  return true;
+}
 
 bool parseHoldButtonCommand(const String &line, ControllerButton &button, uint16_t &holdMs) {
   if (!line.startsWith("HOLD ")) {
@@ -447,6 +491,18 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
       return failControllerInput(error);
     }
     Serial.printf("INFO action=move dx=%d dy=%d\n", dx, dy);
+    return true;
+  }
+
+  int stickX = 0;
+  int stickY = 0;
+  uint16_t stickHoldMs = 0;
+
+  if (parseStickCommand(line, stickX, stickY, stickHoldMs)) {
+    if (!controller.moveStick(stickX, stickY, stickHoldMs)) {
+      return failControllerInput(error);
+    }
+    Serial.printf("INFO action=stick x=%d y=%d ms=%u\n", stickX, stickY, stickHoldMs);
     return true;
   }
 

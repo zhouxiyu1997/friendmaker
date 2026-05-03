@@ -64,6 +64,7 @@ const state = {
     colorCount: 32,
     removeBackground: false,
     usedColorIndexes: [],
+    generatedPalette: [],
     officialPalette: {
       rows: 0,
       cols: 0,
@@ -243,6 +244,7 @@ let studioPreviewBoundsRequestSerial = 0;
 
 const COLOR_COUNT_OPTIONS_BY_MODE = {
   mono: [2],
+  palette: [8, 9, 16, 18, 24, 32, 64, 84, 128],
   official: [8, 16, 32, 64, 84],
 };
 
@@ -314,7 +316,8 @@ els.offsetYInput.addEventListener("blur", () => {
 
 els.colorModeSelect.addEventListener("change", () => {
   const nextMode = els.colorModeSelect.value;
-  state.studio.colorMode = nextMode === "official" ? "official" : "mono";
+  state.studio.colorMode =
+    nextMode === "official" || nextMode === "palette" ? nextMode : "mono";
   syncStudioColorCountOptions();
   syncStudioUi();
   scheduleStudioPreviewRefresh();
@@ -522,6 +525,9 @@ function applyGeneratedStudioPayload(payload) {
   state.studio.usedColorIndexes = Array.isArray(payload.stats.usedColorIndexes)
     ? payload.stats.usedColorIndexes
     : [];
+  state.studio.generatedPalette = Array.isArray(payload.profile.palette)
+    ? payload.profile.palette
+    : [];
   state.studio.profile = {
     baudRate: payload.profile.baudRate ?? 115200,
     ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
@@ -535,7 +541,9 @@ function applyGeneratedStudioPayload(payload) {
   state.studio.imageOffsetYPercent =
     payload.profile.imageOffsetYPercent ?? state.studio.imageOffsetYPercent;
   state.studio.colorMode =
-    payload.profile.colorMode === "official" ? "official" : "mono";
+    payload.profile.colorMode === "official" || payload.profile.colorMode === "palette"
+      ? payload.profile.colorMode
+      : "mono";
   state.studio.colorCount = payload.profile.colorCount ?? state.studio.colorCount;
   state.studio.removeBackground = payload.profile.removeBackground === true;
 
@@ -543,10 +551,13 @@ function applyGeneratedStudioPayload(payload) {
   els.previewImage.src = payload.previewDataUrl;
   els.previewImage.classList.add("visible");
   els.previewEmpty.classList.add("hidden");
-  els.statColors.textContent =
-    payload.profile.colorMode === "mono"
-      ? "黑 / 白"
-      : `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`;
+  if (payload.profile.colorMode === "mono") {
+    els.statColors.textContent = "黑 / 白";
+  } else if (payload.profile.colorMode === "official") {
+    els.statColors.textContent = `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 官方色`;
+  } else {
+    els.statColors.textContent = `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 自动量化色`;
+  }
   els.statPixels.textContent = String(payload.stats.totalPixels);
   els.statCommands.textContent = payload.stats.pathStats
     ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}`
@@ -1623,34 +1634,68 @@ function renderStudioExecutionStatus() {
 
 function renderOfficialPalettePreview() {
   const isOfficialMode = state.studio.colorMode === "official";
+  const isPaletteMode = state.studio.colorMode === "palette";
   const palette = state.studio.officialPalette;
+  const generatedPalette = Array.isArray(state.studio.generatedPalette)
+    ? state.studio.generatedPalette
+    : [];
 
   els.officialPalettePanel.classList.toggle(
     "hidden",
-    !isOfficialMode || !Array.isArray(palette.grid) || palette.grid.length === 0,
+    isOfficialMode
+      ? !Array.isArray(palette.grid) || palette.grid.length === 0
+      : !isPaletteMode || generatedPalette.length === 0,
   );
 
-  if (!isOfficialMode || !Array.isArray(palette.grid) || palette.grid.length === 0) {
+  if (isOfficialMode && Array.isArray(palette.grid) && palette.grid.length > 0) {
+    const usedIndexes = new Set(
+      Array.isArray(state.studio.usedColorIndexes) ? state.studio.usedColorIndexes : [],
+    );
+    const usedCount = usedIndexes.size;
+    els.officialPaletteSummary.textContent =
+      usedCount > 0
+        ? `这里显示程序当前使用的 7x12 官方色盘。当前这张图实际量化到了 ${usedCount} 个官方色，已高亮对应格子。`
+        : "这里显示程序当前使用的 7x12 官方色盘，并会高亮这张图实际量化到的颜色格。";
+
     els.officialPaletteGrid.innerHTML = "";
+
+    palette.grid.forEach((rowColors, rowIndex) => {
+      rowColors.forEach((colorHex, colIndex) => {
+        const cell = document.createElement("div");
+        const flatIndex = rowIndex * palette.cols + colIndex;
+        cell.className = `official-palette-cell${usedIndexes.has(flatIndex) ? " used" : ""}`;
+
+        const swatch = document.createElement("div");
+        swatch.className = "official-palette-swatch";
+        swatch.style.background = colorHex;
+
+        const meta = document.createElement("div");
+        meta.className = "official-palette-meta";
+
+        const coord = document.createElement("span");
+        coord.className = "official-palette-coord";
+        coord.textContent = `R${rowIndex} · C${colIndex}`;
+
+        const hex = document.createElement("span");
+        hex.className = "official-palette-hex";
+        hex.textContent = colorHex;
+
+        meta.append(coord, hex);
+        cell.append(swatch, meta);
+        els.officialPaletteGrid.appendChild(cell);
+      });
+    });
     return;
   }
 
-  const usedIndexes = new Set(
-    Array.isArray(state.studio.usedColorIndexes) ? state.studio.usedColorIndexes : [],
-  );
-  const usedCount = usedIndexes.size;
-  els.officialPaletteSummary.textContent =
-    usedCount > 0
-      ? `这里显示程序当前使用的 7x12 官方色盘。当前这张图实际量化到了 ${usedCount} 个官方色，已高亮对应格子。`
-      : "这里显示程序当前使用的 7x12 官方色盘，并会高亮这张图实际量化到的颜色格。";
+  if (isPaletteMode && generatedPalette.length > 0) {
+    els.officialPaletteSummary.textContent =
+      `这里完整列出这张图当前预览实际用到的全部颜色。当前共使用 ${generatedPalette.length} 个自动量化颜色，绘制时会按 9 槽一批写入自定义色槽。`;
+    els.officialPaletteGrid.innerHTML = "";
 
-  els.officialPaletteGrid.innerHTML = "";
-
-  palette.grid.forEach((rowColors, rowIndex) => {
-    rowColors.forEach((colorHex, colIndex) => {
+    generatedPalette.forEach((colorHex, index) => {
       const cell = document.createElement("div");
-      const flatIndex = rowIndex * palette.cols + colIndex;
-      cell.className = `official-palette-cell${usedIndexes.has(flatIndex) ? " used" : ""}`;
+      cell.className = "official-palette-cell used";
 
       const swatch = document.createElement("div");
       swatch.className = "official-palette-swatch";
@@ -1661,7 +1706,7 @@ function renderOfficialPalettePreview() {
 
       const coord = document.createElement("span");
       coord.className = "official-palette-coord";
-      coord.textContent = `R${rowIndex} · C${colIndex}`;
+      coord.textContent = `P${index}`;
 
       const hex = document.createElement("span");
       hex.className = "official-palette-hex";
@@ -1671,7 +1716,10 @@ function renderOfficialPalettePreview() {
       cell.append(swatch, meta);
       els.officialPaletteGrid.appendChild(cell);
     });
-  });
+    return;
+  }
+
+  els.officialPaletteGrid.innerHTML = "";
 }
 
 function syncStudioColorCountOptions() {
@@ -1723,10 +1771,16 @@ function syncStudioUi() {
     state.studio.imageOffsetXPercent,
     state.studio.imageOffsetYPercent,
   );
-  els.studioModeHint.textContent =
-    state.studio.colorMode === "mono"
-      ? `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`
-      : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
+  if (state.studio.colorMode === "mono") {
+    els.studioModeHint.textContent =
+      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`;
+  } else if (state.studio.colorMode === "official") {
+    els.studioModeHint.textContent =
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
+  } else {
+    els.studioModeHint.textContent =
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${scaleHint}${positionHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}`;
+  }
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
   els.sizeSelect.disabled = state.studio.busy || executionActive;
@@ -1804,7 +1858,9 @@ function syncStudioUi() {
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
       ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
-      : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`;
+      : state.studio.colorMode === "official"
+        ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
+        : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}。ESP32 会分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制；这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
   renderStudioConnectionStatus();
 }
 
