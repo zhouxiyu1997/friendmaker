@@ -279,6 +279,7 @@ const TEMPLATE_CATEGORY_LABELS = {
   dresses: "裙装 / 衣摆",
   bottoms: "下装",
   hats: "帽子",
+  other: "其他异形",
   base: "默认",
 };
 
