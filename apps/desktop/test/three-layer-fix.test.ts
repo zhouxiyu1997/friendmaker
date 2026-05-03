@@ -200,6 +200,14 @@ test("dynamic timeouts follow CFG INPUT timing", () => {
   assert.equal(getAckTimeoutForCommand("H", 500, timing), 4700);
 });
 
+test("palette-config commands get enough timeout for calibrated custom colors", () => {
+  const timing = { buttonPressMs: 100, inputDelayMs: 100, homeMs: 1800 };
+
+  assert.equal(getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing), 20_440);
+  assert.equal(getAckTimeoutForCommand("PC 2 #00FF00", 20_000, timing), 46_340);
+  assert.equal(getAckTimeoutForCommand("PC 6 #000000", 20_000, timing), 20_000);
+});
+
 test("controller input report failures are not retried", async () => {
   const lines: string[] = [];
   const sender = new SimulatedAckSender();
