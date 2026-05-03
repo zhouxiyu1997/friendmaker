@@ -55,7 +55,9 @@
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.utilities",
-      "identity": null,
+      "hardenedRuntime": true,
+      "forceCodeSigning": true,
+      "notarize": true,
       "target": [
         "dmg",
         "zip"
