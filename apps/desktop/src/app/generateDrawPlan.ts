@@ -5,7 +5,7 @@ import { renderPreviewToBuffer } from "../image/renderPreview.js";
 import { estimateRuntimeMs, generateScanlineCommands } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
-import type { CanvasBounds, DrawingProfile, PixelMap } from "../types.js";
+import type { CanvasBounds, DrawingMask, DrawingProfile, PixelMap } from "../types.js";
 
 export interface DrawPlanPathStats {
   lineRunCount: number;
@@ -36,6 +36,7 @@ export async function generateDrawPlan(
     imageOffsetXPercent?: number;
     imageOffsetYPercent?: number;
     removeBackground?: boolean;
+    drawingMask?: DrawingMask | null;
   },
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
@@ -61,12 +62,19 @@ export async function generateDrawPlan(
     pixelMap,
     usedColorIndexes,
     paletteHexes,
-    totalPixels: pixelMap.length * (pixelMap[0]?.length ?? 0),
+    totalPixels: countDrawablePixels(pixelMap),
     estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),
     previewPng,
     imageBounds,
     pathStats,
   };
+}
+
+function countDrawablePixels(pixelMap: PixelMap): number {
+  return pixelMap.reduce(
+    (total, row) => total + row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).length,
+    0,
+  );
 }
 
 export function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): CanvasBounds | null {

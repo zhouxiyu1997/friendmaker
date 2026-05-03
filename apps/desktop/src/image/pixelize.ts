@@ -1,6 +1,12 @@
-import type { DrawingProfile, PixelizationResult } from "../types.js";
+import type { DrawingMask, DrawingProfile, PixelizationResult } from "../types.js";
 import { createBrushGrid } from "../brushGrid.js";
 import type { ImageSource } from "./loadImage.js";
+import {
+  applyDrawingMask,
+  createDrawingMaskCoverageMap,
+  isDrawingMaskCellEnabled,
+  type DrawingMaskCoverageMap,
+} from "./drawingMask.js";
 import { autoRemoveBackground } from "./removeBackground.js";
 import { resizeImage } from "./resizeImage.js";
 import { quantizePixels } from "./quantize.js";
@@ -8,6 +14,7 @@ import { quantizePixels } from "./quantize.js";
 function collapsePixelMapForBrush(
   pixelMap: PixelizationResult["pixelMap"],
   profile: DrawingProfile,
+  drawingMaskCoverageMap: DrawingMaskCoverageMap | null,
 ): PixelizationResult["pixelMap"] {
   const grid = createBrushGrid(profile);
   const collapsed: PixelizationResult["pixelMap"] = [];
@@ -17,6 +24,17 @@ function collapsePixelMapForBrush(
     const originY = grid.originY + logicalY * grid.brushSize;
 
     for (let logicalX = 0; logicalX < grid.gridWidth; logicalX += 1) {
+      if (!isDrawingMaskCellEnabled(drawingMaskCoverageMap, { x: logicalX, y: logicalY })) {
+        row.push({
+          x: logicalX,
+          y: logicalY,
+          colorIndex: -1,
+          colorHex: "#ffffff",
+          alpha: 0,
+        });
+        continue;
+      }
+
       const originX = grid.originX + logicalX * grid.brushSize;
       const colorCounts = new Map<
         number,
@@ -125,8 +143,10 @@ export async function pixelizeImage(
     imageOffsetXPercent?: number;
     imageOffsetYPercent?: number;
     removeBackground?: boolean;
+    drawingMask?: DrawingMask | null;
   },
 ): Promise<PixelizationResult> {
+  const grid = createBrushGrid(profile);
   const resizeOptions = {
     width: profile.canvasWidth,
     height: profile.canvasHeight,
@@ -142,20 +162,22 @@ export async function pixelizeImage(
       : {}),
   };
   const resizedImage = await resizeImage(imageSource, resizeOptions);
-  const rawImage = options?.removeBackground ? autoRemoveBackground(resizedImage) : resizedImage;
+  const backgroundAdjustedImage = options?.removeBackground ? autoRemoveBackground(resizedImage) : resizedImage;
+  const maskedImage = applyDrawingMask(backgroundAdjustedImage, options?.drawingMask ?? null);
+  const drawingMaskCoverageMap = createDrawingMaskCoverageMap(options?.drawingMask ?? null, grid);
 
-  const fullPixelMap = quantizePixels(rawImage, {
+  const fullPixelMap = quantizePixels(maskedImage, {
     colorMode: profile.colorMode,
     colorCount: profile.colorCount,
     monoThreshold: profile.monoThreshold,
     palette: profile.palette,
   });
-  const pixelMap = collapsePixelMapForBrush(fullPixelMap, profile);
+  const pixelMap = collapsePixelMapForBrush(fullPixelMap, profile, drawingMaskCoverageMap);
 
   const usedColorIndexes = Array.from(
     new Set(
       pixelMap.flatMap((row) =>
-        row.filter((pixel) => pixel.alpha > 0).map((pixel) => pixel.colorIndex),
+        row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).map((pixel) => pixel.colorIndex),
       ),
     ),
   ).sort((a, b) => a - b);
