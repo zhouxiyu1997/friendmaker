@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -305,8 +306,16 @@ async function loadDrawingTemplateMaskUncached(
     throw new Error(`Unknown drawing template: ${templateId}`);
   }
 
+  if (definition.id === "none") {
+    return null;
+  }
+
   const assetPath = resolveDrawingTemplateAssetPath(definition.maskAssetPath);
-  const { data, info } = await sharp(assetPath)
+  // Packaged Electron builds serve these assets from app.asar, which sharp
+  // cannot reliably open via a filesystem path. Reading into a Buffer keeps
+  // both dev and packaged builds on the same code path.
+  const assetBuffer = await readFile(assetPath);
+  const { data, info } = await sharp(assetBuffer)
     .resize(width, height, {
       fit: "fill",
       kernel: sharp.kernel.nearest,

@@ -4,6 +4,11 @@ import test from "node:test";
 import { listDrawingTemplates, loadDrawingTemplateMask } from "../src/drawingTemplates.js";
 import { startWebServer } from "../src/web/server.js";
 
+test("none drawing template skips file-backed mask loading", async () => {
+  const mask = await loadDrawingTemplateMask("none", 256, 256);
+  assert.equal(mask, null);
+});
+
 test("irregular drawing template masks reserve transparent space outside the cutout", async () => {
   const templates = listDrawingTemplates().filter((template) => template.id !== "none");
 
