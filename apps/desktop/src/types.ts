@@ -28,6 +28,13 @@ export interface RawImageData {
   data: Buffer;
 }
 
+export interface DrawingMask {
+  id?: string;
+  width: number;
+  height: number;
+  alpha: Uint8Array;
+}
+
 export interface DrawingProfile {
   profileName: string;
   baudRate: number;

@@ -3,15 +3,16 @@ import { test } from "node:test";
 
 import sharp from "sharp";
 
-import { calculateCanvasBounds } from "../src/app/generateDrawPlan.js";
+import { calculateCanvasBounds, generateDrawPlan } from "../src/app/generateDrawPlan.js";
 import { createBrushGrid, gridCellBounds, gridCellToCanvasCenter } from "../src/brushGrid.js";
+import { applyDrawingMask, createDrawingMaskCoverageMap } from "../src/image/drawingMask.js";
 import { pixelizeImage } from "../src/image/pixelize.js";
 import { renderPreviewToBuffer } from "../src/image/renderPreview.js";
 import { generateScanlineCommands } from "../src/path/scanline.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import { getAckTimeoutForCommand } from "../src/serial/sender.js";
 import { SimulatedAckSender } from "../src/simulator/sender.js";
-import type { BrushSize, DrawingProfile, Pixel, PixelMap } from "../src/types.js";
+import type { BrushSize, DrawingMask, DrawingProfile, Pixel, PixelMap, RawImageData } from "../src/types.js";
 
 function makeProfile(overrides: Partial<DrawingProfile> = {}): DrawingProfile {
   return {
@@ -109,6 +110,43 @@ async function transparentPng(width: number, height: number): Promise<Buffer> {
     .toBuffer();
 }
 
+async function solidPng(
+  width: number,
+  height: number,
+  color: { r: number; g: number; b: number; alpha: number } = { r: 0, g: 0, b: 0, alpha: 255 },
+): Promise<Buffer> {
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: color,
+    },
+  })
+    .png()
+    .toBuffer();
+}
+
+function makeDrawingMask(
+  width: number,
+  height: number,
+  isFilled: (x: number, y: number) => boolean,
+): DrawingMask {
+  const alpha = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      alpha[y * width + x] = isFilled(x, y) ? 255 : 0;
+    }
+  }
+
+  return {
+    width,
+    height,
+    alpha,
+  };
+}
+
 test("BrushGrid keeps pixelize, preview, bounds, and centers aligned", async () => {
   const brushSizes: BrushSize[] = [1, 3, 7, 13, 19, 27];
   const blankImage = await transparentPng(256, 256);
@@ -189,6 +227,106 @@ test("large brush centered blocks use grid origin instead of top-left bias", asy
 
   assert.deepEqual(calculateCanvasBounds(pixelMap, profile), expected);
   assert.deepEqual(await alphaBoundsFromPreview(await renderPreviewToBuffer(pixelMap, profile, 1)), expected);
+});
+
+test("drawing mask clears pixels outside the template and bounds follow the masked shape", async () => {
+  const profile = makeProfile({ canvasWidth: 6, canvasHeight: 6, brushSize: 1 });
+  const source = await solidPng(6, 6);
+  const drawingMask = makeDrawingMask(6, 6, (x, y) => x >= 1 && x <= 2 && y >= 1 && y <= 2);
+  const pixelized = await pixelizeImage(source, profile, { drawingMask });
+
+  assert.equal(
+    pixelized.pixelMap.flatMap((row) => row).filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).length,
+    4,
+  );
+  assert.deepEqual(calculateCanvasBounds(pixelized.pixelMap, profile), {
+    x: 1,
+    y: 1,
+    width: 2,
+    height: 2,
+    maxX: 2,
+    maxY: 2,
+  });
+});
+
+test("large brush cells stay drawable when they overlap the template edge", async () => {
+  const profile = makeProfile({ canvasWidth: 6, canvasHeight: 6, brushSize: 3 });
+  const source = await solidPng(6, 6);
+  const drawingMask = makeDrawingMask(6, 6, (x, y) => {
+    if (y >= 3) {
+      return false;
+    }
+
+    if (x <= 1) {
+      return true;
+    }
+
+    return x === 3;
+  });
+  const grid = createBrushGrid(profile);
+  const coverageMap = createDrawingMaskCoverageMap(drawingMask, grid);
+  const pixelized = await pixelizeImage(source, profile, { drawingMask });
+
+  assert.equal(coverageMap?.[0]?.[0], 6 / 9);
+  assert.equal(coverageMap?.[0]?.[1], 3 / 9);
+  assert.equal(pixelized.pixelMap[0]?.[0]?.alpha, 255);
+  assert.equal(pixelized.pixelMap[0]?.[1]?.alpha, 255);
+  assert.equal(pixelized.pixelMap[1]?.[0]?.alpha, 0);
+  assert.equal(pixelized.pixelMap[1]?.[1]?.alpha, 0);
+  assert.equal(
+    pixelized.pixelMap.flatMap((row) => row).filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).length,
+    2,
+  );
+});
+
+test("multi-island masks preserve separated drawable regions", async () => {
+  const profile = makeProfile({ canvasWidth: 8, canvasHeight: 8, brushSize: 1 });
+  const source = await solidPng(8, 8);
+  const drawingMask = makeDrawingMask(
+    8,
+    8,
+    (x, y) =>
+      (x <= 1 && y <= 1) ||
+      (x >= 6 && y >= 6),
+  );
+  const pixelized = await pixelizeImage(source, profile, { drawingMask });
+
+  assert.equal(pixelized.pixelMap[0]?.[0]?.alpha, 255);
+  assert.equal(pixelized.pixelMap[1]?.[1]?.alpha, 255);
+  assert.equal(pixelized.pixelMap[4]?.[4]?.alpha, 0);
+  assert.equal(pixelized.pixelMap[6]?.[6]?.alpha, 255);
+  assert.equal(pixelized.pixelMap[7]?.[7]?.alpha, 255);
+});
+
+test("applyDrawingMask zeroes alpha outside the template", () => {
+  const raw: RawImageData = {
+    width: 2,
+    height: 2,
+    channels: 4,
+    data: Buffer.from([
+      0, 0, 0, 255,
+      0, 0, 0, 255,
+      0, 0, 0, 255,
+      0, 0, 0, 255,
+    ]),
+  };
+  const drawingMask = makeDrawingMask(2, 2, (x, y) => x === 0 && y === 0);
+  const masked = applyDrawingMask(raw, drawingMask);
+
+  assert.equal(masked.data[3], 255);
+  assert.equal(masked.data[7], 0);
+  assert.equal(masked.data[11], 0);
+  assert.equal(masked.data[15], 0);
+});
+
+test("draw plan pixel stats count only drawable cells after masking", async () => {
+  const profile = makeProfile({ canvasWidth: 4, canvasHeight: 4, brushSize: 1 });
+  const source = await solidPng(4, 4);
+  const drawingMask = makeDrawingMask(4, 4, (x, y) => x <= 1 && y <= 1);
+  const plan = await generateDrawPlan(source, profile, 1, { drawingMask });
+
+  assert.equal(plan.totalPixels, 4);
+  assert.equal(plan.commands.length > 0, true);
 });
 
 test("dynamic timeouts follow CFG INPUT timing", () => {

@@ -127,7 +127,7 @@
             <div class="execution-box mono-note-box">
               <div class="panel-head compact">
                 <h2>绘制模式</h2>
-                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；自定义多色模式会先自动量化颜色，再按批次写入 9 个自定义色槽。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
+                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；自定义多色模式会先自动量化颜色，再按批次写入 9 个自定义色槽。现在也可以给画布套用异形图纸模板，模板外区域会直接裁掉。建议在游戏里切换为方块笔刷，整体观感通常会更美观。</p>
               </div>
 
               <p class="hint" id="studio-mode-hint">
@@ -178,6 +178,39 @@
                   <option value="128">128 色</option>
                 </select>
               </label>
+            </div>
+
+            <div class="template-picker-card">
+              <div class="panel-head compact">
+                <h2>图纸模板</h2>
+                <p>选择后，预览会裁掉模板外区域；边缘格子只要和模板有重叠也会保留绘制，这样大画笔能把可见边缘填满。不选时保持当前正方形画布行为。</p>
+              </div>
+
+              <div class="field-grid template-picker-grid">
+                <label>
+                  <span>模板分类</span>
+                  <select id="template-category-select">
+                    <option value="all" selected>全部模板</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>当前模板</span>
+                  <select id="template-select">
+                    <option value="none" selected>无模板（正方形）</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="template-preview-card">
+                <div class="template-preview-thumb">
+                  <img id="template-preview-image" alt="当前图纸模板预览" />
+                </div>
+                <div class="template-preview-copy">
+                  <strong id="template-preview-label">无模板（正方形）</strong>
+                  <small>模板缩略图只用于确认当前选中项；真正的裁剪会在生成预览和绘制命令时一起生效。</small>
+                </div>
+              </div>
             </div>
 
             <label class="range-row">
@@ -279,7 +312,7 @@
           <section class="panel panel-preview">
             <div class="panel-head">
               <h2>预览</h2>
-              <p>这里显示像素化结果和关键统计信息。</p>
+              <p>这里显示像素化结果、模板裁剪效果和关键统计信息。</p>
             </div>
 
             <div class="preview-tools">
@@ -306,6 +339,7 @@
             <div class="preview-frame">
               <div id="preview-canvas" class="preview-canvas" data-guide="none">
                 <img id="preview-image" alt="生成预览" />
+                <img id="preview-template-overlay" alt="" aria-hidden="true" />
                 <div class="preview-guide" aria-hidden="true"></div>
                 <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
               </div>

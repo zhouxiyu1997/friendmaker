@@ -1,3 +1,5 @@
+import { deriveControllerStatus } from "./controllerStatus.js";
+
 const state = {
   activePage: "studio",
   imageDataUrl: null,
@@ -56,6 +58,10 @@ const state = {
     target: "serial",
     canvasSize: 256,
     brushSize: 3,
+    templateCategory: "all",
+    templateId: "none",
+    templateLabel: "无模板（正方形）",
+    templates: [],
     imageScalePercent: 100,
     imageOffsetXPercent: 0,
     imageOffsetYPercent: 0,
@@ -74,6 +80,8 @@ const state = {
       baudRate: 115200,
       ackTimeoutMs: 5000,
       commandRetryCount: 1,
+      templateId: "none",
+      templateLabel: "无模板（正方形）",
     },
     execution: {
       id: null,
@@ -140,6 +148,10 @@ const els = {
   studioModeHint: document.getElementById("studio-mode-hint"),
   sizeSelect: document.getElementById("size-select"),
   brushSizeSelect: document.getElementById("brush-size-select"),
+  templateCategorySelect: document.getElementById("template-category-select"),
+  templateSelect: document.getElementById("template-select"),
+  templatePreviewImage: document.getElementById("template-preview-image"),
+  templatePreviewLabel: document.getElementById("template-preview-label"),
   colorModeSelect: document.getElementById("color-mode-select"),
   colorCountSelect: document.getElementById("color-count-select"),
   thresholdLabel: document.getElementById("threshold-label"),
@@ -165,6 +177,7 @@ const els = {
   autoRemoveBackgroundCheckbox: document.getElementById("auto-remove-background-checkbox"),
   previewGuideSelect: document.getElementById("preview-guide-select"),
   previewCanvas: document.getElementById("preview-canvas"),
+  previewTemplateOverlay: document.getElementById("preview-template-overlay"),
   previewImage: document.getElementById("preview-image"),
   previewEmpty: document.getElementById("preview-empty"),
   officialPalettePanel: document.getElementById("official-palette-panel"),
@@ -241,6 +254,7 @@ let windowsSerialDriverPollTimer = null;
 let studioPreviewRefreshTimer = null;
 let studioGenerateRequestSerial = 0;
 let studioPreviewBoundsRequestSerial = 0;
+const studioTemplateOverlayCache = new Map();
 
 const COLOR_COUNT_OPTIONS_BY_MODE = {
   mono: [2],
@@ -259,6 +273,15 @@ const STUDIO_IMAGE_OFFSET_LIMITS = {
 };
 
 const VALID_PAGE_NAMES = new Set(["studio", "firmware", "controller"]);
+const TEMPLATE_CATEGORY_LABELS = {
+  all: "全部模板",
+  tops: "上衣 / 长衣",
+  dresses: "裙装 / 衣摆",
+  bottoms: "下装",
+  hats: "帽子",
+  other: "几何 / 特殊",
+  base: "默认",
+};
 
 els.pageTabs.forEach((button) => {
   button.addEventListener("click", () => {
@@ -276,6 +299,23 @@ els.brushSizeSelect.addEventListener("change", () => {
   state.studio.brushSize = Number(els.brushSizeSelect.value);
   syncStudioUi();
   scheduleStudioPreviewRefresh();
+});
+
+els.templateCategorySelect.addEventListener("change", () => {
+  state.studio.templateCategory = els.templateCategorySelect.value || "all";
+  syncStudioTemplateOptions();
+  syncStudioUi();
+});
+
+els.templateSelect.addEventListener("change", () => {
+  const nextTemplateId = els.templateSelect.value || "none";
+  const changed = nextTemplateId !== state.studio.templateId;
+  applySelectedStudioTemplate(nextTemplateId);
+  syncStudioUi();
+
+  if (changed) {
+    scheduleStudioPreviewRefresh();
+  }
 });
 
 els.scaleRange.addEventListener("input", () => {
@@ -452,6 +492,193 @@ els.resetExecutionButton.addEventListener("click", async () => {
   await sendStudioExecutionControl("reset", "强制恢复绘制状态");
 });
 
+function findStudioTemplateById(templateId) {
+  return (
+    state.studio.templates.find((template) => template.id === templateId) ?? {
+      id: "none",
+      label: "无模板（正方形）",
+      category: "base",
+      maskUrl: "",
+      previewUrl: "",
+    }
+  );
+}
+
+function getFilteredStudioTemplates() {
+  if (state.studio.templateCategory === "all") {
+    return state.studio.templates;
+  }
+
+  return state.studio.templates.filter(
+    (template) => template.id === "none" || template.category === state.studio.templateCategory,
+  );
+}
+
+function applySelectedStudioTemplate(templateId) {
+  const nextTemplate = findStudioTemplateById(templateId) ?? findStudioTemplateById("none");
+
+  if (!nextTemplate) {
+    return;
+  }
+
+  state.studio.templateId = nextTemplate.id;
+  state.studio.templateLabel = nextTemplate.label;
+
+  if (
+    state.studio.templateCategory !== "all" &&
+    nextTemplate.id !== "none" &&
+    nextTemplate.category !== state.studio.templateCategory
+  ) {
+    state.studio.templateCategory = nextTemplate.category;
+  }
+}
+
+function syncStudioTemplateOptions() {
+  const categoryOptions = ["all", ...new Set(
+    state.studio.templates
+      .map((template) => template.category)
+      .filter((category) => category !== "base"),
+  )];
+  const nextCategory = categoryOptions.includes(state.studio.templateCategory)
+    ? state.studio.templateCategory
+    : "all";
+  state.studio.templateCategory = nextCategory;
+  els.templateCategorySelect.innerHTML = "";
+
+  categoryOptions.forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = TEMPLATE_CATEGORY_LABELS[category] ?? category;
+    option.selected = category === nextCategory;
+    els.templateCategorySelect.appendChild(option);
+  });
+
+  const filteredTemplates = getFilteredStudioTemplates();
+
+  if (!filteredTemplates.some((template) => template.id === state.studio.templateId)) {
+    const fallbackTemplate = filteredTemplates[0] ?? findStudioTemplateById("none");
+    applySelectedStudioTemplate(fallbackTemplate?.id ?? "none");
+  }
+
+  els.templateSelect.innerHTML = "";
+
+  filteredTemplates.forEach((template) => {
+    const option = document.createElement("option");
+    option.value = template.id;
+    option.textContent = template.label;
+    option.selected = template.id === state.studio.templateId;
+    els.templateSelect.appendChild(option);
+  });
+}
+
+function renderStudioTemplatePreview() {
+  const template = findStudioTemplateById(state.studio.templateId) ?? findStudioTemplateById("none");
+  const previewUrl = template?.previewUrl ?? "";
+
+  if (previewUrl) {
+    els.templatePreviewImage.src = previewUrl;
+    els.templatePreviewImage.classList.add("visible");
+  } else {
+    els.templatePreviewImage.removeAttribute("src");
+    els.templatePreviewImage.classList.remove("visible");
+  }
+
+  els.templatePreviewLabel.textContent = template?.label ?? "无模板（正方形）";
+}
+
+function clearPreviewTemplateOverlay() {
+  els.previewTemplateOverlay.removeAttribute("src");
+  els.previewTemplateOverlay.classList.remove("visible");
+}
+
+async function updatePreviewTemplateOverlay() {
+  const template = findStudioTemplateById(state.studio.templateId);
+  const maskUrl = template?.maskUrl ?? "";
+
+  if (!template || template.id === "none" || !maskUrl) {
+    clearPreviewTemplateOverlay();
+    return;
+  }
+
+  try {
+    const overlayUrl = await buildTemplateOverlayDataUrl(maskUrl);
+
+    if (template.id !== state.studio.templateId) {
+      return;
+    }
+
+    els.previewTemplateOverlay.src = overlayUrl;
+    els.previewTemplateOverlay.classList.add("visible");
+  } catch (error) {
+    if (template.id === state.studio.templateId) {
+      clearPreviewTemplateOverlay();
+    }
+
+    console.warn(`Failed to build template overlay for ${template.id}.`, error);
+  }
+}
+
+async function buildTemplateOverlayDataUrl(previewUrl) {
+  if (studioTemplateOverlayCache.has(previewUrl)) {
+    return studioTemplateOverlayCache.get(previewUrl);
+  }
+
+  const image = await loadImageElement(previewUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || 256;
+  canvas.height = image.naturalHeight || 256;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!context) {
+    return previewUrl;
+  }
+
+  context.drawImage(image, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3] ?? 0;
+    data[index] = 19;
+    data[index + 1] = 34;
+    data[index + 2] = 56;
+    data[index + 3] = alpha > 0 ? 0 : 176;
+  }
+
+  context.putImageData(imageData, 0, 0);
+  const overlayUrl = canvas.toDataURL("image/png");
+  studioTemplateOverlayCache.set(previewUrl, overlayUrl);
+  return overlayUrl;
+}
+
+async function loadDrawingTemplates() {
+  const response = await fetch("/api/drawing-templates");
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "加载图纸模板失败");
+  }
+
+  state.studio.templates = Array.isArray(payload.templates) ? payload.templates : [];
+
+  if (state.studio.templates.length === 0) {
+    state.studio.templates = [
+      {
+        id: "none",
+        label: "无模板（正方形）",
+        category: "base",
+        maskUrl: "",
+        previewUrl: "",
+      },
+    ];
+  }
+
+  applySelectedStudioTemplate(state.studio.templateId);
+  syncStudioTemplateOptions();
+  renderStudioTemplatePreview();
+  await updatePreviewTemplateOverlay();
+}
+
 async function generateStudioCommands({ logPrefix }) {
   if (!state.imageDataUrl) {
     appendLog(els.studioLogOutput, "请先选择图片。");
@@ -488,6 +715,7 @@ function buildStudioGeneratePayload() {
     imageDataUrl: state.imageDataUrl,
     size: state.studio.canvasSize,
     brushSize: state.studio.brushSize,
+    templateId: state.studio.templateId,
     imageScalePercent: state.studio.imageScalePercent,
     imageOffsetXPercent: state.studio.imageOffsetXPercent,
     imageOffsetYPercent: state.studio.imageOffsetYPercent,
@@ -532,8 +760,11 @@ function applyGeneratedStudioPayload(payload) {
     baudRate: payload.profile.baudRate ?? 115200,
     ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
     commandRetryCount: payload.profile.commandRetryCount ?? 1,
+    templateId: payload.profile.templateId ?? state.studio.templateId,
+    templateLabel: payload.profile.templateLabel ?? state.studio.templateLabel,
   };
   state.studio.brushSize = payload.profile.brushSize ?? state.studio.brushSize;
+  applySelectedStudioTemplate(payload.profile.templateId ?? state.studio.templateId);
   state.studio.imageScalePercent =
     payload.profile.imageScalePercent ?? state.studio.imageScalePercent;
   state.studio.imageOffsetXPercent =
@@ -551,6 +782,7 @@ function applyGeneratedStudioPayload(payload) {
   els.previewImage.src = payload.previewDataUrl;
   els.previewImage.classList.add("visible");
   els.previewEmpty.classList.add("hidden");
+  void updatePreviewTemplateOverlay();
   if (payload.profile.colorMode === "mono") {
     els.statColors.textContent = "黑 / 白";
   } else if (payload.profile.colorMode === "official") {
@@ -1377,50 +1609,6 @@ function setControllerBusy(isBusy) {
   syncControllerUi();
 }
 
-function readInfoLineMap(lines) {
-  const info = {};
-
-  (lines ?? []).forEach((line) => {
-    const match = /^INFO\s+([^=]+)=(.*)$/u.exec(line);
-    if (!match) {
-      return;
-    }
-
-    const [, key, value] = match;
-    info[key.trim()] = value.trim();
-  });
-
-  return info;
-}
-
-function boolFromInfo(value) {
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
-
-  return null;
-}
-
-function boolLabel(value, labels) {
-  if (value === true) {
-    return labels[0];
-  }
-
-  if (value === false) {
-    return labels[1];
-  }
-
-  return "未知";
-}
-
-function isControllerSendableStatus({ connected, paired, ready }) {
-  return ready === true || (connected === true && paired === true);
-}
-
 function applySerialSessionSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     return;
@@ -1494,76 +1682,12 @@ function setControllerStatus(partialStatus) {
 }
 
 function updateControllerStatusFromLines(lines) {
-  const info = readInfoLineMap(lines);
+  const status = deriveControllerStatus(lines);
 
-  if (!info.transport && !info.bt_mode && !info.bt_profile) {
+  if (!status) {
     return;
   }
-
-  const discoverable = boolFromInfo(info.bt_discoverable);
-  const authComplete = boolFromInfo(info.bt_auth_complete);
-  const connected = boolFromInfo(info.bt_connected);
-  const paired = boolFromInfo(info.bt_paired);
-  const rawReady = boolFromInfo(info.bt_ready_for_reports);
-  const ready = isControllerSendableStatus({ connected, paired, ready: rawReady });
-  const readyInferredFromPairing = rawReady !== true && connected === true && paired === true;
-  const initError = info.bt_init_error ?? "-";
-
-  let tone = "idle";
-  let pill = "待连接";
-  let title = "等待连接手柄";
-  let detail = "当前还没有拿到可用的蓝牙连接状态。";
-
-  if (initError !== "-" && initError !== "ESP_OK") {
-    tone = "error";
-    pill = "异常";
-    title = "初始化异常";
-    detail = `蓝牙初始化停在 ${info.bt_init_step ?? "unknown"}，返回 ${initError}。`;
-  } else if (ready === true) {
-    tone = "success";
-    pill = "已就绪";
-    title = "手柄已连接";
-    detail = readyInferredFromPairing
-      ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
-      : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
-  } else if (connected === true) {
-    tone = "running";
-    pill = "已连接";
-    title = "连接已建立";
-    detail = "HID 连接已经建立，正在等待配对完成或报告通道完全就绪。";
-  } else if (authComplete === true) {
-    tone = "running";
-    pill = "已认证";
-    title = "认证已通过";
-    detail = "Switch 已完成蓝牙认证，正在尝试把这块板子接成可用手柄。";
-  } else if (discoverable === true) {
-    tone = "running";
-    pill = "广播中";
-    title = "等待 Switch 发现";
-    detail = "开发板正在广播。请在 Switch 的“更改握法/顺序”页面停留等待。";
-  }
-
-  setControllerStatus({
-    tone,
-    pill,
-    title,
-    detail,
-    transport: info.transport ?? "-",
-    profile: info.bt_profile ?? info.bt_mode ?? "-",
-    discoverable: boolLabel(discoverable, ["可发现", "未发现"]),
-    auth: boolLabel(authComplete, ["已通过", "未通过"]),
-    connected: boolLabel(connected, ["已连接", "未连接"]),
-    paired: boolLabel(paired, ["已配对", "未配对"]),
-    ready: boolLabel(ready, ["可发送", "未就绪"]),
-    discoverableValue: discoverable,
-    authValue: authComplete,
-    connectedValue: connected,
-    pairedValue: paired,
-    readyValue: ready,
-    peer: info.bt_last_peer ?? "-",
-    initStep: info.bt_init_step ?? "-",
-    initError,
-  });
+  setControllerStatus(status);
 }
 
 function isControllerReadyForStudio() {
@@ -1751,6 +1875,11 @@ function syncStudioUi() {
 
   els.sizeSelect.value = String(state.studio.canvasSize);
   els.brushSizeSelect.value = String(state.studio.brushSize);
+  syncStudioTemplateOptions();
+  els.templateCategorySelect.value = state.studio.templateCategory;
+  els.templateSelect.value = state.studio.templateId;
+  renderStudioTemplatePreview();
+  void updatePreviewTemplateOverlay();
   els.scaleRange.value = String(state.studio.imageScalePercent);
   els.scaleInput.value = String(state.studio.imageScalePercent);
   els.offsetXRange.value = String(state.studio.imageOffsetXPercent);
@@ -1766,6 +1895,10 @@ function syncStudioUi() {
     ? "已开启自动扣背景，会优先去掉白底、浅灰底和棋盘格假透明背景。"
     : "当前不会自动扣背景；如果素材是白底或棋盘格假透明图，建议开启。";
   const squareBrushHint = "建议同时把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。";
+  const templateHint =
+    state.studio.templateId === "none"
+      ? "当前使用正方形画布，不会额外裁掉模板外区域。"
+      : `当前模板是“${state.studio.templateLabel}”，纯模板外区域不会显示；边缘格子只要碰到模板，也会保留绘制来填满可见边缘。`;
   const scaleHint = `当前导入缩放是 ${state.studio.imageScalePercent}%，100% 表示完整放进画布。`;
   const positionHint = describeImagePosition(
     state.studio.imageOffsetXPercent,
@@ -1773,18 +1906,20 @@ function syncStudioUi() {
   );
   if (state.studio.colorMode === "mono") {
     els.studioModeHint.textContent =
-      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`;
+      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${templateHint}${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`;
   } else if (state.studio.colorMode === "official") {
     els.studioModeHint.textContent =
-      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
   } else {
     els.studioModeHint.textContent =
-      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${scaleHint}${positionHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}`;
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}`;
   }
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
   els.sizeSelect.disabled = state.studio.busy || executionActive;
   els.brushSizeSelect.disabled = state.studio.busy || executionActive;
+  els.templateCategorySelect.disabled = state.studio.busy || executionActive;
+  els.templateSelect.disabled = state.studio.busy || executionActive;
   els.scaleRange.disabled = state.studio.busy || executionActive;
   els.scaleInput.disabled = state.studio.busy || executionActive;
   els.offsetXRange.disabled = state.studio.busy || executionActive;
@@ -1857,10 +1992,10 @@ function syncStudioUi() {
 
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
-      ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
+      ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，模板为“${state.studio.templateLabel}”。由 ESP32 从画布中心起步，按 ${state.studio.brushSize} 号笔继续翻译成方向键移动与 A 绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
       : state.studio.colorMode === "official"
-        ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
-        : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}。ESP32 会分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制；这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
+        ? `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${state.studio.templateLabel}”。请先保持右侧 9 个槽位默认颜色不变，ESP32 会按这组默认槽位状态去配置内置 7x12 色盘，并按 ${state.studio.brushSize} 号笔绘制。建议开始前把 Switch 里的笔刷切到方块笔刷，整体观感通常会更美观。`
+        : `当前会把按 ${state.studio.imageScalePercent}% 缩放、${describeImagePosition(state.studio.imageOffsetXPercent, state.studio.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${state.studio.templateLabel}”。ESP32 会分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制；这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
   renderStudioConnectionStatus();
 }
 
@@ -2512,6 +2647,7 @@ async function init() {
   syncStudioColorCountOptions();
   await Promise.all([
     refreshPorts(),
+    loadDrawingTemplates(),
     loadFirmwareInfo(),
     loadWindowsSerialDriversInfo(),
     loadOfficialPalette(),
