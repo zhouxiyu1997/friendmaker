@@ -40,6 +40,9 @@ const defaultWindowsDriverRoot = resolveDefaultWindowsDriverRoot();
 const defaultHost = "127.0.0.1";
 const defaultPort = 4307;
 const defaultAppDataRoot = path.join(os.homedir(), ".friend-maker");
+const MAX_FIRMWARE_FLASH_LOG_LINES = 800;
+const FIRMWARE_FLASH_TIMEOUT_MS = 15 * 60 * 1_000;
+const FIRMWARE_FLASH_CANCEL_GRACE_MS = 5_000;
 const serialSessionManager = new SerialSessionManager();
 
 export interface StartWebServerOptions {
@@ -67,6 +70,7 @@ interface WebRuntimeConfig {
   firmwareRoot: string;
   toolingManager: FirmwareToolingManager;
   windowsSerialDriverManager: WindowsSerialDriverManager;
+  flashManager: FirmwareFlashManager;
 }
 
 let webRuntime: WebRuntimeConfig = {
@@ -76,6 +80,7 @@ let webRuntime: WebRuntimeConfig = {
   firmwareRoot: defaultFirmwareRoot,
   toolingManager: new FirmwareToolingManager({ appDataRoot: defaultAppDataRoot }),
   windowsSerialDriverManager: new WindowsSerialDriverManager(defaultWindowsDriverRoot),
+  flashManager: null as unknown as FirmwareFlashManager,
 };
 
 function resolveDefaultFirmwareRoot(): string {
@@ -123,6 +128,7 @@ type FirmwareEnvironmentId = (typeof FIRMWARE_ENVIRONMENTS)[number]["id"];
 const VALID_BRUSH_SIZES = new Set([1, 3, 7, 13, 19, 27] as const);
 type ExecutionTarget = "simulate" | "serial";
 type ExecutionStatus = "idle" | "running" | "paused" | "stopping" | "completed" | "failed" | "stopped";
+type FirmwareFlashStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 
 interface ManagedExecution {
   id: number | null;
@@ -340,6 +346,88 @@ async function resolvePlatformIoPath(): Promise<string | null> {
   return platformIo.path;
 }
 
+interface FirmwareFlashSnapshot {
+  status: FirmwareFlashStatus;
+  startedAt: number | null;
+  finishedAt: number | null;
+  error: string | null;
+  environmentId: FirmwareEnvironmentId | null;
+  environmentLabel: string | null;
+  selectedPortPath: string | null;
+  uploadPortPath: string | null;
+  fallbackToAutoDetect: boolean;
+  platformIoPath: string | null;
+  timeoutMs: number;
+  lineOffset: number;
+  totalLineCount: number;
+  lines: string[];
+}
+
+interface LoggedError extends Error {
+  logged?: boolean;
+}
+
+function createIdleFirmwareFlashState(): FirmwareFlashSnapshot {
+  return {
+    status: "idle",
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    environmentId: null,
+    environmentLabel: null,
+    selectedPortPath: null,
+    uploadPortPath: null,
+    fallbackToAutoDetect: false,
+    platformIoPath: null,
+    timeoutMs: FIRMWARE_FLASH_TIMEOUT_MS,
+    lineOffset: 0,
+    totalLineCount: 0,
+    lines: [],
+  };
+}
+
+function markLogged(error: Error): LoggedError {
+  const loggedError = error as LoggedError;
+  loggedError.logged = true;
+  return loggedError;
+}
+
+export function isUploadPortFailure(message: string): boolean {
+  return /Timed out waiting for packet header|Failed to connect|No serial data received|No upload port found|could not open port|cannot configure port|Serial port .* not found|Access is denied|Permission denied|PermissionError|Resource temporarily unavailable|No such file or directory|port doesn't exist|A fatal error occurred/i
+    .test(message);
+}
+
+export function summarizePlatformIoFailure(output: string, exitCode: number | null): string {
+  const lines = output
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("$ "));
+
+  const priorityPatterns = [
+    /A fatal error occurred:/iu,
+    /Timed out waiting for packet header/iu,
+    /Failed to connect/iu,
+    /No serial data received/iu,
+    /No upload port found/iu,
+    /could not open port/iu,
+    /cannot configure port/iu,
+    /Permission(?:Error| denied)/iu,
+    /Access is denied/iu,
+    /Resource temporarily unavailable/iu,
+    /^Error:/iu,
+    /^Exception:/iu,
+  ];
+
+  for (const pattern of priorityPatterns) {
+    const match = lines.find((line) => pattern.test(line));
+    if (match) {
+      return match;
+    }
+  }
+
+  return lines.at(-1) ?? `PlatformIO exited with code ${String(exitCode ?? "unknown")}`;
+}
+
 function getFirmwareEnvironment(environmentId: string): (typeof FIRMWARE_ENVIRONMENTS)[number] {
   const environment = FIRMWARE_ENVIRONMENTS.find((item) => item.id === environmentId);
 
@@ -350,50 +438,355 @@ function getFirmwareEnvironment(environmentId: string): (typeof FIRMWARE_ENVIRON
   return environment;
 }
 
-async function runPlatformIo(args: string[]): Promise<{
-  platformIoPath: string;
-  output: string;
-}> {
-  const platformIoPath = await resolvePlatformIoPath();
+class FirmwareFlashManager {
+  private state: FirmwareFlashSnapshot = createIdleFirmwareFlashState();
+  private child: ReturnType<typeof spawn> | null = null;
+  private timeoutTimer: NodeJS.Timeout | null = null;
+  private cancelTimer: NodeJS.Timeout | null = null;
+  private cancelRequested = false;
+  private stopReason: string | null = null;
 
-  if (!platformIoPath) {
-    throw new Error("PlatformIO not found. Install it first or set PLATFORMIO_BIN.");
+  getStatus(): FirmwareFlashSnapshot {
+    return {
+      ...this.state,
+      lines: [...this.state.lines],
+    };
   }
 
-  const platformIoEnv = await webRuntime.toolingManager.getPlatformIoEnv();
+  async start(options: {
+    environmentId: FirmwareEnvironmentId;
+    portPath: string;
+  }): Promise<FirmwareFlashSnapshot> {
+    if (this.state.status === "running") {
+      throw new Error("A firmware flash is already running.");
+    }
 
-  return new Promise((resolve, reject) => {
-    const child = spawn(platformIoPath, args, {
-      cwd: webRuntime.firmwareRoot,
-      env: platformIoEnv,
-    });
+    const environment = getFirmwareEnvironment(options.environmentId);
+    const selectedPortPath = preferSerialPath(options.portPath);
+    const session = await serialSessionManager.disconnect();
 
-    let output = `$ ${platformIoPath} ${args.join(" ")}\n`;
+    this.state = {
+      ...createIdleFirmwareFlashState(),
+      status: "running",
+      startedAt: Date.now(),
+      environmentId: environment.id,
+      environmentLabel: environment.label,
+      selectedPortPath,
+    };
+    this.cancelRequested = false;
+    this.stopReason = null;
 
-    child.stdout.on("data", (chunk: string | Buffer) => {
-      output += chunk.toString();
-    });
+    this.appendLine(`INFO flashing environment=${environment.id} label=${environment.label}`);
+    this.appendLine(`INFO selected upload port=${selectedPortPath}`);
+    this.appendLine(`INFO flash timeout=${formatDuration(FIRMWARE_FLASH_TIMEOUT_MS)}`);
+    if (session.connected) {
+      this.appendLine(
+        `INFO released serial session port=${session.portPath ?? selectedPortPath} baud=${session.baudRate ?? "-"}`,
+      );
+    } else {
+      this.appendLine("INFO no active serial session to release before flashing");
+    }
 
-    child.stderr.on("data", (chunk: string | Buffer) => {
-      output += chunk.toString();
-    });
+    void this.runFlash(environment, selectedPortPath);
+    return this.getStatus();
+  }
 
-    child.on("error", (error) => {
-      reject(error);
-    });
+  async cancel(): Promise<FirmwareFlashSnapshot> {
+    if (this.state.status !== "running") {
+      throw new Error("No firmware flash is currently running.");
+    }
 
-    child.on("close", (exitCode) => {
-      if (exitCode === 0) {
-        resolve({
-          platformIoPath,
-          output,
-        });
+    this.cancelRequested = true;
+    this.stopReason = "Firmware flash cancelled by user.";
+    this.appendLine("WARN firmware flash cancel requested");
+    this.clearTimeoutTimer();
+
+    if (this.child) {
+      this.child.kill();
+      this.scheduleForceKill();
+    }
+
+    return this.getStatus();
+  }
+
+  async shutdown(): Promise<void> {
+    this.cancelRequested = true;
+    this.stopReason = "Firmware flash stopped during app shutdown.";
+    this.clearTimeoutTimer();
+    this.clearCancelTimer();
+    this.child?.kill("SIGKILL");
+    this.child = null;
+  }
+
+  private async runFlash(
+    environment: (typeof FIRMWARE_ENVIRONMENTS)[number],
+    selectedPortPath: string,
+  ): Promise<void> {
+    try {
+      const platformIoPath = await resolvePlatformIoPath();
+      if (!platformIoPath) {
+        throw new Error("PlatformIO not found. Install it first or set PLATFORMIO_BIN.");
+      }
+
+      this.state.platformIoPath = platformIoPath;
+      this.appendLine(`INFO PlatformIO=${platformIoPath}`);
+      this.appendLine(`INFO firmware root=${webRuntime.firmwareRoot}`);
+
+      if (this.cancelRequested) {
+        throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
+      }
+
+      const detectedPortPaths = await this.listDetectedPorts();
+      const selectedPortDetected =
+        detectedPortPaths.length === 0 || detectedPortPaths.includes(selectedPortPath);
+
+      if (this.cancelRequested) {
+        throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
+      }
+
+      if (!selectedPortDetected) {
+        this.state.uploadPortPath = null;
+        this.state.fallbackToAutoDetect = true;
+        this.appendLine(
+          `WARN selected port ${selectedPortPath} is no longer detected. Falling back to PlatformIO auto-detect.`,
+        );
+        await this.runPlatformIoUpload(environment.id, null);
+        this.finish("completed", null);
         return;
       }
 
-      reject(new Error(output.trim() || `PlatformIO exited with code ${String(exitCode)}`));
+      this.state.uploadPortPath = selectedPortPath;
+
+      try {
+        await this.runPlatformIoUpload(environment.id, selectedPortPath);
+        this.finish("completed", null);
+        return;
+      } catch (error) {
+        if (this.cancelRequested) {
+          throw error;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        if (!isUploadPortFailure(message)) {
+          throw error;
+        }
+
+        if (this.cancelRequested) {
+          throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
+        }
+
+        this.state.uploadPortPath = null;
+        this.state.fallbackToAutoDetect = true;
+        this.appendLine(
+          `WARN upload on ${selectedPortPath} failed with a port-related error. Retrying with PlatformIO auto-detect.`,
+        );
+        await this.runPlatformIoUpload(environment.id, null);
+        this.finish("completed", null);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof Error) || !(error as LoggedError).logged) {
+        this.appendLine(`ERR ${message}`);
+      }
+
+      this.finish(
+        this.cancelRequested && !/timed out/i.test(this.stopReason ?? "") ? "cancelled" : "failed",
+        message,
+      );
+    }
+  }
+
+  private async listDetectedPorts(): Promise<string[]> {
+    try {
+      const ports = await listPortInfos();
+      const portPaths = ports.map((port) => port.path);
+
+      if (portPaths.length > 0) {
+        this.appendLine(`INFO detected serial ports=${portPaths.join(", ")}`);
+      } else {
+        this.appendLine("WARN no serial ports detected before flashing; PlatformIO will still try.");
+      }
+
+      return portPaths;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.appendLine(`WARN failed to refresh serial ports before flashing: ${message}`);
+      return [];
+    }
+  }
+
+  private async runPlatformIoUpload(
+    environmentId: FirmwareEnvironmentId,
+    uploadPortPath: string | null,
+  ): Promise<void> {
+    const platformIoPath = this.state.platformIoPath;
+    if (!platformIoPath) {
+      throw new Error("PlatformIO not found. Install it first or set PLATFORMIO_BIN.");
+    }
+
+    const args = [
+      "run",
+      "-e",
+      environmentId,
+      "-t",
+      "upload",
+      ...(uploadPortPath ? ["--upload-port", uploadPortPath] : []),
+    ];
+    const platformIoEnv = await webRuntime.toolingManager.getPlatformIoEnv();
+
+    this.appendLine(
+      uploadPortPath
+        ? `INFO trying explicit upload port ${uploadPortPath}`
+        : "INFO trying PlatformIO auto-detect for the upload port",
+    );
+    this.appendLine(`$ ${platformIoPath} ${args.join(" ")}`);
+
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(platformIoPath, args, {
+        cwd: webRuntime.firmwareRoot,
+        env: platformIoEnv,
+      });
+      this.child = child;
+
+      let settled = false;
+      let bufferedOutput = "";
+      let output = `$ ${platformIoPath} ${args.join(" ")}\n`;
+
+      const cleanup = (): void => {
+        this.clearTimeoutTimer();
+        this.clearCancelTimer();
+        if (this.child === child) {
+          this.child = null;
+        }
+      };
+
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        cleanup();
+        callback();
+      };
+
+      const flushBufferedOutput = (): void => {
+        const remainingLine = bufferedOutput.trim();
+        if (!remainingLine) {
+          return;
+        }
+
+        this.appendLine(remainingLine);
+        output += `${remainingLine}\n`;
+        bufferedOutput = "";
+      };
+
+      const handleChunk = (chunk: string | Buffer): void => {
+        bufferedOutput += chunk.toString();
+        const lines = bufferedOutput.split(/\r?\n/u);
+        bufferedOutput = lines.pop() ?? "";
+
+        lines
+          .map((line) => line.trimEnd())
+          .filter((line) => line.length > 0)
+          .forEach((line) => {
+            this.appendLine(line);
+            output += `${line}\n`;
+          });
+      };
+
+      child.stdout.on("data", handleChunk);
+      child.stderr.on("data", handleChunk);
+      child.on("error", (error) => {
+        finish(() => reject(error));
+      });
+      child.on("close", (exitCode) => {
+        flushBufferedOutput();
+
+        if (this.cancelRequested) {
+          finish(() =>
+            reject(markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."))),
+          );
+          return;
+        }
+
+        if (exitCode === 0) {
+          finish(resolve);
+          return;
+        }
+
+        const message = summarizePlatformIoFailure(output, exitCode);
+        finish(() => reject(markLogged(new Error(message))));
+      });
+
+      this.timeoutTimer = setTimeout(() => {
+        const timeoutMessage = `Firmware flash timed out after ${formatDuration(FIRMWARE_FLASH_TIMEOUT_MS)}.`;
+        this.appendLine(`ERR ${timeoutMessage}`);
+        this.cancelRequested = true;
+        this.stopReason = timeoutMessage;
+        child.kill();
+        this.scheduleForceKill();
+      }, FIRMWARE_FLASH_TIMEOUT_MS);
     });
-  });
+  }
+
+  private finish(status: Exclude<FirmwareFlashStatus, "idle" | "running">, error: string | null): void {
+    this.clearTimeoutTimer();
+    this.clearCancelTimer();
+    this.child = null;
+
+    this.state.status = status;
+    this.state.finishedAt = Date.now();
+    this.state.error = error;
+
+    if (status === "completed") {
+      this.appendLine("INFO firmware flash completed");
+      return;
+    }
+
+    if (status === "cancelled") {
+      this.appendLine("WARN firmware flash cancelled");
+      return;
+    }
+
+    this.appendLine("ERR firmware flash failed");
+  }
+
+  private appendLine(line: string): void {
+    this.state.totalLineCount += 1;
+    this.state.lines.push(line);
+
+    if (this.state.lines.length > MAX_FIRMWARE_FLASH_LOG_LINES) {
+      this.state.lines.splice(0, this.state.lines.length - MAX_FIRMWARE_FLASH_LOG_LINES);
+    }
+
+    this.state.lineOffset = this.state.totalLineCount - this.state.lines.length;
+  }
+
+  private clearTimeoutTimer(): void {
+    if (!this.timeoutTimer) {
+      return;
+    }
+
+    clearTimeout(this.timeoutTimer);
+    this.timeoutTimer = null;
+  }
+
+  private clearCancelTimer(): void {
+    if (!this.cancelTimer) {
+      return;
+    }
+
+    clearTimeout(this.cancelTimer);
+    this.cancelTimer = null;
+  }
+
+  private scheduleForceKill(): void {
+    this.clearCancelTimer();
+    this.cancelTimer = setTimeout(() => {
+      this.child?.kill("SIGKILL");
+    }, FIRMWARE_FLASH_CANCEL_GRACE_MS);
+  }
 }
 
 function withDefined<T extends Record<string, unknown>>(values: T): Partial<T> {
@@ -854,6 +1247,7 @@ async function handleFirmwareInfo(response: ServerResponse): Promise<void> {
     },
     python: tooling.python,
     install: tooling.install,
+    flash: webRuntime.flashManager.getStatus(),
     environments: FIRMWARE_ENVIRONMENTS,
   });
 }
@@ -937,30 +1331,42 @@ async function handleFirmwareFlash(
       throw new Error("Missing portPath.");
     }
 
-    const environment = getFirmwareEnvironment(body.environmentId);
-    const portPath = preferSerialPath(body.portPath);
-    const session = await serialSessionManager.disconnect();
-    const result = await runPlatformIo([
-      "run",
-      "-e",
-      environment.id,
-      "-t",
-      "upload",
-      "--upload-port",
-      portPath,
-    ]);
-
-    json(response, 200, {
+    json(response, 202, {
       success: true,
-      environment,
-      portPath,
-      platformIoPath: result.platformIoPath,
-      output: result.output,
-      session,
+      flash: await webRuntime.flashManager.start({
+        environmentId: body.environmentId,
+        portPath: body.portPath,
+      }),
+      session: serialSessionManager.snapshot(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     json(response, 400, { error: message, session: serialSessionManager.snapshot() });
+  }
+}
+
+function handleFirmwareFlashStatus(response: ServerResponse): void {
+  json(response, 200, {
+    success: true,
+    flash: webRuntime.flashManager.getStatus(),
+    session: serialSessionManager.snapshot(),
+  });
+}
+
+async function handleFirmwareFlashCancel(response: ServerResponse): Promise<void> {
+  try {
+    json(response, 200, {
+      success: true,
+      flash: await webRuntime.flashManager.cancel(),
+      session: serialSessionManager.snapshot(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    json(response, 400, {
+      error: message,
+      flash: webRuntime.flashManager.getStatus(),
+      session: serialSessionManager.snapshot(),
+    });
   }
 }
 
@@ -1237,6 +1643,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/firmware/flash/status") {
+      handleFirmwareFlashStatus(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/firmware/flash/cancel") {
+      await handleFirmwareFlashCancel(response);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/execute") {
       await handleExecute(request, response);
       return;
@@ -1309,6 +1725,7 @@ export async function startWebServer(
     windowsSerialDriverManager: new WindowsSerialDriverManager(
       options.windowsDriverRoot ?? defaultWindowsDriverRoot,
     ),
+    flashManager: new FirmwareFlashManager(),
   };
 
   const server = createServer(handleRequest);
@@ -1335,6 +1752,7 @@ export async function startWebServer(
     port: actualPort,
     url: `http://${webRuntime.host}:${actualPort}`,
     close: async () => {
+      await webRuntime.flashManager.shutdown();
       await serialSessionManager.disconnect({ force: true }).catch(() => undefined);
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {

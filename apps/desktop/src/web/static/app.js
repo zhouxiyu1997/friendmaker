@@ -6,6 +6,7 @@ const state = {
   commands: [],
   ports: [],
   selectedPortPath: "",
+  missingSelectedPortPath: null,
   serialSession: {
     connected: false,
     portPath: null,
@@ -98,6 +99,23 @@ const state = {
   firmware: {
     busy: false,
     environmentId: "esp32dev_wireless",
+    flash: {
+      status: "idle",
+      lines: [],
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+      environmentId: null,
+      environmentLabel: null,
+      selectedPortPath: null,
+      uploadPortPath: null,
+      fallbackToAutoDetect: false,
+      platformIoPath: null,
+      timeoutMs: 15 * 60 * 1000,
+      lineOffset: 0,
+      totalLineCount: 0,
+    },
+    flashLineCount: 0,
     result: {
       status: "idle",
       title: "等待刷入固件",
@@ -203,6 +221,7 @@ const els = {
   firmwareRefreshButton: document.getElementById("firmware-refresh-button"),
   firmwareInstallToolingButton: document.getElementById("firmware-install-tooling-button"),
   firmwareFlashButton: document.getElementById("firmware-flash-button"),
+  firmwareStopButton: document.getElementById("firmware-stop-button"),
   firmwarePlatformIoHint: document.getElementById("firmware-platformio-hint"),
   firmwareEnvHint: document.getElementById("firmware-env-hint"),
   windowsDriverPanel: document.getElementById("windows-driver-panel"),
@@ -251,6 +270,7 @@ const els = {
 let studioExecutionPollTimer = null;
 let firmwareToolingPollTimer = null;
 let windowsSerialDriverPollTimer = null;
+let firmwareFlashPollTimer = null;
 let studioPreviewRefreshTimer = null;
 let studioGenerateRequestSerial = 0;
 let studioPreviewBoundsRequestSerial = 0;
@@ -390,6 +410,7 @@ els.thresholdRange.addEventListener("input", () => {
 [els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect].forEach((select) => {
   select.addEventListener("change", () => {
     state.selectedPortPath = select.value;
+    state.missingSelectedPortPath = null;
     renderPortSelects();
     syncStudioUi();
     syncFirmwareUi();
@@ -420,6 +441,10 @@ els.firmwareRefreshButton.addEventListener("click", async () => {
 
 els.firmwareInstallToolingButton.addEventListener("click", async () => {
   await startFirmwareToolingInstall();
+});
+
+els.firmwareStopButton.addEventListener("click", async () => {
+  await stopFirmwareFlash();
 });
 
 els.installCp210xDriverButton.addEventListener("click", async () => {
@@ -1020,30 +1045,26 @@ els.studioClearLogButton.addEventListener("click", () => {
 });
 
 els.firmwareFlashButton.addEventListener("click", async () => {
+  await startFirmwareFlash();
+});
+
+els.firmwareClearLogButton.addEventListener("click", () => {
+  clearLog(els.firmwareLogOutput);
+});
+
+async function startFirmwareFlash() {
   if (!state.selectedPortPath) {
-    appendLog(els.firmwareLogOutput, "请先选择要刷入的串口设备。");
+    appendLog(
+      els.firmwareLogOutput,
+      state.missingSelectedPortPath
+        ? `之前选择的串口 ${state.missingSelectedPortPath} 已断开，请重新选择目标设备后再刷入。`
+        : "请先选择要刷入的串口设备。",
+    );
     return;
   }
 
-  const environment = state.firmwareEnvironments.find(
-    (item) => item.id === state.firmware.environmentId,
-  );
-
-  setFirmwareBusy(true);
-  setFirmwareResult({
-    status: "running",
-    title: "正在刷入固件",
-    detail: "PlatformIO 正在编译并上传固件，请稍等片刻。",
-    environmentLabel: environment?.label ?? state.firmware.environmentId,
-    portPath: state.selectedPortPath,
-  });
-  appendLog(
-    els.firmwareLogOutput,
-    `开始刷入固件：${state.firmware.environmentId} -> ${state.selectedPortPath}`,
-  );
-  appendLog(els.firmwareLogOutput, "刷入前会自动释放串口会话，避免端口占用。");
-
   try {
+    state.firmware.flashLineCount = 0;
     const response = await fetch("/api/firmware/flash", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1054,39 +1075,211 @@ els.firmwareFlashButton.addEventListener("click", async () => {
     });
     const payload = await response.json();
 
+    applySerialSessionSnapshot(payload.session);
+
     if (!response.ok) {
-      applySerialSessionSnapshot(payload.session);
       throw new Error(payload.error ?? "刷入固件失败");
     }
 
-    setFirmwareResult({
-      status: "success",
-      title: "固件刷入成功",
-      detail: "设备已经写入完成，可以继续去手柄测试页读取设备信息。",
-      environmentLabel: payload.environment.label,
-      portPath: state.selectedPortPath,
-    });
-    applySerialSessionSnapshot(payload.session);
-    appendLog(els.firmwareLogOutput, "刷入前已释放串口会话。");
-    appendLog(els.firmwareLogOutput, `刷入完成：${payload.environment.label}`);
-    appendLog(els.firmwareLogOutput, payload.output.trim());
+    applyFirmwareFlashSnapshot(payload.flash);
+    pollFirmwareFlash();
   } catch (error) {
+    setFirmwareBusy(false);
     setFirmwareResult({
       status: "error",
       title: "固件刷入失败",
       detail: summarizeFirmwareError(getErrorMessage(error)),
-      environmentLabel: environment?.label ?? state.firmware.environmentId,
-      portPath: state.selectedPortPath,
+      environmentLabel:
+        state.firmwareEnvironments.find((item) => item.id === state.firmware.environmentId)?.label ??
+        state.firmware.environmentId,
+      portPath: state.selectedPortPath || "-",
     });
     appendLog(els.firmwareLogOutput, `刷入失败：${getErrorMessage(error)}`);
-  } finally {
-    setFirmwareBusy(false);
+    syncFirmwareUi();
   }
-});
+}
 
-els.firmwareClearLogButton.addEventListener("click", () => {
-  clearLog(els.firmwareLogOutput);
-});
+async function stopFirmwareFlash() {
+  if (!state.firmware.busy) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/firmware/flash/cancel", {
+      method: "POST",
+    });
+    const payload = await response.json();
+
+    applySerialSessionSnapshot(payload.session);
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "停止刷入失败");
+    }
+
+    applyFirmwareFlashSnapshot(payload.flash);
+  } catch (error) {
+    appendLog(els.firmwareLogOutput, `停止刷入失败：${getErrorMessage(error)}`);
+  } finally {
+    syncFirmwareUi();
+  }
+}
+
+function formatFirmwarePortLabel(flash) {
+  if (flash?.uploadPortPath) {
+    return flash.uploadPortPath;
+  }
+
+  if (flash?.selectedPortPath) {
+    return `自动检测（初始选择 ${flash.selectedPortPath}）`;
+  }
+
+  return "-";
+}
+
+function updateFirmwareResultFromFlashSnapshot(flash) {
+  const environmentLabel =
+    flash?.environmentLabel ??
+    state.firmwareEnvironments.find((item) => item.id === state.firmware.environmentId)?.label ??
+    state.firmware.environmentId;
+  const portPath = formatFirmwarePortLabel(flash);
+
+  if (flash?.status === "running") {
+    const detail = flash.fallbackToAutoDetect
+      ? "固定端口刷入失败，正在改用 PlatformIO 自动探测可用端口重试。"
+      : flash.uploadPortPath
+        ? "PlatformIO 正在按当前选中的串口编译并上传固件，请稍等片刻。"
+        : "PlatformIO 正在自动探测可用串口并上传固件，请稍等片刻。";
+    setFirmwareResult({
+      status: "running",
+      title: "正在刷入固件",
+      detail,
+      environmentLabel,
+      portPath,
+    });
+    return;
+  }
+
+  if (flash?.status === "completed") {
+    const detail = flash.fallbackToAutoDetect
+      ? "固定端口失败后已自动改用 PlatformIO 串口探测并刷入成功，可以继续去手柄测试页读取设备信息。"
+      : "设备已经写入完成，可以继续去手柄测试页读取设备信息。";
+    setFirmwareResult({
+      status: "success",
+      title: "固件刷入成功",
+      detail,
+      environmentLabel,
+      portPath,
+    });
+    return;
+  }
+
+  if (flash?.status === "cancelled") {
+    setFirmwareResult({
+      status: "error",
+      title: "已停止刷入",
+      detail: "当前刷入任务已经取消，可以检查端口或让开发板重新进入下载模式后再重试。",
+      environmentLabel,
+      portPath,
+    });
+    return;
+  }
+
+  if (flash?.status === "failed") {
+    setFirmwareResult({
+      status: "error",
+      title: "固件刷入失败",
+      detail: summarizeFirmwareError(flash.error ?? "刷入失败，请查看下方日志。"),
+      environmentLabel,
+      portPath,
+    });
+  }
+}
+
+function applyFirmwareFlashSnapshot(flash) {
+  const nextFlash = flash ?? {
+    status: "idle",
+    lines: [],
+    error: null,
+    startedAt: null,
+    finishedAt: null,
+    environmentId: null,
+    environmentLabel: null,
+    selectedPortPath: null,
+    uploadPortPath: null,
+    fallbackToAutoDetect: false,
+    platformIoPath: null,
+    timeoutMs: 15 * 60 * 1000,
+    lineOffset: 0,
+    totalLineCount: 0,
+  };
+  const lines = Array.isArray(nextFlash.lines) ? nextFlash.lines : [];
+  const fallbackTotalLineCount = lines.length;
+  const totalLineCount = Number.isFinite(nextFlash.totalLineCount)
+    ? nextFlash.totalLineCount
+    : fallbackTotalLineCount;
+  const lineOffset = Number.isFinite(nextFlash.lineOffset)
+    ? nextFlash.lineOffset
+    : Math.max(0, totalLineCount - lines.length);
+  const previousLineCount = state.firmware.flashLineCount ?? 0;
+  const firstUnreadLine = previousLineCount > totalLineCount
+    ? lineOffset
+    : Math.max(previousLineCount, lineOffset);
+  const newLines = lines.slice(firstUnreadLine - lineOffset);
+
+  newLines.forEach((line) => appendLog(els.firmwareLogOutput, `[flash] ${line}`));
+  state.firmware.flash = {
+    ...nextFlash,
+    lineOffset,
+    totalLineCount,
+    lines,
+  };
+  state.firmware.flashLineCount = totalLineCount;
+  setFirmwareBusy(nextFlash.status === "running");
+  updateFirmwareResultFromFlashSnapshot(state.firmware.flash);
+}
+
+function pollFirmwareFlash() {
+  if (firmwareFlashPollTimer) {
+    return;
+  }
+
+  firmwareFlashPollTimer = window.setInterval(async () => {
+    try {
+      const response = await fetch("/api/firmware/flash/status");
+      const payload = await response.json();
+
+      applySerialSessionSnapshot(payload.session);
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "读取刷入状态失败");
+      }
+
+      applyFirmwareFlashSnapshot(payload.flash);
+
+      if (payload.flash?.status === "completed" || payload.flash?.status === "failed" || payload.flash?.status === "cancelled") {
+        stopFirmwareFlashPolling();
+        await refreshPorts({
+          log: (message) => appendLog(els.firmwareLogOutput, message),
+        });
+      }
+    } catch (error) {
+      stopFirmwareFlashPolling();
+      setFirmwareBusy(false);
+      appendLog(els.firmwareLogOutput, `读取刷入状态失败：${getErrorMessage(error)}`);
+    } finally {
+      syncFirmwareUi();
+    }
+  }, 1_000);
+}
+
+function stopFirmwareFlashPolling() {
+  if (!firmwareFlashPollTimer) {
+    return;
+  }
+
+  window.clearInterval(firmwareFlashPollTimer);
+  firmwareFlashPollTimer = null;
+}
 
 async function startFirmwareToolingInstall() {
   if (state.firmwareTooling.available) {
@@ -2003,6 +2196,7 @@ function syncFirmwareUi() {
   const environment = state.firmwareEnvironments.find(
     (item) => item.id === state.firmware.environmentId,
   );
+  const selectedPortAvailable = state.ports.some((port) => port.path === state.selectedPortPath);
 
   if (environment) {
     els.firmwareEnvHint.textContent = environment.description;
@@ -2025,11 +2219,16 @@ function syncFirmwareUi() {
     els.firmwarePlatformIoHint.textContent = `PlatformIO 已就绪：${state.firmwareTooling.path}`;
   }
 
+  if (state.missingSelectedPortPath) {
+    els.firmwareEnvHint.textContent = `之前选择的串口 ${state.missingSelectedPortPath} 已断开，请重新选择目标设备。`;
+  }
+
   syncWindowsSerialDriverUi();
 
   els.firmwarePortSelect.disabled = state.firmware.busy;
+  els.firmwareStopButton.disabled = !state.firmware.busy;
   els.firmwareFlashButton.disabled =
-    state.firmware.busy || installing || !state.firmwareTooling.available || !state.selectedPortPath;
+    state.firmware.busy || installing || !state.firmwareTooling.available || !selectedPortAvailable;
   renderFirmwareStatus();
 }
 
@@ -2223,6 +2422,7 @@ async function refreshPorts({ log } = {}) {
   }
 
   try {
+    const previousSelectedPortPath = state.selectedPortPath;
     const response = await fetch("/api/ports");
     const payload = await response.json();
 
@@ -2232,8 +2432,15 @@ async function refreshPorts({ log } = {}) {
 
     state.ports = Array.isArray(payload.ports) ? payload.ports : [];
 
-    if (!state.ports.some((port) => port.path === state.selectedPortPath)) {
+    if (!previousSelectedPortPath) {
       state.selectedPortPath = pickPreferredPortPath();
+      state.missingSelectedPortPath = null;
+    } else if (state.ports.some((port) => port.path === previousSelectedPortPath)) {
+      state.selectedPortPath = previousSelectedPortPath;
+      state.missingSelectedPortPath = null;
+    } else {
+      state.selectedPortPath = "";
+      state.missingSelectedPortPath = previousSelectedPortPath;
     }
 
     renderPortSelects();
@@ -2247,6 +2454,10 @@ async function refreshPorts({ log } = {}) {
           ? `检测到 ${state.ports.length} 个串口设备。`
           : "当前没有检测到串口设备。请换数据线、重新插拔 ESP32；PlatformIO 就绪后仍无设备时优先安装 CP210x 驱动，再尝试 CH340/CH341 驱动。",
       );
+
+      if (state.missingSelectedPortPath) {
+        log(`之前选择的串口 ${state.missingSelectedPortPath} 已消失，请重新选择目标设备。`);
+      }
     }
   } catch (error) {
     if (typeof log === "function") {
@@ -2266,7 +2477,13 @@ function renderPortSelects() {
   selects.forEach((select) => {
     select.innerHTML = "";
 
-    if (state.ports.length === 0) {
+    if (state.missingSelectedPortPath) {
+      const missingOption = document.createElement("option");
+      missingOption.value = "";
+      missingOption.textContent = `之前选择的串口已断开：${state.missingSelectedPortPath}`;
+      missingOption.selected = true;
+      select.appendChild(missingOption);
+    } else if (state.ports.length === 0) {
       const option = document.createElement("option");
       option.value = "";
       option.textContent = "未检测到串口";
@@ -2278,7 +2495,7 @@ function renderPortSelects() {
       const option = document.createElement("option");
       option.value = port.path;
       option.textContent = port.label;
-      option.selected = state.selectedPortPath ? port.path === state.selectedPortPath : index === 0;
+      option.selected = state.selectedPortPath ? port.path === state.selectedPortPath : index === 0 && !state.missingSelectedPortPath;
       select.appendChild(option);
     });
   });
@@ -2306,6 +2523,14 @@ async function loadFirmwareInfo() {
     if (payload.install?.status === "running") {
       applyFirmwareToolingInstallSnapshot(payload.install);
       pollFirmwareToolingInstall();
+    }
+
+    if (payload.flash) {
+      applyFirmwareFlashSnapshot(payload.flash);
+
+      if (payload.flash.status === "running") {
+        pollFirmwareFlash();
+      }
     }
 
     if (!state.firmwareEnvironments.some((item) => item.id === state.firmware.environmentId)) {
@@ -2479,6 +2704,22 @@ function summarizeFirmwareError(message) {
     return "串口当前被占用，请先关闭串口监视器或其他串口工具后再重试。";
   }
 
+  if (/Timed out waiting for packet header|Failed to connect|No serial data received|A fatal error occurred/i.test(message)) {
+    return "设备没有顺利进入下载模式。请重新插拔开发板，必要时按住 BOOT 键后再重试刷入。";
+  }
+
+  if (/could not open port|cannot configure port|No upload port found|No such file or directory|Access is denied|Permission denied|port doesn't exist/i.test(message)) {
+    return "当前串口不可用，或端口号已经变化。请刷新串口列表并重新选择目标设备后再重试。";
+  }
+
+  if (/timed out after \d+m \d+s/i.test(message)) {
+    return "刷入超时了。请检查数据线、下载模式和网络，再重试；如果开发板难以进入下载模式，可以按住 BOOT 键后重新刷入。";
+  }
+
+  if (/cancelled by user/i.test(message)) {
+    return "刷入任务已停止。请检查端口和开发板状态后再重试。";
+  }
+
   if (/PlatformIO not found/i.test(message)) {
     return "没有找到 PlatformIO，请先确认本机安装是否完成。";
   }
@@ -2490,7 +2731,7 @@ function summarizeFirmwareError(message) {
   const summaryLine = message
     .split("\n")
     .map((line) => line.trim())
-    .find(Boolean);
+    .find((line) => line && !line.startsWith("$ "));
 
   return summaryLine ?? "刷入失败，请查看下方日志。";
 }
