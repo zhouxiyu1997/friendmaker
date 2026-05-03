@@ -271,10 +271,15 @@ let studioExecutionPollTimer = null;
 let firmwareToolingPollTimer = null;
 let windowsSerialDriverPollTimer = null;
 let firmwareFlashPollTimer = null;
+let controllerStatusPollTimer = null;
+let controllerStatusPollDeadlineMs = 0;
+let controllerStatusPollInFlight = false;
 let studioPreviewRefreshTimer = null;
 let studioGenerateRequestSerial = 0;
 let studioPreviewBoundsRequestSerial = 0;
 const studioTemplateOverlayCache = new Map();
+const CONTROLLER_STATUS_POLL_INTERVAL_MS = 1_000;
+const CONTROLLER_STATUS_POLL_WINDOW_MS = 45_000;
 
 const COLOR_COUNT_OPTIONS_BY_MODE = {
   mono: [2],
@@ -1528,15 +1533,34 @@ function stopWindowsSerialDriverPolling() {
 }
 
 els.controllerInfoButton.addEventListener("click", async () => {
-  await runControllerCommands(["I"], "连接手柄");
+  setControllerPendingStatus({
+    title: "正在准备连接手柄",
+    detail: "正在重置蓝牙并重新进入可发现状态，请保持 Switch 停在“更改握法/顺序”页面。",
+  });
+
+  const payload = await runControllerCommands(["BT RESET", "I"], "连接手柄");
+
+  if (payload) {
+    startControllerStatusPolling();
+  }
 });
 
 els.controllerResetButton.addEventListener("click", async () => {
-  await runControllerCommands(["BT RESET"], "重置手柄蓝牙");
+  setControllerPendingStatus({
+    title: "正在重置手柄蓝牙",
+    detail: "正在重启蓝牙协议栈并读取最新状态，请稍等片刻。",
+  });
+
+  const payload = await runControllerCommands(["BT RESET", "I"], "重置手柄蓝牙");
+
+  if (payload) {
+    startControllerStatusPolling();
+  }
 });
 
 els.controllerDisconnectButton.addEventListener("click", async () => {
   setControllerBusy(true);
+  stopControllerStatusPolling();
 
   try {
     const response = await fetch("/api/serial-session/disconnect", {
@@ -1871,7 +1895,29 @@ function setControllerStatus(partialStatus) {
     updatedAt: new Date(),
   };
   renderControllerStatus();
+  syncControllerUi();
   syncStudioUi();
+}
+
+function setControllerPendingStatus({ title, detail }) {
+  setControllerStatus({
+    tone: "running",
+    pill: "处理中",
+    title,
+    detail,
+    discoverable: "未知",
+    auth: "未知",
+    connected: "未知",
+    paired: "未知",
+    ready: "未就绪",
+    discoverableValue: null,
+    authValue: null,
+    connectedValue: null,
+    pairedValue: null,
+    readyValue: false,
+    initStep: "-",
+    initError: "-",
+  });
 }
 
 function updateControllerStatusFromLines(lines) {
@@ -1885,6 +1931,120 @@ function updateControllerStatusFromLines(lines) {
 
 function isControllerReadyForStudio() {
   return state.controller.status.readyValue === true;
+}
+
+async function requestControllerStatus({ logErrors = false } = {}) {
+  if (!state.selectedPortPath) {
+    return false;
+  }
+
+  if (controllerStatusPollInFlight) {
+    return null;
+  }
+
+  controllerStatusPollInFlight = true;
+
+  try {
+    const response = await fetch("/api/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "serial",
+        commands: ["I"],
+        portPath: state.selectedPortPath,
+        baudRate: state.studio.profile.baudRate,
+        ackTimeoutMs: state.studio.profile.ackTimeoutMs,
+        retries: state.studio.profile.commandRetryCount,
+        ackDelayMs: 0,
+      }),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
+      throw new Error(payload.error ?? "读取手柄状态失败");
+    }
+
+    applySerialSessionSnapshot(payload.session);
+    updateControllerStatusFromLines(payload.lines ?? []);
+    return true;
+  } catch (error) {
+    if (logErrors) {
+      appendLog(els.controllerLogOutput, `读取手柄状态失败：${getErrorMessage(error)}`);
+    }
+    return false;
+  } finally {
+    controllerStatusPollInFlight = false;
+  }
+}
+
+async function pollControllerStatus() {
+  if (state.controller.busy) {
+    return;
+  }
+
+  if (controllerStatusPollInFlight) {
+    return;
+  }
+
+  if (!state.selectedPortPath) {
+    stopControllerStatusPolling();
+    return;
+  }
+
+  if (controllerStatusPollDeadlineMs > 0 && Date.now() > controllerStatusPollDeadlineMs) {
+    stopControllerStatusPolling();
+    return;
+  }
+
+  const ok = await requestControllerStatus();
+
+  if (ok === null) {
+    return;
+  }
+
+  if (!ok) {
+    stopControllerStatusPolling();
+    appendLog(els.controllerLogOutput, "读取手柄状态失败，请重新点击“连接手柄”后再试。");
+    return;
+  }
+
+  if (
+    state.controller.status.readyValue === true ||
+    state.controller.status.tone === "error"
+  ) {
+    stopControllerStatusPolling();
+  }
+}
+
+function startControllerStatusPolling(durationMs = CONTROLLER_STATUS_POLL_WINDOW_MS) {
+  if (!state.selectedPortPath) {
+    return;
+  }
+
+  controllerStatusPollDeadlineMs = Math.max(
+    controllerStatusPollDeadlineMs,
+    Date.now() + durationMs,
+  );
+
+  if (!controllerStatusPollTimer) {
+    controllerStatusPollTimer = window.setInterval(() => {
+      void pollControllerStatus();
+    }, CONTROLLER_STATUS_POLL_INTERVAL_MS);
+  }
+
+  void pollControllerStatus();
+}
+
+function stopControllerStatusPolling() {
+  controllerStatusPollDeadlineMs = 0;
+
+  if (!controllerStatusPollTimer) {
+    return;
+  }
+
+  window.clearInterval(controllerStatusPollTimer);
+  controllerStatusPollTimer = null;
 }
 
 function renderStudioConnectionStatus() {
@@ -2273,16 +2433,19 @@ function syncWindowsSerialDriverUi() {
 
 function syncControllerUi() {
   const hasPort = Boolean(state.selectedPortPath);
+  const ready = state.controller.status.readyValue === true;
+  const canSendTestCommands = !state.controller.busy && hasPort && ready;
 
   els.controllerPortSelect.disabled = state.controller.busy;
 
   const shouldDisable = state.controller.busy || !hasPort;
   els.controllerInfoButton.disabled = shouldDisable;
   els.controllerResetButton.disabled = shouldDisable;
-  els.controllerSendCustomButton.disabled = shouldDisable;
+  els.controllerSendCustomButton.disabled = !canSendTestCommands;
+  els.controllerCustomCommands.disabled = !canSendTestCommands;
   els.controllerDisconnectButton.disabled = state.controller.busy || !state.serialSession.connected;
   els.controllerActionButtons.forEach((button) => {
-    button.disabled = shouldDisable;
+    button.disabled = !canSendTestCommands;
   });
   renderSerialSessionStatus();
 }
@@ -2336,7 +2499,7 @@ async function runExecution({
 async function runControllerCommands(commands, label) {
   if (!state.selectedPortPath) {
     appendLog(els.controllerLogOutput, "请先选择一个串口设备。");
-    return;
+    return null;
   }
 
   appendLog(
@@ -2359,6 +2522,8 @@ async function runControllerCommands(commands, label) {
   if (payload?.lines) {
     updateControllerStatusFromLines(payload.lines);
   }
+
+  return payload;
 }
 
 function mapControllerActionToCommands(action, step) {
@@ -2900,6 +3065,10 @@ async function init() {
   syncFirmwareUi();
   syncControllerUi();
   renderControllerStatus();
+
+  if (state.serialSession.connected && state.selectedPortPath) {
+    void requestControllerStatus();
+  }
 }
 
 void init();
