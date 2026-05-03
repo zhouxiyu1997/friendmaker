@@ -23,6 +23,8 @@ import { DEFAULT_SAFE_INPUT_TIMING } from "../protocol/timing.js";
 export type PathStrategy = "scanline" | "nearest";
 
 const PALETTE_SLOT_COUNT = 9;
+const EXACT_COMPONENT_ORDER_LIMIT = 6;
+const EXACT_COMPONENT_PIXEL_LIMIT = 300;
 const NEIGHBOR_OFFSETS = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
@@ -351,7 +353,10 @@ function getOrderedPixelsForColor(
 
   let orderedPixels: Pixel[];
 
-  if (components.length <= 8) {
+  if (
+    components.length <= EXACT_COMPONENT_ORDER_LIMIT &&
+    pixels.length <= EXACT_COMPONENT_PIXEL_LIMIT
+  ) {
     orderedPixels = findOptimalComponentOrder(components, current, grid);
   } else {
     orderedPixels = greedyComponentOrder(components, current, grid);
