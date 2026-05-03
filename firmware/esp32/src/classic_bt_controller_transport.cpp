@@ -25,6 +25,12 @@ constexpr uint8_t kControllerTypeProCon = 0x03;
 constexpr uint8_t kStickCenter = 128;
 constexpr uint8_t kStickMin = 0;
 constexpr uint8_t kStickMax = 255;
+// Broadcom/BlueDroid HID status from hiddefs.h: 8 means the interrupt channel
+// is congested, so a short retry window is safe and avoids aborting the whole
+// draw on a transient queue backup.
+constexpr uint8_t kHidErrCongested = 8;
+constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
+constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -380,6 +386,7 @@ void ClassicBtControllerTransport::clearConnectionState() {
   lastSendReportStatus_ = -1;
   lastSendReportReason_ = 0;
   lastSendReportId_ = 0;
+  reportCongested_ = false;
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
 }
@@ -747,17 +754,43 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
   return true;
 }
 
+bool ClassicBtControllerTransport::shouldRetryAfterTransientSendFailure() const {
+  return reportCongested_ && isHidReportChannelOpen() && paired_;
+}
+
 bool ClassicBtControllerTransport::repeatCurrentInputReport(
     uint16_t durationMs, bool logFailure) {
   const uint32_t startedAt = millis();
+  uint32_t congestionStartedAt = 0;
+  bool loggedCongestionRetry = false;
 
   while (true) {
-    // Treat the synchronous send result as authoritative here. Waiting for a
-    // separate SEND_REPORT event on every 16 ms repeat can spuriously abort
-    // long drawing sessions even while the controller link is still healthy.
+    // Prefer the synchronous send result, but tolerate a brief burst of HID
+    // congestion before declaring the controller link unusable.
     if (!sendCurrentInputReport(logFailure)) {
+      if (shouldRetryAfterTransientSendFailure()) {
+        if (congestionStartedAt == 0) {
+          congestionStartedAt = millis();
+        }
+
+        if (!loggedCongestionRetry && logFailure) {
+          loggedCongestionRetry = true;
+          Serial.printf(
+              "WARN bt send_report congested retry_window=%u\n",
+              kHidCongestionRetryBudgetMs);
+        }
+
+        if ((millis() - congestionStartedAt) < kHidCongestionRetryBudgetMs) {
+          delay(kHidCongestionRetryDelayMs);
+          continue;
+        }
+      }
+
       return false;
     }
+
+    congestionStartedAt = 0;
+    loggedCongestionRetry = false;
 
     const uint32_t elapsed = millis() - startedAt;
     if (elapsed >= durationMs) {
@@ -1033,6 +1066,8 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;
       lastSendReportId_ = param->send_report.report_id;
+      reportCongested_ = param->send_report.status != ESP_HIDD_SUCCESS &&
+                         param->send_report.reason == kHidErrCongested;
       readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
         Serial.printf(

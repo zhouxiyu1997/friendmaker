@@ -6,6 +6,7 @@ import {
   deriveControllerStatus,
   normalizeControllerDeviceLines,
   readInfoLineMap,
+  shouldReuseExistingControllerConnection,
 } from "../src/web/static/controllerStatus.js";
 
 test("normalizeControllerDeviceLines splits concatenated device output", () => {
@@ -60,6 +61,54 @@ test("deriveControllerStatus prefers connected-ready progress over stale init er
   assert.equal(status?.initError, "btStart_failed");
 });
 
+test("shouldReuseExistingControllerConnection keeps active bluetooth sessions intact", () => {
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: true,
+      connectedValue: false,
+      authValue: false,
+      discoverableValue: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: true,
+      authValue: false,
+      discoverableValue: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: false,
+      authValue: true,
+      discoverableValue: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: false,
+      authValue: false,
+      discoverableValue: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: false,
+      authValue: false,
+      discoverableValue: false,
+    }),
+    false,
+  );
+});
+
 test("controller status updates also resync the controller action buttons", async () => {
   const appSource = await readFile(
     new URL("../src/web/static/app.js", import.meta.url),
@@ -69,5 +118,10 @@ test("controller status updates also resync the controller action buttons", asyn
   assert.match(
     appSource,
     /function setControllerStatus\(partialStatus\)\s*\{[\s\S]*renderControllerStatus\(\);[\s\S]*syncControllerUi\(\);[\s\S]*syncStudioUi\(\);[\s\S]*\}/u,
+  );
+
+  assert.match(
+    appSource,
+    /els\.controllerInfoButton\.addEventListener\("click", async \(\) => \{[\s\S]*await requestControllerStatus\(\)[\s\S]*shouldReuseExistingControllerConnection\(state\.controller\.status\)[\s\S]*runControllerCommands\(\["BT RESET", "I"\], "连接手柄"\)/u,
   );
 });

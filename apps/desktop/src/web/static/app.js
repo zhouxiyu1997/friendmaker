@@ -1,4 +1,7 @@
-import { deriveControllerStatus } from "./controllerStatus.js";
+import {
+  deriveControllerStatus,
+  shouldReuseExistingControllerConnection,
+} from "./controllerStatus.js";
 
 const state = {
   activePage: "studio",
@@ -1533,6 +1536,28 @@ function stopWindowsSerialDriverPolling() {
 }
 
 els.controllerInfoButton.addEventListener("click", async () => {
+  setControllerPendingStatus({
+    title: "正在检查当前手柄状态",
+    detail: "正在读取开发板当前蓝牙状态；如果已经连上 Switch，会直接复用当前连接。",
+  });
+
+  const statusOk = await requestControllerStatus();
+
+  if (statusOk && shouldReuseExistingControllerConnection(state.controller.status)) {
+    appendLog(
+      els.controllerLogOutput,
+      state.controller.status.readyValue === true
+        ? "检测到手柄已经连接，跳过蓝牙重置。"
+        : "检测到开发板已经在广播或握手中，跳过蓝牙重置并继续等待连接完成。",
+    );
+    startControllerStatusPolling();
+    return;
+  }
+
+  if (!statusOk) {
+    appendLog(els.controllerLogOutput, "当前状态读取失败，改为重置蓝牙后重新连接。");
+  }
+
   setControllerPendingStatus({
     title: "正在准备连接手柄",
     detail: "正在重置蓝牙并重新进入可发现状态，请保持 Switch 停在“更改握法/顺序”页面。",

@@ -28,6 +28,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool isControllerInputReady() const;
   bool sendCurrentInputReport(bool logFailure);
   bool repeatCurrentInputReport(uint16_t durationMs, bool logFailure);
+  bool shouldRetryAfterTransientSendFailure() const;
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);
   bool attemptVirtualCablePlug(const uint8_t peerAddress[6], const char *reason);
   void enterReconnectableState(const char *reason);
@@ -77,6 +78,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   int lastSendReportStatus_ = -1;
   uint8_t lastSendReportReason_ = 0;
   uint8_t lastSendReportId_ = 0;
+  bool reportCongested_ = false;
   uint32_t sendReportFailureCount_ = 0;
   const char *lastDropReason_ = "none";
 };
