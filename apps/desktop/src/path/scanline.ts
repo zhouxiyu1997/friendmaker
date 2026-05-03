@@ -274,6 +274,51 @@ function getNearestNeighborPixels(
   return ordered;
 }
 
+function getNearestNeighborPixelsByComponents(
+  pixels: Pixel[],
+  current: { x: number; y: number },
+  grid: BrushGrid,
+): Pixel[] {
+  const components = collectConnectedComponents(pixels);
+  if (components.length <= 1) {
+    return getNearestNeighborPixels(pixels, current, grid);
+  }
+
+  const remaining = components.slice();
+  const ordered: Pixel[] = [];
+  let position = current;
+
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const component = remaining[i]!;
+      for (const pixel of component) {
+        const target = toCanvasPosition(pixel, grid);
+        const distance = Math.abs(target.x - position.x) + Math.abs(target.y - position.y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = i;
+          if (distance === 0) break;
+        }
+      }
+    }
+
+    const [chosen] = remaining.splice(bestIndex, 1);
+    if (!chosen) break;
+
+    const sub = getNearestNeighborPixels(chosen, position, grid);
+    if (sub.length === 0) continue;
+
+    ordered.push(...sub);
+    const lastPixel = sub[sub.length - 1]!;
+    position = toCanvasPosition(lastPixel, grid);
+  }
+
+  return ordered;
+}
+
 function getOrderedPixelsForColor(
   pixelsByColor: Map<number, Pixel[]>,
   colorIndex: number,
@@ -286,7 +331,7 @@ function getOrderedPixelsForColor(
   if (!pixels || pixels.length === 0) return [];
 
   if (pathStrategy === "nearest") {
-    return getNearestNeighborPixels(pixels, current, grid);
+    return getNearestNeighborPixelsByComponents(pixels, current, grid);
   }
 
   if (profile.brushSize === 1) {
