@@ -77,7 +77,6 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Verify macOS signature and notarization
         if: runner.os == 'macOS'
