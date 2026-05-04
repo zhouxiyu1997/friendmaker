@@ -61,6 +61,36 @@ test("deriveControllerStatus prefers connected-ready progress over stale init er
   assert.equal(status?.initError, "btStart_failed");
 });
 
+test("deriveControllerStatus marks congested inferred-ready links as unstable", () => {
+  const status = deriveControllerStatus([
+    "INFO transport=classic-bt-uartswitchcon",
+    "INFO bt_profile=uartswitchcon-pro-controller",
+    "INFO bt_discoverable=false",
+    "INFO bt_auth_complete=false",
+    "INFO bt_connected=true",
+    "INFO bt_paired=true",
+    "INFO bt_ready_for_reports=false",
+    "INFO bt_send_report_failures=7236",
+    "INFO bt_last_send_report_status=1",
+    "INFO bt_last_send_report_reason=8",
+    "INFO bt_last_acl_disconnect_reason=19",
+    "INFO bt_init_step=discoverable",
+    "INFO bt_init_error=ESP_OK",
+  ]);
+
+  assert.ok(status);
+  assert.equal(status?.tone, "warning");
+  assert.equal(status?.pill, "不稳定");
+  assert.equal(status?.title, "连接容易断开");
+  assert.equal(status?.ready, "未就绪");
+  assert.equal(status?.readyValue, false);
+  assert.equal(status?.unstableValue, true);
+  assert.equal(status?.reconnectRecommendedValue, true);
+  assert.equal(status?.sendReportFailureCount, 7236);
+  assert.equal(status?.lastSendReportReason, 8);
+  assert.equal(status?.lastAclDisconnectReason, 19);
+});
+
 test("shouldReuseExistingControllerConnection keeps active bluetooth sessions intact", () => {
   assert.equal(
     shouldReuseExistingControllerConnection({
@@ -107,6 +137,17 @@ test("shouldReuseExistingControllerConnection keeps active bluetooth sessions in
     }),
     false,
   );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: true,
+      authValue: false,
+      discoverableValue: false,
+      reconnectRecommendedValue: true,
+      unstableValue: true,
+    }),
+    false,
+  );
 });
 
 test("controller status updates also resync the controller action buttons", async () => {
@@ -123,5 +164,10 @@ test("controller status updates also resync the controller action buttons", asyn
   assert.match(
     appSource,
     /els\.controllerInfoButton\.addEventListener\("click", async \(\) => \{[\s\S]*await requestControllerStatus\(\)[\s\S]*shouldReuseExistingControllerConnection\(state\.controller\.status\)[\s\S]*runControllerCommands\(\["BT RESET", "I"\], "连接手柄"\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*runControllerCommands\(\["BT RESET", "I"\], "自动恢复手柄连接"\)/u,
   );
 });

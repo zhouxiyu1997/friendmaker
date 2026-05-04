@@ -31,6 +31,10 @@ constexpr uint8_t kStickMax = 255;
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
 constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
+constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
+constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
+constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -387,6 +391,7 @@ void ClassicBtControllerTransport::clearConnectionState() {
   lastSendReportReason_ = 0;
   lastSendReportId_ = 0;
   reportCongested_ = false;
+  consecutiveSendReportFailures_ = 0;
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
 }
@@ -563,13 +568,29 @@ void ClassicBtControllerTransport::ensureSendTask() {
       0);
 }
 
+uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
+  if (!connected_ && !paired_) {
+    return kIdleDisconnectedReportIntervalMs;
+  }
+
+  if (reportCongested_ || consecutiveSendReportFailures_ >= 3) {
+    return kIdleCongestedReportIntervalMs;
+  }
+
+  if (!paired_ || !authComplete_) {
+    return kIdlePrePairingReportIntervalMs;
+  }
+
+  return kIdleConnectedReportIntervalMs;
+}
+
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   while (true) {
     if (!transport->explicitInputActive_) {
       transport->sendCurrentInputReport(false);
     }
-    vTaskDelay(pdMS_TO_TICKS((transport->connected_ || transport->paired_) ? 15 : 100));
+    vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
   }
 }
 
@@ -627,6 +648,8 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   pairingComplete_ = false;
   paired_ = false;
   discoverable_ = true;
+  reportCongested_ = false;
+  consecutiveSendReportFailures_ = 0;
   lastDropReason_ = reason;
   clearInputs();
 
@@ -736,6 +759,9 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
       const_cast<uint8_t *>(payload));
   if (err != ESP_OK) {
     sendReportFailureCount_ += 1;
+    if (consecutiveSendReportFailures_ < UINT8_MAX) {
+      consecutiveSendReportFailures_ += 1;
+    }
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = 0x30;
@@ -1037,6 +1063,8 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                    param->open.conn_status == ESP_HIDD_CONN_STATE_CONNECTED;
       readyForReports_ = connected_ && appRegistered_ && hidReady_;
       discoverable_ = !connected_;
+      reportCongested_ = false;
+      consecutiveSendReportFailures_ = 0;
       if (connected_) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
@@ -1062,6 +1090,11 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
     case ESP_HIDD_SEND_REPORT_EVT:
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
         sendReportFailureCount_ += 1;
+        if (consecutiveSendReportFailures_ < UINT8_MAX) {
+          consecutiveSendReportFailures_ += 1;
+        }
+      } else {
+        consecutiveSendReportFailures_ = 0;
       }
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;

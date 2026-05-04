@@ -35,6 +35,18 @@ function hasControllerInitError(value) {
   return value !== "-" && value !== "none" && value !== "ESP_OK";
 }
 
+function numberFromInfo(value) {
+  const normalized = String(value ?? "").trim();
+  const match = /^-?\d+/u.exec(normalized);
+
+  if (!match?.[0]) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[0], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function normalizeControllerDeviceLines(lines) {
   return (lines ?? []).flatMap((line) => splitEmbeddedDeviceLine(line));
 }
@@ -84,6 +96,10 @@ export function isControllerSendableStatus({ connected, paired, ready }) {
 }
 
 export function shouldReuseExistingControllerConnection(status) {
+  if (status?.reconnectRecommendedValue === true || status?.unstableValue === true) {
+    return false;
+  }
+
   return (
     status?.readyValue === true ||
     status?.connectedValue === true ||
@@ -104,8 +120,22 @@ export function deriveControllerStatus(lines) {
   const connected = boolFromInfo(info.bt_connected);
   const paired = boolFromInfo(info.bt_paired);
   const rawReady = boolFromInfo(info.bt_ready_for_reports);
-  const ready = isControllerSendableStatus({ connected, paired, ready: rawReady });
-  const readyInferredFromPairing = rawReady !== true && connected === true && paired === true;
+  const sendReportFailureCount = numberFromInfo(info.bt_send_report_failures) ?? 0;
+  const lastSendReportStatus = numberFromInfo(info.bt_last_send_report_status);
+  const lastSendReportReason = numberFromInfo(info.bt_last_send_report_reason);
+  const lastAclDisconnectReason = numberFromInfo(info.bt_last_acl_disconnect_reason);
+  const congestedSendReport =
+    lastSendReportStatus !== null &&
+    lastSendReportStatus > 0 &&
+    lastSendReportReason === 8;
+  const unstableInferredReady =
+    rawReady !== true &&
+    connected === true &&
+    paired === true &&
+    congestedSendReport &&
+    sendReportFailureCount >= 10;
+  const readyInferredFromPairing = rawReady !== true && connected === true && paired === true && !unstableInferredReady;
+  const ready = rawReady === true || readyInferredFromPairing;
   const initError = info.bt_init_error ?? "-";
 
   let tone = "idle";
@@ -120,6 +150,12 @@ export function deriveControllerStatus(lines) {
     detail = readyInferredFromPairing
       ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
       : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+  } else if (unstableInferredReady) {
+    tone = "warning";
+    pill = "不稳定";
+    title = "连接容易断开";
+    detail =
+      `开发板已经连上 Switch，但 HID 报告通道仍在拥塞（最近一次 send-report status=${lastSendReportStatus ?? "-"} reason=${lastSendReportReason ?? "-"}，累计失败 ${sendReportFailureCount} 次），现在继续测试或开画都容易断联。建议先重置蓝牙后重新连接。`;
   } else if (connected === true) {
     tone = "running";
     pill = "已连接";
@@ -162,5 +198,14 @@ export function deriveControllerStatus(lines) {
     peer: info.bt_last_peer ?? "-",
     initStep: info.bt_init_step ?? "-",
     initError,
+    rawReadyValue: rawReady,
+    readyInferredValue: readyInferredFromPairing,
+    unstableValue: unstableInferredReady,
+    reconnectRecommendedValue: unstableInferredReady,
+    sendReportFailureCount,
+    lastSendReportStatus,
+    lastSendReportReason,
+    lastAclDisconnectReason,
+    lastDropReason: info.bt_last_drop_reason ?? "-",
   };
 }
