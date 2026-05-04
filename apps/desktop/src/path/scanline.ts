@@ -340,10 +340,6 @@ function getOrderedPixelsForColor(
     return getNearestNeighborPixelsByComponents(pixels, current, grid);
   }
 
-  if (profile.brushSize === 1) {
-    return getLegacyScanlinePixels(pixels);
-  }
-
   const components = collectConnectedComponents(pixels);
   const legacyPixels = rotatePixelsToNearestStart(
     getLegacyScanlinePixels(pixels),
