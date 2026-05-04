@@ -15,15 +15,6 @@ export interface DerivedControllerStatus {
   connectedValue: boolean | null;
   pairedValue: boolean | null;
   readyValue: boolean | null;
-  rawReadyValue: boolean | null;
-  readyInferredValue: boolean;
-  unstableValue: boolean;
-  reconnectRecommendedValue: boolean;
-  sendReportFailureCount: number;
-  lastSendReportStatus: number | null;
-  lastSendReportReason: number | null;
-  lastAclDisconnectReason: number | null;
-  lastDropReason: string;
   peer: string;
   initStep: string;
   initError: string;
@@ -43,8 +34,6 @@ export function shouldReuseExistingControllerConnection(status: {
   connectedValue?: boolean | null;
   authValue?: boolean | null;
   discoverableValue?: boolean | null;
-  reconnectRecommendedValue?: boolean | null;
-  unstableValue?: boolean | null;
 } | null | undefined): boolean;
 export function deriveControllerStatus(
   lines: Array<string | null | undefined>,
