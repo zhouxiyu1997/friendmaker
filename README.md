@@ -7,8 +7,11 @@
 ![Hardware](https://img.shields.io/badge/hardware-ESP32--WROOM--32-orange.svg)
 ![Status](https://img.shields.io/badge/status-alpha-yellow.svg)
 
-<!-- GitHub renders a repository-relative MP4 path here as an inline playable video. -->
-docs/media/demo-video.mp4
+<p>
+  <a href="docs/media/demo-video.mp4">
+    <img src="docs/media/demo-real-device.jpeg" alt="Friend Maker real device demo on Nintendo Switch" width="760" />
+  </a>
+</p>
 
 <p>
   <img src="docs/media/ui-studio-page.png" alt="Friend Maker studio page for image import, preview, brush size, color modes, and serial execution" width="32%" />
