@@ -830,7 +830,7 @@ export function generateScanlinePlan(
             segmentIndex,
             colorHex: color.colorHex,
             slotIndex,
-            resumePrefixCommands: [...batchPrefixCommands, colorCommand(slotIndex)],
+            resumePrefixCommands: [...batchPrefixCommands.slice(slotIndex), colorCommand(slotIndex)],
           },
         );
         segmentIndex += 1;
@@ -873,7 +873,11 @@ export function generateScanlinePlan(
             segmentIndex,
             colorHex: color.colorHex,
             slotIndex,
-            resumePrefixCommands: [basicPaletteResetCommand(), ...batchConfigCommands, colorCommand(slotIndex)],
+            resumePrefixCommands: [
+              basicPaletteResetCommand(),
+              ...batchConfigCommands.slice(slotIndex),
+              colorCommand(slotIndex),
+            ],
           },
         );
         segmentIndex += 1;

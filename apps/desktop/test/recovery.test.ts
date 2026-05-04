@@ -103,25 +103,32 @@ test("mono resume segments keep the first draw command when the segment already 
   assert.equal(segment.commandEndExclusive, 2);
 });
 
-test("official and palette resume segments rebuild their color-slot prefixes", () => {
+test("official and palette resume segments rebuild only unfinished color slots", () => {
   const profile = makeProfile({
-    canvasWidth: 6,
+    canvasWidth: 9,
     canvasHeight: 1,
     colorMode: "official",
     colorCount: 16,
     palette: Array.from({ length: 16 }, (_, index) => `#${String(index + 1).padStart(6, "0")}`),
   });
-  const pixelMap = makePixelMap(6, 1, [
+  const pixelMap = makePixelMap(9, 1, [
     { x: 1, y: 0, colorIndex: 2, colorHex: "#ff0000" },
     { x: 4, y: 0, colorIndex: 5, colorHex: "#00ff00" },
+    { x: 7, y: 0, colorIndex: 7, colorHex: "#0000ff" },
   ]);
   const officialPlan = generateScanlinePlan(pixelMap, profile);
   const officialCommands = serializeCommands(officialPlan.commands);
   const officialSegments = officialPlan.resumePlan.segments;
 
-  assert.equal(officialSegments.length, 2);
+  assert.equal(officialSegments.length, 3);
   assert.equal(officialSegments[0]?.resumePrefixCommands[0], "BC RESET");
   assert.equal(officialSegments[1]?.resumePrefixCommands[0], "BC RESET");
+  assert.match(officialSegments[1]?.resumePrefixCommands[1] ?? "", /^BC 1 /u);
+  assert.match(officialSegments[1]?.resumePrefixCommands[2] ?? "", /^BC 2 /u);
+  assert.equal(
+    officialSegments[1]?.resumePrefixCommands.some((command) => /^BC 0 /u.test(command)),
+    false,
+  );
   assert.equal(
     officialSegments[1]?.resumePrefixCommands[officialSegments[1].resumePrefixCommands.length - 1],
     "C 1",
@@ -129,7 +136,7 @@ test("official and palette resume segments rebuild their color-slot prefixes", (
   assert.equal(officialCommands[officialSegments[1]?.bodyStartCommandIndex ?? 0], "P");
 
   const paletteProfile = makeProfile({
-    canvasWidth: 6,
+    canvasWidth: 9,
     canvasHeight: 1,
     colorMode: "palette",
     colorCount: 16,
@@ -140,6 +147,12 @@ test("official and palette resume segments rebuild their color-slot prefixes", (
 
   assert.match(paletteSegments[0]?.resumePrefixCommands[0] ?? "", /^PC 0 /u);
   assert.match(paletteSegments[0]?.resumePrefixCommands[1] ?? "", /^PC 1 /u);
+  assert.match(paletteSegments[1]?.resumePrefixCommands[0] ?? "", /^PC 1 /u);
+  assert.match(paletteSegments[1]?.resumePrefixCommands[1] ?? "", /^PC 2 /u);
+  assert.equal(
+    paletteSegments[1]?.resumePrefixCommands.some((command) => /^PC 0 /u.test(command)),
+    false,
+  );
   assert.equal(
     paletteSegments[1]?.resumePrefixCommands[paletteSegments[1].resumePrefixCommands.length - 1],
     "C 1",
