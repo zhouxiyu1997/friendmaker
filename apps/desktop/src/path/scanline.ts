@@ -1,4 +1,4 @@
-import type { DrawingProfile, Pixel, PixelMap } from "../types.js";
+import type { DrawingProfile, Pixel, PixelMap, ResumePlan, ResumeSegment } from "../types.js";
 import {
   createBrushGrid,
   gridCellToCanvasCenter,
@@ -18,9 +18,14 @@ import {
   paletteConfigCommand,
   type DrawCommand,
 } from "../protocol/commands.js";
+import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
 import { DEFAULT_SAFE_INPUT_TIMING } from "../protocol/timing.js";
 
 export type PathStrategy = "scanline" | "nearest";
+export interface GeneratedScanlinePlan {
+  commands: DrawCommand[];
+  resumePlan: ResumePlan;
+}
 
 const PALETTE_SLOT_COUNT = 9;
 const EXACT_COMPONENT_ORDER_LIMIT = 6;
@@ -674,22 +679,80 @@ function appendOrderedPixels(
   return appendPixelRun(commands, run, currentPosition, profile, grid);
 }
 
-export function generateScanlineCommands(
+function buildResumeLabel(
+  profile: DrawingProfile,
+  segmentIndex: number,
+  colorHex: string | null,
+  slotIndex: number | null,
+): string {
+  if (profile.colorMode === "mono") {
+    return "单色重绘";
+  }
+
+  const normalizedColor = colorHex ? colorHex.toUpperCase() : "未知颜色";
+  const slotLabel = slotIndex === null ? "" : ` · 槽位 ${slotIndex + 1}`;
+  const prefix = profile.colorMode === "official" ? "官方色" : "自定义色";
+
+  return `${prefix} ${segmentIndex + 1} · ${normalizedColor}${slotLabel}`;
+}
+
+function appendResumeSegment(
+  commands: DrawCommand[],
+  resumeSegments: ResumeSegment[],
+  orderedPixels: Pixel[],
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+  grid: BrushGrid,
+  meta: {
+    segmentIndex: number;
+    colorHex: string | null;
+    slotIndex: number | null;
+    resumePrefixCommands: DrawCommand[];
+  },
+): { x: number; y: number } {
+  const firstPixel = orderedPixels[0];
+
+  if (!firstPixel) {
+    return current;
+  }
+
+  const firstCanvasPosition = toCanvasPosition(firstPixel, grid);
+  const needsInitialMove =
+    firstCanvasPosition.x !== current.x || firstCanvasPosition.y !== current.y;
+  const bodyStartCommandIndex = commands.length + (needsInitialMove ? 1 : 0);
+  const nextPosition = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
+
+  resumeSegments.push({
+    segmentIndex: meta.segmentIndex,
+    label: buildResumeLabel(profile, meta.segmentIndex, meta.colorHex, meta.slotIndex),
+    colorHex: meta.colorHex,
+    slotIndex: meta.slotIndex,
+    resumePrefixCommands: serializeCommands(meta.resumePrefixCommands),
+    firstCanvasPosition,
+    bodyStartCommandIndex,
+    commandEndExclusive: commands.length,
+  });
+
+  return nextPosition;
+}
+
+export function generateScanlinePlan(
   pixelMap: PixelMap,
   profile: DrawingProfile,
   pathStrategy: PathStrategy = "scanline",
-): DrawCommand[] {
+): GeneratedScanlinePlan {
   const commands: DrawCommand[] = [];
   const grid = createBrushGrid(profile);
+  const resumeSegments: ResumeSegment[] = [];
   let current = { x: 0, y: 0 };
+  let segmentIndex = 0;
 
-  commands.push(
-    inputConfigCommand(
-      DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
-      DEFAULT_SAFE_INPUT_TIMING.inputDelayMs,
-      DEFAULT_SAFE_INPUT_TIMING.homeMs,
-    ),
+  const inputConfig = inputConfigCommand(
+    DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
+    DEFAULT_SAFE_INPUT_TIMING.inputDelayMs,
+    DEFAULT_SAFE_INPUT_TIMING.homeMs,
   );
+  commands.push(inputConfig);
 
   if (shouldStartFromCanvasCenter(profile)) {
     current = {
@@ -705,6 +768,8 @@ export function generateScanlineCommands(
     }
   }
 
+  const initialCursor = { ...current };
+
   // Pre-group pixels by color to avoid repeated full-map scans
   const pixelsByColor = groupPixelsByColor(pixelMap);
 
@@ -719,18 +784,33 @@ export function generateScanlineCommands(
       }
 
       const orderedPixels = getOrderedPixelsForColor(pixelsByColor, colorIndex, current, profile, grid, pathStrategy);
-      current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
+      current = appendResumeSegment(
+        commands,
+        resumeSegments,
+        orderedPixels,
+        current,
+        profile,
+        grid,
+        {
+          segmentIndex,
+          colorHex: orderedPixels[0]?.colorHex ?? null,
+          slotIndex: null,
+          resumePrefixCommands: profile.startColorIndex === 0 ? [] : [colorCommand(profile.startColorIndex)],
+        },
+      );
+      segmentIndex += 1;
     }
   } else if (profile.colorMode === "palette") {
     const usedColors = getUsedPaletteColors(pixelMap);
 
     for (let batchStart = 0; batchStart < usedColors.length; batchStart += PALETTE_SLOT_COUNT) {
       const batch = usedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT);
+      const batchPrefixCommands = batch.map((color, slotIndex) =>
+        paletteConfigCommand(slotIndex, color.colorHex),
+      );
       let selectedSlot: number | null = null;
 
-      batch.forEach((color, slotIndex) => {
-        commands.push(paletteConfigCommand(slotIndex, color.colorHex));
-      });
+      commands.push(...batchPrefixCommands);
 
       for (const [slotIndex, color] of batch.entries()) {
         if (selectedSlot !== slotIndex) {
@@ -739,7 +819,21 @@ export function generateScanlineCommands(
         }
 
         const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
-        current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
+        current = appendResumeSegment(
+          commands,
+          resumeSegments,
+          orderedPixels,
+          current,
+          profile,
+          grid,
+          {
+            segmentIndex,
+            colorHex: color.colorHex,
+            slotIndex,
+            resumePrefixCommands: [...batchPrefixCommands, colorCommand(slotIndex)],
+          },
+        );
+        segmentIndex += 1;
       }
     }
   } else {
@@ -748,6 +842,10 @@ export function generateScanlineCommands(
 
     for (let batchStart = 0; batchStart < usedColors.length; batchStart += PALETTE_SLOT_COUNT) {
       const batch = usedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT);
+      const batchConfigCommands = batch.map((color, slotIndex) => {
+        const cell = officialPaletteCellFromIndex(color.colorIndex);
+        return basicPaletteConfigCommand(slotIndex, cell.row, cell.col);
+      });
       let selectedSlot: number | null = null;
 
       if (!didResetOfficialPaletteState) {
@@ -755,10 +853,7 @@ export function generateScanlineCommands(
         didResetOfficialPaletteState = true;
       }
 
-      batch.forEach((color, slotIndex) => {
-        const cell = officialPaletteCellFromIndex(color.colorIndex);
-        commands.push(basicPaletteConfigCommand(slotIndex, cell.row, cell.col));
-      });
+      commands.push(...batchConfigCommands);
 
       for (const [slotIndex, color] of batch.entries()) {
         if (selectedSlot !== slotIndex) {
@@ -767,13 +862,42 @@ export function generateScanlineCommands(
         }
 
         const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
-        current = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
+        current = appendResumeSegment(
+          commands,
+          resumeSegments,
+          orderedPixels,
+          current,
+          profile,
+          grid,
+          {
+            segmentIndex,
+            colorHex: color.colorHex,
+            slotIndex,
+            resumePrefixCommands: [basicPaletteResetCommand(), ...batchConfigCommands, colorCommand(slotIndex)],
+          },
+        );
+        segmentIndex += 1;
       }
     }
   }
 
   commands.push(endCommand());
-  return commands;
+  return {
+    commands,
+    resumePlan: {
+      inputConfigCommand: serializeCommand(inputConfig),
+      initialCursor,
+      segments: resumeSegments,
+    },
+  };
+}
+
+export function generateScanlineCommands(
+  pixelMap: PixelMap,
+  profile: DrawingProfile,
+  pathStrategy: PathStrategy = "scanline",
+): DrawCommand[] {
+  return generateScanlinePlan(pixelMap, profile, pathStrategy).commands;
 }
 
 export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfile): number {

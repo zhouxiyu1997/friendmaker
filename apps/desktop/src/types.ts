@@ -75,6 +75,28 @@ export interface CanvasBounds {
   maxY: number;
 }
 
+export interface CanvasPoint {
+  x: number;
+  y: number;
+}
+
+export interface ResumeSegment {
+  segmentIndex: number;
+  label: string;
+  colorHex: string | null;
+  slotIndex: number | null;
+  resumePrefixCommands: string[];
+  firstCanvasPosition: CanvasPoint;
+  bodyStartCommandIndex: number;
+  commandEndExclusive: number;
+}
+
+export interface ResumePlan {
+  inputConfigCommand: string;
+  initialCursor: CanvasPoint;
+  segments: ResumeSegment[];
+}
+
 export interface ProgressUpdate {
   index: number;
   total: number;
