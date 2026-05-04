@@ -42,6 +42,10 @@ function getWindowsDriverRoot(): string {
   return path.join(repoRoot, "drivers", "windows");
 }
 
+function getRecoverySessionsRoot(): string {
+  return path.join(app.getPath("documents"), "FriendMaker", "recovery-sessions");
+}
+
 function hasWhitespace(value: string): boolean {
   return /\s/u.test(value);
 }
@@ -147,6 +151,7 @@ async function createMainWindow(): Promise<void> {
     staticRoot: getStaticRoot(),
     firmwareRoot,
     appDataRoot: getPlatformIoSafeDataRoot(),
+    recoverySessionsRoot: getRecoverySessionsRoot(),
     windowsDriverRoot: getWindowsDriverRoot(),
   });
 
