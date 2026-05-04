@@ -24,6 +24,15 @@
 `朋友制作器` 是一个面向 `macOS / Windows + ESP32-WROOM-32 / ESP-32S` 的自动绘制工具。  
 它会将图片转换成像素网格和手柄动作脚本，再通过 ESP32 模拟 Switch Pro Controller 输入，在游戏画板中自动完成绘制。当前版本主要面向《朋友收集：梦想生活》与 `Tomodachi Life` 的绘图场景。
 
+这个项目已经历过多轮迭代，当前 README 以最新的 `桌面端三页工作流` 为准：
+
+- `刷入固件`
+- `手柄测试`
+- `脚本生成 / 恢复绘制`
+
+当前最推荐的体验路线仍然是 `单色绘制` 和 `官方色绘制`。  
+`自定义多色` 已经开放测试入口，但稳定性仍弱于前两条主线，当前仍属于 `测试阶段 / 实验能力`。
+
 关键词：`Friend Maker`、`朋友制作器`、`Tomodachi Life`、`朋友收集：梦想生活`、`Nintendo Switch auto draw`、`ESP32 Pro Controller emulator`、`pixel art drawing automation`、`Bluetooth Classic HID`。
 
 ### 平台支持
@@ -52,11 +61,13 @@
 
 - 导入 `PNG / JPG / SVG` 图片，并生成绘制预览
 - 支持 `1 / 3 / 7 / 13 / 19 / 27` 六种画笔大小
-- 支持 `单色绘制` 与 `官方色绘制`
+- 支持 `单色绘制`、`官方色绘制`，以及 `自定义多色（测试中）`
 - 支持 `256x256` 脚本坐标画布工作流
+- 支持异形图纸模板裁切与模板预览
 - 支持 `自动扣背景`，适合白底、浅灰底、棋盘格假透明图
 - 通过带 `SEQ <session> <seq>` 去重帧的串口协议将绘制脚本逐条发送给 ESP32，并等待 `ACK`
 - 在界面中完成脚本生成、固件刷写、手柄连接与按钮测试，以及暂停、继续和中断绘制
+- 支持本地恢复任务：暂停、中断、异常或应用重启后，仍可从恢复点继续
 
 ### 整体架构
 
@@ -85,6 +96,13 @@
 2. 在 `手柄测试` 页完成蓝牙连接、按钮和方向测试
 3. 回到 `脚本生成` 页导入图片、检查预览并正式开始绘制
 
+### 当前版本定位
+
+- 当前主线已经从早期的“手工脚本 + 命令行试验”迭代到“桌面端闭环工作流”
+- README 默认描述 `桌面端安装包 / 桌面端页面` 的最新行为
+- 与绘图质量和成功率直接相关的能力，会优先以 `输入稳定性` 和 `恢复能力` 为准
+- `自定义多色` 虽然可见、可测试，但暂时不建议作为首次试用路线
+
 ### 绘制模式
 
 #### 单色绘制
@@ -99,12 +117,20 @@
 - 当前支持 `8 / 16 / 32 / 64 / 84` 色量化档位
 - 当前按游戏原始 `9` 个色盘槽位的默认颜色起步
 
+#### 自定义多色（测试中）
+
+- 会先把图片自动量化成多种颜色，再按批次写入右侧 `9` 个自定义色槽
+- 当前更适合颜色数量较少、结构较简单的图片
+- 这是仍在继续打磨的实验路线，稳定性与容错性暂时弱于 `单色绘制` 和 `官方色绘制`
+- 首次试用时，更推荐先用 `单色绘制` 或 `官方色绘制` 验证整体链路
+
 ### 运行要求
 
 #### 硬件
 
 - Mac 或 Windows 电脑
-- `ESP32-WROOM-32 / ESP-32S`
+- `ESP32-WROOM-32 / ESP-32S` 开发板
+  常见写法如 `ESP32 DevKitC` 或 `NodeMCU-32S` 兼容板通常也可以；建议选择带 `USB` 串口、可直接刷机的版本，并尽量避开 `ESP32-C3 / ESP32-S3 / ESP32-C6` 这类只有 `BLE` 或当前不属于本项目主线支持范围的型号
 - Nintendo Switch
 - 可传输数据的 USB 线
 
@@ -272,17 +298,22 @@ http://127.0.0.1:4307
 
 - 导入图片
 - 选择画笔大小
-- 选择单色或官方色
+- 选择单色、官方色或自定义多色（测试中）
+- 选择模板、缩放和位置，并检查预览
 - 生成预览与命令
 - 查看官方色盘预览、统计信息与执行状态
 - 一键开始绘制
 - 暂停、中断或异常后会在本地保留恢复任务；如果应用在暂停期间被关闭，下次启动后该任务也会自动转成可恢复状态
+- 可以从恢复点继续，也可以手动放弃已经不需要的恢复记录
+- 如果“正在中断绘制”长时间卡住，页面会出现应急按钮，用于强制清除当前卡住状态
 
 #### 刷入固件
 
 - 枚举串口
+- 当前主线支持的固件目标环境为：`ESP32-WROOM-32 / ESP-32S` 与 `NodeMCU-32S`
 - 调用本机 PlatformIO
 - 编译并刷入 ESP32 固件
+- Windows 下可在页面内直接安装 `CP210x` 或 `CH340/CH341` 串口驱动
 - 返回刷写结果与滚动日志
 
 #### 手柄测试
@@ -292,8 +323,10 @@ http://127.0.0.1:4307
 - 如果连接手柄连不上，先点击 `重置手柄蓝牙`，再点击 `连接手柄`
 - 如果还是连不上，可以按一下实体板上的 `EN` 键重启开发板，再重新点击 `连接手柄`
 - 如果还是连不上，回到 `刷入固件` 页重新刷一次固件后再试
-- 单步测试按钮、方向键与摇杆
+- 单步测试按钮、方向键与摇杆，并可选择摇杆步数
+- 支持 `Home`、`Capture`、`LS`、`RS` 和 `L+R 配对` 等单独动作测试
 - 查看 HID 连接状态
+- 支持手动断开串口
 - 发送自定义测试命令并查看滚动日志
 
 ### 仓库结构
@@ -329,7 +362,8 @@ docs/media/          README 展示图片与视频
 ### 当前限制
 
 - Switch 连接和绘图流程仍然依赖固定场景假设
-- 自定义颜色自动调色还不稳定，当前更推荐 `官方色绘制`
+- `自定义多色` 仍在测试阶段，当前整体稳定性明显弱于 `单色绘制` 和 `官方色绘制`
+- 自定义颜色自动调色和长流程容错还不稳定，当前更推荐 `官方色绘制`
 - 第一优先级仍然是输入稳定性，而不是绘制速度
 
 ### 当前状态
@@ -366,6 +400,15 @@ docs/media/          README 展示图片与视频
 `Friend Maker` is an automatic drawing toolkit for `macOS / Windows + ESP32-WROOM-32 / ESP-32S`.  
 It converts images into pixel grids and controller action scripts, then uses an ESP32 to emulate Switch Pro Controller input and draw automatically on the in-game canvas. The current version is primarily tailored for drawing workflows in `Tomodachi Life` and 《朋友收集：梦想生活》.
 
+The project has already gone through many iterations, and this README now follows the latest `desktop three-page workflow`:
+
+- `Firmware Flash`
+- `Controller Test`
+- `Script Studio / Recovery`
+
+The recommended paths are still `mono drawing` and `official palette drawing`.  
+`Custom multicolor` is now exposed for testing, but it is still less stable than those two main paths and should be treated as an `experimental / testing-stage` feature.
+
 Keywords: `Friend Maker`, `Tomodachi Life`, `Nintendo Switch auto draw`, `ESP32 Pro Controller emulator`, `pixel art drawing automation`, `Bluetooth Classic HID`.
 
 ### Compatibility
@@ -394,11 +437,13 @@ Reference documents:
 
 - Import `PNG / JPG / SVG` images and generate drawing previews
 - Support six brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
-- Support both `mono drawing` and `official palette drawing`
+- Support `mono drawing`, `official palette drawing`, and `custom multicolor (testing)`
 - Use a `256x256` script-coordinate canvas workflow
+- Support irregular drawing templates and template-aware preview cropping
 - Support `automatic background removal` for white, light gray, and fake transparency checkerboard backgrounds
 - Send drawing commands to the ESP32 over a `SEQ <session> <seq>` deduplicating serial protocol and wait for `ACK`
 - Handle script generation, firmware flashing, controller connection and button testing, plus pause, resume, and stop actions from the shared app interface
+- Preserve local recovery jobs so paused, interrupted, failed, or restarted sessions can still be resumed from a recovery point
 
 ### Architecture
 
@@ -427,6 +472,13 @@ The practical actions are:
 2. Complete Bluetooth connection, button tests, and direction tests in the `Controller Test` page
 3. Return to the `Script Studio` page, import an image, review the preview, and start drawing
 
+### Current Product Focus
+
+- The main path has evolved from early command-line experiments into a desktop-app-centered closed loop
+- This README describes the latest packaged desktop app and page flow by default
+- Features that affect success rate are prioritized around `input stability` and `recovery`
+- `Custom multicolor` is available for testing, but it is still not the recommended first-run path
+
 ### Drawing Modes
 
 #### Mono Drawing
@@ -441,12 +493,20 @@ The practical actions are:
 - Currently supports `8 / 16 / 32 / 64 / 84` quantization levels
 - Starts from the game's default colors for the `9` palette slots
 
+#### Custom Multicolor (Testing)
+
+- Automatically quantizes the image into multiple colors, then writes them into the right-side `9` custom palette slots in batches
+- Currently works best on images with fewer colors and simpler structure
+- This path is still experimental, and its stability and tolerance are weaker than `mono drawing` and `official palette drawing`
+- For a first successful run, `mono drawing` or `official palette drawing` is still the safer recommendation
+
 ### Requirements
 
 #### Hardware
 
 - A Mac or Windows computer
-- `ESP32-WROOM-32 / ESP-32S`
+- An `ESP32-WROOM-32 / ESP-32S` development board
+  Common labels such as `ESP32 DevKitC` or `NodeMCU-32S` compatible boards are usually fine; prefer versions with a built-in `USB` serial interface that can be flashed directly, and avoid `ESP32-C3 / ESP32-S3 / ESP32-C6` variants because they are BLE-only or not part of the current main supported path for this project
 - Nintendo Switch
 - A USB cable that supports data transfer
 
@@ -612,17 +672,22 @@ Notes:
 
 - Import images
 - Choose brush size
-- Choose mono drawing or official palette drawing
+- Choose mono drawing, official palette drawing, or custom multicolor (testing)
+- Choose template, scale, and position, then review the preview
 - Generate previews and command scripts
 - Review official palette previews, statistics, and execution status
 - Start drawing with one click
 - Preserve local recovery jobs after pause, stop, or failure; if the app closes while paused, the next launch will still surface that job as recoverable
+- Resume from a saved recovery point, or discard recovery records you no longer need
+- If the stop flow stays stuck for too long, the page exposes an emergency action to forcibly clear the stuck execution state
 
 #### Firmware Flash
 
 - Enumerate serial ports
+- The current main supported firmware targets are `ESP32-WROOM-32 / ESP-32S` and `NodeMCU-32S`
 - Call the local PlatformIO installation
 - Build and flash the ESP32 firmware
+- Install `CP210x` or `CH340/CH341` serial drivers directly from the page on Windows
 - Return flash results and scrollable logs
 
 #### Controller Test
@@ -631,8 +696,10 @@ Notes:
 - Reset Controller Bluetooth
 - If the controller does not connect, click `Reset Controller Bluetooth` first and then `Connect the controller`
 - If it still does not connect, reflash the firmware and try again
-- Test buttons, D-pad, and stick movement step by step
+- Test buttons, D-pad, and stick movement step by step, with selectable stick step sizes
+- Test standalone actions such as `Home`, `Capture`, `LS`, `RS`, and `L+R` pairing
 - Inspect HID connection status
+- Disconnect the serial session manually when needed
 - Send custom test commands and review scrollable logs
 
 ### Repository Layout
@@ -668,7 +735,8 @@ docs/media/          README images and videos
 ### Current Limitations
 
 - The Switch connection and drawing workflow still depend on fixed scenario assumptions
-- Automatic custom-color tuning is not stable yet, so `official palette drawing` is currently recommended
+- `Custom multicolor` is still in the testing stage, and its overall stability is clearly weaker than `mono drawing` and `official palette drawing`
+- Automatic custom-color tuning and long-run fault tolerance are not stable yet, so `official palette drawing` is still the recommended color path
 - The highest priority is still input stability, not drawing speed
 
 ### Development Status
