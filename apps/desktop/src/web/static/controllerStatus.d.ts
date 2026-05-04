@@ -29,6 +29,12 @@ export function isControllerSendableStatus(input: {
   paired: boolean | null;
   ready: boolean | null;
 }): boolean;
+export function shouldReuseExistingControllerConnection(status: {
+  readyValue?: boolean | null;
+  connectedValue?: boolean | null;
+  authValue?: boolean | null;
+  discoverableValue?: boolean | null;
+} | null | undefined): boolean;
 export function deriveControllerStatus(
   lines: Array<string | null | undefined>,
 ): DerivedControllerStatus | null;

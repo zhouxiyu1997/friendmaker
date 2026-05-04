@@ -66,7 +66,7 @@ export class SimulatedAckSender implements SenderControls {
       ackDelayMs: number;
       errorAtCommand?: number;
       inputReportFailureAtCommand?: number;
-      onProgress?: (progress: ProgressUpdate) => void;
+      onProgress?: (progress: ProgressUpdate) => Promise<void> | void;
       onDeviceLine?: (line: string) => void;
     },
   ): Promise<void> {
@@ -130,7 +130,7 @@ export class SimulatedAckSender implements SenderControls {
         sent = true;
       }
 
-      options.onProgress?.({
+      await options.onProgress?.({
         index: index + 1,
         total: commands.length,
         command,

@@ -1,8 +1,12 @@
-import { deriveControllerStatus } from "./controllerStatus.js";
+import {
+  deriveControllerStatus,
+  shouldReuseExistingControllerConnection,
+} from "./controllerStatus.js";
 
 const state = {
   activePage: "studio",
   imageDataUrl: null,
+  imageSourceLabel: null,
   commands: [],
   ports: [],
   selectedPortPath: "",
@@ -72,6 +76,8 @@ const state = {
     removeBackground: false,
     usedColorIndexes: [],
     generatedPalette: [],
+    resumePlan: null,
+    recoverySessions: [],
     officialPalette: {
       rows: 0,
       cols: 0,
@@ -87,6 +93,7 @@ const state = {
     execution: {
       id: null,
       status: "idle",
+      statusSince: null,
       totalCommands: 0,
       completedCommands: 0,
       currentCommand: null,
@@ -94,6 +101,7 @@ const state = {
       finishedAt: null,
       error: null,
       lineCount: 0,
+      recoverySessionId: null,
     },
   },
   firmware: {
@@ -191,7 +199,10 @@ const els = {
   resumeExecutionButton: document.getElementById("resume-execution-button"),
   stopExecutionButton: document.getElementById("stop-execution-button"),
   resetExecutionButton: document.getElementById("reset-execution-button"),
+  executionEmergencyPanel: document.getElementById("execution-emergency-panel"),
   studioExecutionStatus: document.getElementById("studio-execution-status"),
+  recoverySessionList: document.getElementById("recovery-session-list"),
+  recoveryEmptyState: document.getElementById("recovery-empty-state"),
   autoRemoveBackgroundCheckbox: document.getElementById("auto-remove-background-checkbox"),
   previewGuideSelect: document.getElementById("preview-guide-select"),
   previewCanvas: document.getElementById("preview-canvas"),
@@ -270,6 +281,7 @@ const els = {
 let studioExecutionPollTimer = null;
 let firmwareToolingPollTimer = null;
 let windowsSerialDriverPollTimer = null;
+const STUDIO_RESET_REVEAL_DELAY_MS = 4_000;
 let firmwareFlashPollTimer = null;
 let controllerStatusPollTimer = null;
 let controllerStatusPollDeadlineMs = 0;
@@ -474,6 +486,7 @@ els.imageInput.addEventListener("change", async (event) => {
   }
 
   state.imageDataUrl = await readFileAsDataUrl(file);
+  state.imageSourceLabel = file.name;
   els.fileLabel.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
   appendLog(els.studioLogOutput, `已载入图片：${file.name}`);
   syncStudioUi();
@@ -515,11 +528,42 @@ els.resumeExecutionButton.addEventListener("click", async () => {
 });
 
 els.stopExecutionButton.addEventListener("click", async () => {
-  await sendStudioExecutionControl("stop", "中断绘制");
+  await sendStudioExecutionControl("stop", "中断并保存恢复点");
 });
 
 els.resetExecutionButton.addEventListener("click", async () => {
-  await sendStudioExecutionControl("reset", "强制恢复绘制状态");
+  const shouldReset = window.confirm(
+    "这会强制清除当前卡住的绘制状态，不会继续等待当前命令自然结束。只有在“正在中断绘制”长时间不消失时才建议使用。确定继续吗？",
+  );
+
+  if (!shouldReset) {
+    return;
+  }
+
+  await sendStudioExecutionControl("reset", "强制清除卡住状态");
+});
+
+els.recoverySessionList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-session-action]");
+
+  if (!button) {
+    return;
+  }
+
+  const sessionId = button.dataset.sessionId ?? "";
+
+  if (!sessionId) {
+    return;
+  }
+
+  if (button.dataset.sessionAction === "resume") {
+    await resumeRecoverySession(sessionId);
+    return;
+  }
+
+  if (button.dataset.sessionAction === "discard") {
+    await discardRecoverySession(sessionId);
+  }
 });
 
 function findStudioTemplateById(templateId) {
@@ -780,6 +824,7 @@ async function requestStudioGeneration() {
 
 function applyGeneratedStudioPayload(payload) {
   state.commands = payload.commands;
+  state.studio.resumePlan = payload.resumePlan ?? null;
   state.studio.usedColorIndexes = Array.isArray(payload.stats.usedColorIndexes)
     ? payload.stats.usedColorIndexes
     : [];
@@ -994,6 +1039,17 @@ async function executeStudioCommands({ logPrefix }) {
       body: JSON.stringify({
         target: "serial",
         commands: state.commands,
+        resumePlan: state.studio.resumePlan,
+        sourceLabel: state.imageSourceLabel ?? "untitled-drawing",
+        profileSummary: {
+          brushSize: state.studio.brushSize,
+          colorMode: state.studio.colorMode,
+          templateId: state.studio.templateId,
+          templateLabel: state.studio.templateLabel,
+          imageScalePercent: state.studio.imageScalePercent,
+          imageOffsetXPercent: state.studio.imageOffsetXPercent,
+          imageOffsetYPercent: state.studio.imageOffsetYPercent,
+        },
         portPath: state.selectedPortPath,
         baudRate: state.studio.profile.baudRate,
         ackTimeoutMs: state.studio.profile.ackTimeoutMs,
@@ -1009,6 +1065,10 @@ async function executeStudioCommands({ logPrefix }) {
 
     applySerialSessionSnapshot(payload.session);
     applyStudioExecutionSnapshot(payload.execution);
+    await refreshRecoverySessions();
+    if (payload.recoverySession?.commandsFilePath) {
+      appendLog(els.studioLogOutput, `恢复脚本已保存：${payload.recoverySession.commandsFilePath}`);
+    }
     startStudioExecutionPolling();
     return true;
   } catch (error) {
@@ -1534,6 +1594,28 @@ function stopWindowsSerialDriverPolling() {
 
 els.controllerInfoButton.addEventListener("click", async () => {
   setControllerPendingStatus({
+    title: "正在检查当前手柄状态",
+    detail: "正在读取开发板当前蓝牙状态；如果已经连上 Switch，会直接复用当前连接。",
+  });
+
+  const statusOk = await requestControllerStatus();
+
+  if (statusOk && shouldReuseExistingControllerConnection(state.controller.status)) {
+    appendLog(
+      els.controllerLogOutput,
+      state.controller.status.readyValue === true
+        ? "检测到手柄已经连接，跳过蓝牙重置。"
+        : "检测到开发板已经在广播或握手中，跳过蓝牙重置并继续等待连接完成。",
+    );
+    startControllerStatusPolling();
+    return;
+  }
+
+  if (!statusOk) {
+    appendLog(els.controllerLogOutput, "当前状态读取失败，改为重置蓝牙后重新连接。");
+  }
+
+  setControllerPendingStatus({
     title: "正在准备连接手柄",
     detail: "正在重置蓝牙并重新进入可发现状态，请保持 Switch 停在“更改握法/顺序”页面。",
   });
@@ -1694,18 +1776,25 @@ function applyStudioExecutionSnapshot(snapshot) {
     return;
   }
 
+  const previousStatus = state.studio.execution.status;
+  const previousRecoverySessionId = state.studio.execution.recoverySessionId;
   const previousId = state.studio.execution.id;
   const nextId = snapshot.id ?? null;
   const isNewExecution = previousId !== nextId;
+  const nextStatus =
+    typeof snapshot.status === "string" ? snapshot.status : state.studio.execution.status;
   const existingLineCount = isNewExecution ? 0 : state.studio.execution.lineCount;
   const lines = Array.isArray(snapshot.lines) ? snapshot.lines : [];
   const nextLineCount = lines.length;
   const newLines = lines.slice(existingLineCount);
+  const nextStatusSince =
+    isNewExecution || previousStatus !== nextStatus ? Date.now() : state.studio.execution.statusSince;
 
   state.studio.execution = {
     ...state.studio.execution,
     id: nextId,
-    status: typeof snapshot.status === "string" ? snapshot.status : state.studio.execution.status,
+    status: nextStatus,
+    statusSince: nextStatusSince,
     totalCommands:
       typeof snapshot.totalCommands === "number" ? snapshot.totalCommands : state.studio.execution.totalCommands,
     completedCommands:
@@ -1729,6 +1818,10 @@ function applyStudioExecutionSnapshot(snapshot) {
         ? snapshot.error
         : state.studio.execution.error,
     lineCount: nextLineCount,
+    recoverySessionId:
+      typeof snapshot.recoverySessionId === "string" || snapshot.recoverySessionId === null
+        ? snapshot.recoverySessionId
+        : state.studio.execution.recoverySessionId,
   };
 
   newLines.forEach((line) => appendLog(els.studioLogOutput, `[device] ${line}`));
@@ -1741,6 +1834,13 @@ function applyStudioExecutionSnapshot(snapshot) {
     startStudioExecutionPolling();
   } else {
     stopStudioExecutionPolling();
+  }
+
+  if (
+    previousStatus !== state.studio.execution.status ||
+    previousRecoverySessionId !== state.studio.execution.recoverySessionId
+  ) {
+    void refreshRecoverySessions();
   }
 
   syncStudioUi();
@@ -1798,10 +1898,198 @@ async function sendStudioExecutionControl(action, label) {
     }
 
     appendLog(els.studioLogOutput, `${label}请求已发送。`);
+    if (action === "pause") {
+      appendLog(
+        els.studioLogOutput,
+        "暂停会在当前命令完成后生效；如果此时 Switch 还会继续动一下，这是正常现象。",
+      );
+    }
+    if (action === "stop") {
+      appendLog(
+        els.studioLogOutput,
+        "中断会在当前命令完成后生效；随后会保存恢复点，供你重新进入绘画页后继续。",
+      );
+    }
     applyStudioExecutionSnapshot(payload.execution);
     applySerialSessionSnapshot(payload.session);
+    await refreshRecoverySessions();
   } catch (error) {
     appendLog(els.studioLogOutput, `${label}失败：${getErrorMessage(error)}`);
+  }
+}
+
+function shouldShowExecutionEmergencyReset() {
+  if (state.studio.execution.status !== "stopping") {
+    return false;
+  }
+
+  if (typeof state.studio.execution.statusSince !== "number") {
+    return false;
+  }
+
+  return Date.now() - state.studio.execution.statusSince >= STUDIO_RESET_REVEAL_DELAY_MS;
+}
+
+function formatRecoverySessionStatus(status) {
+  switch (status) {
+    case "running":
+      return "绘制中";
+    case "paused":
+      return "已暂停";
+    case "recoverable":
+      return "可恢复";
+    case "completed":
+      return "已完成";
+    case "discarded":
+      return "已放弃";
+    default:
+      return "未知";
+  }
+}
+
+function renderRecoverySessions() {
+  const sessions = Array.isArray(state.studio.recoverySessions)
+    ? state.studio.recoverySessions
+    : [];
+  const currentRecoverySessionId = state.studio.execution.recoverySessionId;
+  const executionActive = isStudioExecutionActive();
+
+  els.recoverySessionList.innerHTML = "";
+  els.recoveryEmptyState.classList.toggle("hidden", sessions.length > 0);
+
+  sessions.forEach((session) => {
+    const card = document.createElement("article");
+    card.className = "recovery-session-card";
+
+    const title = document.createElement("strong");
+    title.className = "recovery-session-title";
+    title.textContent = session.sourceLabel || "未命名绘制";
+
+    const meta = document.createElement("p");
+    meta.className = "recovery-session-meta";
+    meta.textContent = `${formatRecoverySessionStatus(session.status)} · ${session.completedCommands} / ${session.totalCommands}${
+      session.nextResumeLabel ? ` · 下一个恢复颜色：${session.nextResumeLabel}` : ""
+    }`;
+
+    const path = document.createElement("p");
+    path.className = "recovery-session-path";
+    path.textContent = `脚本：${session.commandsFilePath}`;
+
+    const actions = document.createElement("div");
+    actions.className = "recovery-session-actions";
+
+    const resumeButton = document.createElement("button");
+    resumeButton.type = "button";
+    resumeButton.className = "ghost";
+    resumeButton.textContent = "从恢复点继续";
+    resumeButton.dataset.sessionAction = "resume";
+    resumeButton.dataset.sessionId = session.jobId;
+    resumeButton.disabled =
+      executionActive ||
+      !state.selectedPortPath ||
+      !isControllerReadyForStudio() ||
+      session.status !== "recoverable";
+
+    const discardButton = document.createElement("button");
+    discardButton.type = "button";
+    discardButton.className = "ghost";
+    discardButton.textContent = "放弃恢复记录";
+    discardButton.dataset.sessionAction = "discard";
+    discardButton.dataset.sessionId = session.jobId;
+    discardButton.disabled = executionActive || currentRecoverySessionId === session.jobId;
+
+    actions.append(resumeButton, discardButton);
+    card.append(title, meta, path, actions);
+    els.recoverySessionList.appendChild(card);
+  });
+}
+
+async function refreshRecoverySessions() {
+  try {
+    const response = await fetch("/api/recovery/sessions");
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "读取恢复任务失败");
+    }
+
+    state.studio.recoverySessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    renderRecoverySessions();
+  } catch (error) {
+    appendLog(els.studioLogOutput, `读取恢复任务失败：${getErrorMessage(error)}`);
+  }
+}
+
+async function resumeRecoverySession(sessionId) {
+  if (!state.selectedPortPath) {
+    appendLog(els.studioLogOutput, "请先选择一个串口设备。");
+    return;
+  }
+
+  if (!isControllerReadyForStudio()) {
+    appendLog(els.studioLogOutput, "恢复绘制前，请先到“手柄测试”页把手柄连接状态跑到“已就绪”。");
+    switchPage("controller");
+    return;
+  }
+
+  const shouldResume = window.confirm(
+    "请确认：你已经先在 Switch 里保存当前画作，并且已经手动重新进入绘画页；当前笔刷大小与保存任务一致，页面也回到了默认进入状态。现在开始从恢复点继续吗？",
+  );
+
+  if (!shouldResume) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/recovery/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        portPath: state.selectedPortPath,
+      }),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      applySerialSessionSnapshot(payload.session);
+      throw new Error(payload.error ?? "恢复绘制失败");
+    }
+
+    applySerialSessionSnapshot(payload.session);
+    applyStudioExecutionSnapshot(payload.execution);
+    await refreshRecoverySessions();
+    appendLog(els.studioLogOutput, `已从恢复点继续：${payload.recoverySession?.sourceLabel ?? sessionId}`);
+    startStudioExecutionPolling();
+  } catch (error) {
+    appendLog(els.studioLogOutput, `恢复绘制失败：${getErrorMessage(error)}`);
+  }
+}
+
+async function discardRecoverySession(sessionId) {
+  const shouldDiscard = window.confirm("放弃后会删除本地脚本和恢复记录。确定继续吗？");
+
+  if (!shouldDiscard) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/recovery/discard", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "放弃恢复记录失败");
+    }
+
+    state.studio.recoverySessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    renderRecoverySessions();
+    appendLog(els.studioLogOutput, `已放弃恢复记录：${sessionId}`);
+  } catch (error) {
+    appendLog(els.studioLogOutput, `放弃恢复记录失败：${getErrorMessage(error)}`);
   }
 }
 
@@ -2089,19 +2377,19 @@ function renderStudioExecutionStatus() {
       }`;
       break;
     case "paused":
-      els.studioExecutionStatus.textContent = `绘制已暂停：${execution.completedCommands} / ${execution.totalCommands}`;
+      els.studioExecutionStatus.textContent = `绘制已暂停：${execution.completedCommands} / ${execution.totalCommands}。如果你刚点了暂停，看到 Switch 还会把最后一条已发出的命令跑完，这是正常现象。`;
       break;
     case "stopping":
-      els.studioExecutionStatus.textContent = `正在中断绘制：${execution.completedCommands} / ${execution.totalCommands}`;
+      els.studioExecutionStatus.textContent = `正在中断绘制：${execution.completedCommands} / ${execution.totalCommands}。Switch 还会先跑完当前命令，然后保存恢复点；如果长时间卡在这里，下面会出现应急按钮。`;
       break;
     case "completed":
       els.studioExecutionStatus.textContent = `绘制已完成：${execution.completedCommands} / ${execution.totalCommands}`;
       break;
     case "stopped":
-      els.studioExecutionStatus.textContent = `绘制已中断：${execution.completedCommands} / ${execution.totalCommands}`;
+      els.studioExecutionStatus.textContent = `绘制已中断并保存恢复点：${execution.completedCommands} / ${execution.totalCommands}。请先在 Switch 里保存，再手动重新进入绘画页后继续。`;
       break;
     case "failed":
-      els.studioExecutionStatus.textContent = `绘制失败：${execution.error ?? "请查看执行日志。"}`;
+      els.studioExecutionStatus.textContent = `绘制异常中断：${execution.error ?? "请查看执行日志。"} 请先在 Switch 里保存，再手动重新进入绘画页后，从下方恢复任务继续。`;
       break;
     default:
       els.studioExecutionStatus.textContent = "当前未开始绘制。";
@@ -2225,6 +2513,7 @@ function syncStudioUi() {
   const executionPaused = state.studio.execution.status === "paused";
   const executionRunning = state.studio.execution.status === "running";
   const executionStopping = state.studio.execution.status === "stopping";
+  const showExecutionEmergencyReset = shouldShowExecutionEmergencyReset();
 
   els.sizeSelect.value = String(state.studio.canvasSize);
   els.brushSizeSelect.value = String(state.studio.brushSize);
@@ -2305,9 +2594,11 @@ function syncStudioUi() {
   els.pauseExecutionButton.disabled = !executionRunning;
   els.resumeExecutionButton.disabled = !executionPaused;
   els.stopExecutionButton.disabled = !(executionRunning || executionPaused);
-  els.resetExecutionButton.disabled = !executionStopping;
+  els.executionEmergencyPanel.classList.toggle("hidden", !showExecutionEmergencyReset);
+  els.resetExecutionButton.disabled = !showExecutionEmergencyReset;
   renderStudioExecutionStatus();
   renderOfficialPalettePreview();
+  renderRecoverySessions();
 
   if (state.studio.colorMode !== "mono") {
     els.thresholdRange.disabled = true;
@@ -3063,6 +3354,7 @@ async function init() {
     loadOfficialPalette(),
     loadSerialSessionStatus(),
     pollStudioExecutionStatus(),
+    refreshRecoverySessions(),
   ]);
   renderPortSelects();
   syncStudioUi();

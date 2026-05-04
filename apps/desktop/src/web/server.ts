@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { generateDrawPlan } from "../app/generateDrawPlan.js";
+import { buildRecoveryExecutionPlan, deriveResumeProgress } from "../app/recovery.js";
 import { applyCliOptions, type CliOptions } from "../cli/args.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
@@ -29,7 +30,16 @@ import {
   type SerialSessionSnapshot,
 } from "../serial/sender.js";
 import { SimulatedAckSender } from "../simulator/sender.js";
-import type { SenderControls } from "../types.js";
+import type { ResumePlan, SenderControls } from "../types.js";
+import {
+  RecoverySessionStore,
+  applyRecoveryProgress,
+  applyRecoveryStatus,
+  summarizeRecoverySession,
+  type RecoveryProfileSummary,
+  type RecoverySessionRecord,
+  type RecoverySessionSummary,
+} from "./recoverySessions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +47,31 @@ const repoRoot = path.resolve(__dirname, "..", "..", "..", "..");
 const defaultStaticRoot = path.join(__dirname, "static");
 const defaultFirmwareRoot = resolveDefaultFirmwareRoot();
 const defaultWindowsDriverRoot = resolveDefaultWindowsDriverRoot();
+function resolveDefaultRecoverySessionsRoot(): string {
+  const homeDocumentsRoot = path.join(os.homedir(), "Documents");
+
+  if (process.platform !== "win32") {
+    return path.join(homeDocumentsRoot, "FriendMaker", "recovery-sessions");
+  }
+
+  const oneDriveRoot =
+    process.env.OneDriveConsumer?.trim() ||
+    process.env.OneDriveCommercial?.trim() ||
+    process.env.OneDrive?.trim() ||
+    "";
+  const userProfileRoot = process.env.USERPROFILE?.trim() || "";
+  const windowsCandidates = [
+    oneDriveRoot ? path.join(oneDriveRoot, "Documents") : "",
+    userProfileRoot ? path.join(userProfileRoot, "Documents") : "",
+    homeDocumentsRoot,
+  ].filter((candidate) => candidate.length > 0);
+  const documentsRoot =
+    windowsCandidates.find((candidate) => existsSync(candidate)) ?? windowsCandidates[0] ?? homeDocumentsRoot;
+
+  return path.join(documentsRoot, "FriendMaker", "recovery-sessions");
+}
+
+const defaultRecoverySessionsRoot = resolveDefaultRecoverySessionsRoot();
 const defaultHost = "127.0.0.1";
 const defaultPort = 4307;
 const defaultAppDataRoot = path.join(os.homedir(), ".friend-maker");
@@ -52,6 +87,7 @@ export interface StartWebServerOptions {
   firmwareRoot?: string;
   windowsDriverRoot?: string;
   appDataRoot?: string;
+  recoverySessionsRoot?: string;
   toolingPaths?: ToolingConfig;
 }
 
@@ -71,6 +107,7 @@ interface WebRuntimeConfig {
   toolingManager: FirmwareToolingManager;
   windowsSerialDriverManager: WindowsSerialDriverManager;
   flashManager: FirmwareFlashManager;
+  recoverySessions: RecoverySessionStore;
 }
 
 let webRuntime: WebRuntimeConfig = {
@@ -81,6 +118,7 @@ let webRuntime: WebRuntimeConfig = {
   toolingManager: new FirmwareToolingManager({ appDataRoot: defaultAppDataRoot }),
   windowsSerialDriverManager: new WindowsSerialDriverManager(defaultWindowsDriverRoot),
   flashManager: null as unknown as FirmwareFlashManager,
+  recoverySessions: new RecoverySessionStore(defaultRecoverySessionsRoot),
 };
 
 function resolveDefaultFirmwareRoot(): string {
@@ -129,6 +167,9 @@ const VALID_BRUSH_SIZES = new Set([1, 3, 7, 13, 19, 27] as const);
 type ExecutionTarget = "simulate" | "serial";
 type ExecutionStatus = "idle" | "running" | "paused" | "stopping" | "completed" | "failed" | "stopped";
 type FirmwareFlashStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
+type ExecutionProgressUpdate = { index: number; total: number; command: string };
+
+interface ExecutionStartProfileSummary extends RecoveryProfileSummary {}
 
 interface ManagedExecution {
   id: number | null;
@@ -144,6 +185,8 @@ interface ManagedExecution {
   finishedAt: number | null;
   error: string | null;
   sender: SenderControls | null;
+  progressMap: number[] | null;
+  recoverySession: RecoverySessionRecord | null;
 }
 
 let executionCounter = 0;
@@ -163,6 +206,8 @@ function createEmptyExecution(): ManagedExecution {
     finishedAt: null,
     error: null,
     sender: null,
+    progressMap: null,
+    recoverySession: null,
   };
 }
 
@@ -189,10 +234,14 @@ class ManagedSerialSessionSender implements SenderControls {
 
   stop(): void {
     this.stopped = true;
+  }
+
+  forceStop(): void {
+    this.stopped = true;
     this.interruptAckWait?.();
     this.interruptAckWait = null;
     void this.sessionManager.disconnect({ force: true }).catch(() => {
-      // Stop uses disconnect only to interrupt a blocking ACK wait.
+      // Forced stop uses disconnect only to interrupt a blocking ACK wait.
     });
   }
 
@@ -203,7 +252,7 @@ class ManagedSerialSessionSender implements SenderControls {
       baudRate: number;
       ackTimeoutMs: number;
       retries: number;
-      onProgress?: (progress: { index: number; total: number; command: string }) => void;
+      onProgress?: (progress: { index: number; total: number; command: string }) => Promise<void> | void;
       onDeviceLine?: (line: string) => void;
     },
   ): Promise<void> {
@@ -817,6 +866,21 @@ function normalizeImageOffsetPercent(value: unknown, fallback = 0): number {
   return Math.max(-100, Math.min(100, Math.round(value)));
 }
 
+function normalizeRecoveryProfileSummary(value: unknown): ExecutionStartProfileSummary {
+  const summary = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  return {
+    brushSize: normalizeBrushSize(summary.brushSize, 3),
+    colorMode:
+      summary.colorMode === "official" || summary.colorMode === "palette" ? summary.colorMode : "mono",
+    templateId: typeof summary.templateId === "string" ? summary.templateId : "none",
+    templateLabel: typeof summary.templateLabel === "string" ? summary.templateLabel : "无模板（正方形）",
+    imageScalePercent: normalizeImageScalePercent(summary.imageScalePercent),
+    imageOffsetXPercent: normalizeImageOffsetPercent(summary.imageOffsetXPercent),
+    imageOffsetYPercent: normalizeImageOffsetPercent(summary.imageOffsetYPercent),
+  };
+}
+
 function isManagedExecutionActive(status: ExecutionStatus): boolean {
   return status === "running" || status === "paused" || status === "stopping";
 }
@@ -827,6 +891,12 @@ function appendManagedExecutionLine(execution: ManagedExecution, line: string): 
   if (execution.lines.length > 400) {
     execution.lines.splice(0, execution.lines.length - 400);
   }
+}
+
+function getManagedExecutionRecoverySummary(
+  execution: ManagedExecution,
+): RecoverySessionSummary | null {
+  return execution.recoverySession ? summarizeRecoverySession(execution.recoverySession) : null;
 }
 
 function snapshotManagedExecution(execution: ManagedExecution = managedExecution): Record<string, unknown> {
@@ -843,7 +913,39 @@ function snapshotManagedExecution(execution: ManagedExecution = managedExecution
     finishedAt: execution.finishedAt,
     error: execution.error,
     lines: execution.lines,
+    recoverySessionId: execution.recoverySession?.jobId ?? null,
+    recoverySession: getManagedExecutionRecoverySummary(execution),
   };
+}
+
+async function updateRecoverySessionProgress(
+  execution: ManagedExecution,
+  completedCommands: number,
+): Promise<void> {
+  if (!execution.recoverySession) {
+    return;
+  }
+
+  applyRecoveryProgress(execution.recoverySession, completedCommands);
+  await webRuntime.recoverySessions.writeSession(execution.recoverySession);
+}
+
+async function updateRecoverySessionStatus(
+  execution: ManagedExecution,
+  status: "running" | "paused" | "recoverable" | "completed",
+  error: string | null = null,
+): Promise<void> {
+  if (!execution.recoverySession) {
+    return;
+  }
+
+  applyRecoveryStatus(execution.recoverySession, status, error);
+  await webRuntime.recoverySessions.writeSession(execution.recoverySession);
+}
+
+function resolveRecoveryTerminalStatus(execution: ManagedExecution): "recoverable" | "completed" {
+  const nextResumeSegmentIndex = execution.recoverySession?.nextResumeSegmentIndex ?? null;
+  return nextResumeSegmentIndex === null ? "completed" : "recoverable";
 }
 
 function makeCliOverrides(input: {
@@ -976,6 +1078,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,
     commands: plan.commands,
+    resumePlan: plan.resumePlan,
   });
 }
 
@@ -1079,6 +1182,12 @@ async function runManagedExecution(
     execution,
     `INFO target=${body.target} commands=${body.commands.length}`,
   );
+  if (execution.recoverySession) {
+    appendManagedExecutionLine(
+      execution,
+      `INFO recovery_session=${execution.recoverySession.commandsFilePath}`,
+    );
+  }
 
   try {
     if (body.target === "serial") {
@@ -1097,9 +1206,11 @@ async function runManagedExecution(
         baudRate: body.baudRate ?? 115200,
         ackTimeoutMs,
         retries,
-        onProgress: ({ index, command }) => {
-          execution.completedCommands = index;
+        onProgress: async ({ index, command }: ExecutionProgressUpdate) => {
+          const mappedCompletedCommands = execution.progressMap?.[index - 1] ?? index;
+          execution.completedCommands = mappedCompletedCommands;
           execution.currentCommand = command;
+          await updateRecoverySessionProgress(execution, mappedCompletedCommands);
         },
         onDeviceLine: (line) => {
           appendManagedExecutionLine(execution, line);
@@ -1113,9 +1224,11 @@ async function runManagedExecution(
         retries,
         ackDelayMs: body.ackDelayMs ?? 0,
         ...(body.errorAtCommand !== undefined ? { errorAtCommand: body.errorAtCommand } : {}),
-        onProgress: ({ index, command }) => {
-          execution.completedCommands = index;
+        onProgress: async ({ index, command }: ExecutionProgressUpdate) => {
+          const mappedCompletedCommands = execution.progressMap?.[index - 1] ?? index;
+          execution.completedCommands = mappedCompletedCommands;
           execution.currentCommand = command;
+          await updateRecoverySessionProgress(execution, mappedCompletedCommands);
         },
         onDeviceLine: (line) => {
           appendManagedExecutionLine(execution, line);
@@ -1128,9 +1241,14 @@ async function runManagedExecution(
     if (execution.status === "stopping") {
       execution.status = "stopped";
       appendManagedExecutionLine(execution, "INFO stopped");
+      await updateRecoverySessionStatus(
+        execution,
+        resolveRecoveryTerminalStatus(execution),
+      );
     } else {
       execution.status = "completed";
       appendManagedExecutionLine(execution, "INFO completed");
+      await updateRecoverySessionStatus(execution, "completed");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1140,10 +1258,20 @@ async function runManagedExecution(
       execution.status = "stopped";
       execution.error = null;
       appendManagedExecutionLine(execution, "INFO stopped");
+      await updateRecoverySessionStatus(
+        execution,
+        resolveRecoveryTerminalStatus(execution),
+      );
     } else {
       execution.status = "failed";
       execution.error = message;
       appendManagedExecutionLine(execution, `ERR ${message}`);
+      const recoveryStatus = resolveRecoveryTerminalStatus(execution);
+      await updateRecoverySessionStatus(
+        execution,
+        recoveryStatus,
+        recoveryStatus === "recoverable" ? message : null,
+      );
     }
   } finally {
     execution.finishedAt = Date.now();
@@ -1152,7 +1280,7 @@ async function runManagedExecution(
 }
 
 async function startManagedExecution(body: {
-  commands?: string[];
+  commands: string[];
   target?: ExecutionTarget;
   portPath?: string;
   baudRate?: number;
@@ -1160,6 +1288,10 @@ async function startManagedExecution(body: {
   retries?: number;
   ackDelayMs?: number;
   errorAtCommand?: number;
+  progressMap?: number[];
+  totalCommands?: number;
+  initialCompletedCommands?: number;
+  recoverySession?: RecoverySessionRecord | null;
 }): Promise<Record<string, unknown>> {
   if (!Array.isArray(body.commands) || body.commands.length === 0) {
     throw new Error("Missing commands.");
@@ -1176,6 +1308,10 @@ async function startManagedExecution(body: {
     throw new Error("Missing portPath.");
   }
 
+  if (body.progressMap && body.progressMap.length !== body.commands.length) {
+    throw new Error("Progress map does not match commands.");
+  }
+
   const sender: SenderControls =
     target === "serial" ? new ManagedSerialSessionSender(serialSessionManager) : new SimulatedAckSender();
 
@@ -1185,14 +1321,16 @@ async function startManagedExecution(body: {
     target,
     portPath,
     baudRate: body.baudRate ?? 115200,
-    totalCommands: body.commands.length,
-    completedCommands: 0,
+    totalCommands: body.totalCommands ?? body.commands.length,
+    completedCommands: body.initialCompletedCommands ?? 0,
     currentCommand: null,
     lines: [],
     startedAt: Date.now(),
     finishedAt: null,
     error: null,
     sender,
+    progressMap: body.progressMap ?? null,
+    recoverySession: body.recoverySession ?? null,
   };
 
   managedExecution = execution;
@@ -1403,12 +1541,76 @@ async function handleExecutionStart(
     retries?: number;
     ackDelayMs?: number;
     errorAtCommand?: number;
+    resumePlan?: ResumePlan;
+    sourceLabel?: string;
+    profileSummary?: ExecutionStartProfileSummary;
   };
 
   try {
+    if (!Array.isArray(body.commands) || body.commands.length === 0) {
+      throw new Error("Missing commands.");
+    }
+
+    if (isManagedExecutionActive(managedExecution.status)) {
+      throw new Error("A drawing execution is already running.");
+    }
+
+    const target: ExecutionTarget = body.target === "simulate" ? "simulate" : "serial";
+    const portPath = target === "serial" ? preferSerialPath(body.portPath ?? "") : null;
+
+    if (target === "serial" && !portPath) {
+      throw new Error("Missing portPath.");
+    }
+
+    const recoverySession =
+      body.resumePlan && typeof body.resumePlan === "object"
+        ? await webRuntime.recoverySessions.createSession({
+            commands: body.commands,
+            resumePlan: body.resumePlan,
+            sourceLabel:
+              typeof body.sourceLabel === "string" && body.sourceLabel.trim().length > 0
+                ? body.sourceLabel.trim()
+                : "untitled-drawing",
+            profileSummary: normalizeRecoveryProfileSummary(body.profileSummary),
+            serialOptions: {
+              baudRate: body.baudRate ?? 115200,
+              ackTimeoutMs: body.ackTimeoutMs ?? 5_000,
+              retries: body.retries ?? 1,
+            },
+          })
+        : null;
+
     json(response, 200, {
       success: true,
-      execution: await startManagedExecution(body),
+      execution: await startManagedExecution(
+        withDefined({
+          commands: body.commands,
+          target,
+          ...(portPath ? { portPath } : {}),
+          baudRate: body.baudRate,
+          ackTimeoutMs: body.ackTimeoutMs,
+          retries: body.retries,
+          ackDelayMs: body.ackDelayMs,
+          errorAtCommand: body.errorAtCommand,
+          totalCommands: body.commands.length,
+          initialCompletedCommands: 0,
+          recoverySession,
+        }) as {
+          commands: string[];
+          target?: ExecutionTarget;
+          portPath?: string;
+          baudRate?: number;
+          ackTimeoutMs?: number;
+          retries?: number;
+          ackDelayMs?: number;
+          errorAtCommand?: number;
+          progressMap?: number[];
+          totalCommands?: number;
+          initialCompletedCommands?: number;
+          recoverySession?: RecoverySessionRecord | null;
+        },
+      ),
+      recoverySession: recoverySession ? summarizeRecoverySession(recoverySession) : null,
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {
@@ -1445,16 +1647,20 @@ async function handleSerialSessionDisconnect(response: ServerResponse): Promise<
   }
 }
 
-function updateManagedExecutionState(
+async function updateManagedExecutionState(
   nextStatus: ExecutionStatus,
   line: string,
-): Record<string, unknown> {
+  recoveryStatus?: "running" | "paused" | "recoverable" | "completed",
+): Promise<Record<string, unknown>> {
   if (!managedExecution.sender || !managedExecution.id) {
     throw new Error("No active drawing execution.");
   }
 
   managedExecution.status = nextStatus;
   appendManagedExecutionLine(managedExecution, line);
+  if (recoveryStatus) {
+    await updateRecoverySessionStatus(managedExecution, recoveryStatus);
+  }
   return snapshotManagedExecution();
 }
 
@@ -1467,7 +1673,7 @@ async function handleExecutionPause(response: ServerResponse): Promise<void> {
     managedExecution.sender.pause();
     json(response, 200, {
       success: true,
-      execution: updateManagedExecutionState("paused", "INFO execution paused"),
+      execution: await updateManagedExecutionState("paused", "INFO execution paused", "paused"),
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {
@@ -1485,7 +1691,7 @@ async function handleExecutionResume(response: ServerResponse): Promise<void> {
     managedExecution.sender.resume();
     json(response, 200, {
       success: true,
-      execution: updateManagedExecutionState("running", "INFO execution resumed"),
+      execution: await updateManagedExecutionState("running", "INFO execution resumed", "running"),
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {
@@ -1503,7 +1709,7 @@ async function handleExecutionStop(response: ServerResponse): Promise<void> {
     managedExecution.sender.stop();
     json(response, 200, {
       success: true,
-      execution: updateManagedExecutionState("stopping", "INFO execution stop requested"),
+      execution: await updateManagedExecutionState("stopping", "INFO execution stop requested"),
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {
@@ -1515,7 +1721,19 @@ async function handleExecutionStop(response: ServerResponse): Promise<void> {
 async function handleExecutionReset(response: ServerResponse): Promise<void> {
   try {
     if (managedExecution.sender) {
-      managedExecution.sender.stop();
+      if (managedExecution.sender instanceof ManagedSerialSessionSender) {
+        managedExecution.sender.forceStop();
+      } else {
+        managedExecution.sender.stop();
+      }
+    }
+
+    if (managedExecution.recoverySession) {
+      applyRecoveryProgress(managedExecution.recoverySession, managedExecution.completedCommands);
+      await updateRecoverySessionStatus(
+        managedExecution,
+        resolveRecoveryTerminalStatus(managedExecution),
+      );
     }
 
     resetManagedExecutionState();
@@ -1527,6 +1745,105 @@ async function handleExecutionReset(response: ServerResponse): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     json(response, 400, { error: message, session: serialSessionManager.snapshot() });
+  }
+}
+
+async function handleRecoverySessions(response: ServerResponse): Promise<void> {
+  json(response, 200, {
+    success: true,
+    sessions: await webRuntime.recoverySessions.listSessions(),
+  });
+}
+
+async function handleRecoveryResume(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    sessionId?: string;
+    portPath?: string;
+  };
+
+  try {
+    if (isManagedExecutionActive(managedExecution.status)) {
+      throw new Error("A drawing execution is already running.");
+    }
+
+    if (!body.sessionId) {
+      throw new Error("Missing sessionId.");
+    }
+
+    const portPath = preferSerialPath(body.portPath ?? "");
+
+    if (!portPath) {
+      throw new Error("Missing portPath.");
+    }
+
+    const recoverySession = await webRuntime.recoverySessions.loadSession(body.sessionId);
+    const commands = await webRuntime.recoverySessions.loadCommands(body.sessionId);
+    const recoveryPlan = buildRecoveryExecutionPlan({
+      commands,
+      resumePlan: recoverySession.resumePlan,
+      completedCommands: recoverySession.completedCommands,
+    });
+
+    applyRecoveryProgress(recoverySession, recoveryPlan.resumedFromCompletedCommands);
+    applyRecoveryStatus(recoverySession, "running");
+    await webRuntime.recoverySessions.writeSession(recoverySession);
+
+    json(response, 200, {
+      success: true,
+      execution: await startManagedExecution({
+        commands: recoveryPlan.commands,
+        target: "serial",
+        portPath,
+        baudRate: recoverySession.serialOptions.baudRate,
+        ackTimeoutMs: recoverySession.serialOptions.ackTimeoutMs,
+        retries: recoverySession.serialOptions.retries,
+        progressMap: recoveryPlan.progressMap,
+        totalCommands: recoverySession.totalCommands,
+        initialCompletedCommands: recoverySession.completedCommands,
+        recoverySession,
+      }),
+      recoverySession: summarizeRecoverySession(recoverySession),
+      session: serialSessionManager.snapshot(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    json(response, 400, { error: message, session: serialSessionManager.snapshot() });
+  }
+}
+
+async function handleRecoveryDiscard(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    sessionId?: string;
+  };
+
+  try {
+    if (!body.sessionId) {
+      throw new Error("Missing sessionId.");
+    }
+
+    if (
+      managedExecution.recoverySession?.jobId === body.sessionId &&
+      isManagedExecutionActive(managedExecution.status)
+    ) {
+      throw new Error("Cannot discard an active recovery session.");
+    }
+
+    await webRuntime.recoverySessions.loadSession(body.sessionId);
+    await webRuntime.recoverySessions.discardSession(body.sessionId);
+    json(response, 200, {
+      success: true,
+      sessionId: body.sessionId,
+      sessions: await webRuntime.recoverySessions.listSessions(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    json(response, 400, { error: message });
   }
 }
 
@@ -1698,6 +2015,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/recovery/sessions") {
+      await handleRecoverySessions(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/recovery/resume") {
+      await handleRecoveryResume(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/recovery/discard") {
+      await handleRecoveryDiscard(request, response);
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/api/simulate") {
       await handleSimulate(request, response);
       return;
@@ -1726,7 +2058,12 @@ export async function startWebServer(
       options.windowsDriverRoot ?? defaultWindowsDriverRoot,
     ),
     flashManager: new FirmwareFlashManager(),
+    recoverySessions: new RecoverySessionStore(
+      options.recoverySessionsRoot ?? defaultRecoverySessionsRoot,
+    ),
   };
+
+  await webRuntime.recoverySessions.cleanupSessions({ startup: true });
 
   const server = createServer(handleRequest);
 
@@ -1754,6 +2091,7 @@ export async function startWebServer(
     close: async () => {
       await webRuntime.flashManager.shutdown();
       await serialSessionManager.disconnect({ force: true }).catch(() => undefined);
+      resetManagedExecutionState();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {

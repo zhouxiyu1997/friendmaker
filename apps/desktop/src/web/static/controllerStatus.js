@@ -83,6 +83,15 @@ export function isControllerSendableStatus({ connected, paired, ready }) {
   return ready === true || (connected === true && paired === true);
 }
 
+export function shouldReuseExistingControllerConnection(status) {
+  return (
+    status?.readyValue === true ||
+    status?.connectedValue === true ||
+    status?.authValue === true ||
+    status?.discoverableValue === true
+  );
+}
+
 export function deriveControllerStatus(lines) {
   const info = readInfoLineMap(lines);
 

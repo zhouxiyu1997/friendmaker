@@ -37,7 +37,7 @@ const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
   retries: number;
-  onProgress?: (progress: ProgressUpdate) => void;
+  onProgress?: (progress: ProgressUpdate) => Promise<void> | void;
   onDeviceLine?: (line: string) => void;
   beforeCommand?: () => Promise<void>;
   shouldStop?: () => boolean;
@@ -704,7 +704,7 @@ export class SerialCommandSession {
         }
       }
 
-      options.onProgress?.({
+      await options.onProgress?.({
         index: index + 1,
         total: commands.length,
         command,
@@ -865,7 +865,7 @@ export class SerialAckSender implements SenderControls {
       baudRate: number;
       ackTimeoutMs: number;
       retries: number;
-      onProgress?: (progress: ProgressUpdate) => void;
+      onProgress?: (progress: ProgressUpdate) => Promise<void> | void;
       onDeviceLine?: (line: string) => void;
     },
   ): Promise<void> {
