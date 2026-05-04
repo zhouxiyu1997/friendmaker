@@ -244,6 +244,12 @@ http://127.0.0.1:4307
 2. 开始绘制前，画笔和光标必须停在画布中心
 3. 如果使用官方色绘制，保持游戏默认的 `9` 个色盘槽位颜色即可
 
+补充约束：
+
+- 当前绘图与恢复流程都只支持“重新进入绘图页后，从画布中心继续”这一个起点假设
+- 不要把画布理解成可以稳定“撞到左上角再归零”的有边界平面；游戏主画布当前没有可依赖的左上角复位语义
+- 如果文档里提到“归左上”或“左上角起点”，那只适用于色盘或颜色编辑页内部的导航建模，不适用于绘图画布光标恢复
+
 ### 自动扣背景
 
 如果素材是下面这些类型：
@@ -270,6 +276,7 @@ http://127.0.0.1:4307
 - 生成预览与命令
 - 查看官方色盘预览、统计信息与执行状态
 - 一键开始绘制
+- 暂停、中断或异常后会在本地保留恢复任务；如果应用在暂停期间被关闭，下次启动后该任务也会自动转成可恢复状态
 
 #### 刷入固件
 
@@ -577,6 +584,12 @@ These are the three most commonly missed prerequisites:
 2. Before drawing starts, the brush and cursor must be positioned at the canvas center
 3. If you use official palette drawing, keep the game's default colors for the `9` palette slots
 
+Additional constraint:
+
+- The current drawing and recovery flow supports only one restart assumption: after re-entering the drawing page, resume from the canvas center
+- Do not model the drawing canvas as a bounded plane that can reliably reset by pushing into the top-left corner; the in-game canvas does not currently expose a dependable top-left reset semantic
+- If any document mentions "top-left reset" or a "top-left starting point", that applies only to palette or color-editor navigation models, not to drawing-cursor recovery on the canvas
+
 ### Automatic Background Removal
 
 If your source image is one of the following:
@@ -603,6 +616,7 @@ Notes:
 - Generate previews and command scripts
 - Review official palette previews, statistics, and execution status
 - Start drawing with one click
+- Preserve local recovery jobs after pause, stop, or failure; if the app closes while paused, the next launch will still surface that job as recoverable
 
 #### Firmware Flash
 

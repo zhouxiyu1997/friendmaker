@@ -72,7 +72,7 @@ const DAY_IN_MS = 24 * 60 * 60 * 1_000;
 const COMPLETED_SESSION_RETENTION_MS = 7 * DAY_IN_MS;
 const FAILED_SESSION_RETENTION_MS = 14 * DAY_IN_MS;
 const RECOVERABLE_SESSION_RETENTION_MS = 30 * DAY_IN_MS;
-const STALE_RUNNING_SESSION_MESSAGE =
+const STALE_ACTIVE_SESSION_MESSAGE =
   "The previous drawing session ended unexpectedly. Re-enter the drawing page on your Switch and resume from the saved recovery point.";
 
 function sanitizeLabelSegment(value: string): string {
@@ -225,9 +225,12 @@ export class RecoverySessionStore {
 
       let shouldPersistRecord = false;
 
-      if (options.startup && record.status === "running") {
+      if (
+        options.startup &&
+        (record.status === "running" || record.status === "paused")
+      ) {
         record.status = "recoverable";
-        record.error = record.error ?? STALE_RUNNING_SESSION_MESSAGE;
+        record.error = record.error ?? STALE_ACTIVE_SESSION_MESSAGE;
         record.updatedAt = now;
         shouldPersistRecord = true;
       }

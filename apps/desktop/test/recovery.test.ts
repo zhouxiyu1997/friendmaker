@@ -332,6 +332,51 @@ test("startup cleanup converts stale running sessions into recoverable sessions"
   }
 });
 
+test("startup cleanup converts stale paused sessions into recoverable sessions", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-startup-paused-"));
+  const profile = makeProfile({ canvasWidth: 5, canvasHeight: 1 });
+  const pixelMap = makePixelMap(5, 1, [
+    { x: 2, y: 0, colorIndex: 0, colorHex: "#000000" },
+  ]);
+  const scanlinePlan = generateScanlinePlan(pixelMap, profile);
+  const commands = serializeCommands(scanlinePlan.commands);
+  const store = new RecoverySessionStore(recoverySessionsRoot);
+  const record = await store.createSession({
+    commands,
+    resumePlan: scanlinePlan.resumePlan,
+    sourceLabel: "startup-paused-demo.png",
+    profileSummary: makeRecoveryProfileSummary(profile),
+    serialOptions: {
+      baudRate: profile.baudRate,
+      ackTimeoutMs: profile.ackTimeoutMs,
+      retries: profile.commandRetryCount,
+    },
+  });
+
+  applyRecoveryStatus(record, "paused");
+  await store.writeSession(record);
+
+  let server: Awaited<ReturnType<typeof startWebServer>> | null = null;
+
+  try {
+    server = await startWebServer({ port: 0, recoverySessionsRoot });
+    const response = await fetch(`${server.url}/api/recovery/sessions`);
+    assert.equal(response.ok, true);
+    const payload = (await response.json()) as {
+      sessions?: Array<{ status?: string; error?: string | null }>;
+    };
+
+    assert.equal(payload.sessions?.[0]?.status, "recoverable");
+    assert.match(payload.sessions?.[0]?.error ?? "", /ended unexpectedly/i);
+  } finally {
+    if (server) {
+      await server.close();
+    }
+
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
 test("recovery session API persists visible files across restarts and can discard them", async () => {
   const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-"));
   const profile = makeProfile({ canvasWidth: 5, canvasHeight: 1 });
