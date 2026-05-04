@@ -1532,8 +1532,54 @@ input[type="range"]:focus-visible,
     align-items: flex-start;
   }
 
-  .author-pill-row,
-  .page-step-row {
-    justify-content: flex-start;
-  }
+.author-pill-row,
+.page-step-row {
+  justify-content: flex-start;
+}
+}
+
+.panel-head.compact {
+  margin-top: 18px;
+}
+
+.recovery-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(88, 110, 140, 0.18);
+}
+
+.recovery-session-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recovery-session-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(88, 110, 140, 0.16);
+}
+
+.recovery-session-title {
+  font-size: 0.98rem;
+}
+
+.recovery-session-meta,
+.recovery-session-path {
+  margin: 0;
+  color: rgba(34, 46, 64, 0.78);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.recovery-session-path {
+  word-break: break-all;
+}
+
+.recovery-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }

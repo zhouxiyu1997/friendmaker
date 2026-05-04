@@ -302,11 +302,20 @@
             <div class="action-row slim">
               <button id="pause-execution-button" class="ghost" type="button" disabled>暂停绘制</button>
               <button id="resume-execution-button" class="ghost" type="button" disabled>继续绘制</button>
-              <button id="stop-execution-button" class="ghost" type="button" disabled>中断绘制</button>
+              <button id="stop-execution-button" class="ghost" type="button" disabled>中断并保存恢复点</button>
               <button id="reset-execution-button" class="ghost" type="button" disabled>强制恢复状态</button>
             </div>
 
             <p class="hint" id="studio-execution-status">当前未开始绘制。</p>
+
+            <section class="recovery-panel" aria-label="恢复任务">
+              <div class="panel-head compact">
+                <h2>恢复任务</h2>
+                <p>中断或异常后，会在本地保存脚本和恢复点。请先在 Switch 里保存当前画作，再手动重新进入绘画页，然后从这里继续。</p>
+              </div>
+              <p class="hint" id="recovery-empty-state">当前没有可恢复任务。</p>
+              <div id="recovery-session-list" class="recovery-session-list"></div>
+            </section>
           </section>
 
           <section class="panel panel-preview">
