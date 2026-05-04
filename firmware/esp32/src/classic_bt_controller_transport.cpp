@@ -31,6 +31,10 @@ constexpr uint8_t kStickMax = 255;
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
 constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
+constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
+constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
+constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -67,6 +71,27 @@ const char *boolName(bool value) { return value ? "true" : "false"; }
 
 bool isIgnorableBluetoothError(esp_err_t err) {
   return err == ESP_OK || err == ESP_ERR_INVALID_STATE;
+}
+
+bool deriveDeterministicBaseMac(uint8_t baseMac[6]) {
+  uint8_t factoryMac[6] = {};
+  const esp_err_t err = esp_efuse_mac_get_default(factoryMac);
+
+  if (err != ESP_OK) {
+    Serial.printf("WARN efuse_mac_get_default failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  // Keep the Nintendo-like OUI we already expose to Switch, but derive the
+  // device-specific suffix from the chip eFuse so the controller identity stays
+  // stable even if the user reflashes or the NVS namespace is rebuilt.
+  baseMac[0] = 0xD4;
+  baseMac[1] = 0xF0;
+  baseMac[2] = 0x57;
+  baseMac[3] = factoryMac[3];
+  baseMac[4] = factoryMac[4];
+  baseMac[5] = factoryMac[5];
+  return true;
 }
 
 String formatBluetoothAddress(const uint8_t address[6]) {
@@ -217,38 +242,49 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
     return false;
   }
 
+  uint8_t baseMac[6] = {};
+  const char *baseMacSource = "efuse-derived";
+  bool shouldPersistDerivedMac = false;
   nvs_handle handle;
   err = nvs_open("storage", NVS_READWRITE, &handle);
-  if (err != ESP_OK) {
-    Serial.printf("WARN nvs_open failed err=%s\n", esp_err_to_name(err));
-    return false;
+  if (err == ESP_OK) {
+    size_t size = sizeof(baseMac);
+    err = nvs_get_blob(handle, "mac_addr", baseMac, &size);
+    if (err == ESP_OK && size == sizeof(baseMac)) {
+      baseMacSource = "nvs";
+    } else {
+      if (!deriveDeterministicBaseMac(baseMac)) {
+        nvs_close(handle);
+        return false;
+      }
+      shouldPersistDerivedMac = true;
+    }
+  } else {
+    Serial.printf(
+        "WARN nvs_open failed err=%s; using deterministic base mac fallback\n",
+        esp_err_to_name(err));
+    if (!deriveDeterministicBaseMac(baseMac)) {
+      return false;
+    }
   }
 
-  uint8_t baseMac[6] = {};
-  size_t size = sizeof(baseMac);
-  err = nvs_get_blob(handle, "mac_addr", baseMac, &size);
-  if (err != ESP_OK || size != sizeof(baseMac)) {
-    baseMac[0] = 0xD4;
-    baseMac[1] = 0xF0;
-    baseMac[2] = 0x57;
-    for (size_t index = 3; index < sizeof(baseMac); index += 1) {
-      baseMac[index] = static_cast<uint8_t>(esp_random() & 0xFF);
-    }
+  if (shouldPersistDerivedMac) {
     err = nvs_set_blob(handle, "mac_addr", baseMac, sizeof(baseMac));
     if (err != ESP_OK) {
-      nvs_close(handle);
       Serial.printf("WARN nvs_set_blob failed err=%s\n", esp_err_to_name(err));
-      return false;
-    }
-    err = nvs_commit(handle);
-    if (err != ESP_OK) {
-      nvs_close(handle);
-      Serial.printf("WARN nvs_commit failed err=%s\n", esp_err_to_name(err));
-      return false;
+    } else {
+      err = nvs_commit(handle);
+      if (err != ESP_OK) {
+        Serial.printf("WARN nvs_commit failed err=%s\n", esp_err_to_name(err));
+      }
     }
   }
 
-  nvs_close(handle);
+  if (baseMacSource == "nvs") {
+    nvs_close(handle);
+  } else if (err == ESP_OK || shouldPersistDerivedMac) {
+    nvs_close(handle);
+  }
 
   err = esp_base_mac_addr_set(baseMac);
   if (err != ESP_OK) {
@@ -257,13 +293,14 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   }
 
   Serial.printf(
-      "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
+      "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X source=%s\n",
       baseMac[0],
       baseMac[1],
       baseMac[2],
       baseMac[3],
       baseMac[4],
-      baseMac[5]);
+      baseMac[5],
+      baseMacSource);
   return true;
 }
 
@@ -387,6 +424,7 @@ void ClassicBtControllerTransport::clearConnectionState() {
   lastSendReportReason_ = 0;
   lastSendReportId_ = 0;
   reportCongested_ = false;
+  consecutiveSendReportFailures_ = 0;
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
 }
@@ -563,13 +601,29 @@ void ClassicBtControllerTransport::ensureSendTask() {
       0);
 }
 
+uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
+  if (!connected_ && !paired_) {
+    return kIdleDisconnectedReportIntervalMs;
+  }
+
+  if (reportCongested_ || consecutiveSendReportFailures_ >= 3) {
+    return kIdleCongestedReportIntervalMs;
+  }
+
+  if (!paired_ || !authComplete_) {
+    return kIdlePrePairingReportIntervalMs;
+  }
+
+  return kIdleConnectedReportIntervalMs;
+}
+
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   while (true) {
     if (!transport->explicitInputActive_) {
       transport->sendCurrentInputReport(false);
     }
-    vTaskDelay(pdMS_TO_TICKS((transport->connected_ || transport->paired_) ? 15 : 100));
+    vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
   }
 }
 
@@ -627,6 +681,8 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   pairingComplete_ = false;
   paired_ = false;
   discoverable_ = true;
+  reportCongested_ = false;
+  consecutiveSendReportFailures_ = 0;
   lastDropReason_ = reason;
   clearInputs();
 
@@ -736,6 +792,9 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure) {
       const_cast<uint8_t *>(payload));
   if (err != ESP_OK) {
     sendReportFailureCount_ += 1;
+    if (consecutiveSendReportFailures_ < UINT8_MAX) {
+      consecutiveSendReportFailures_ += 1;
+    }
     lastSendReportStatus_ = static_cast<int>(err);
     lastSendReportReason_ = 0;
     lastSendReportId_ = 0x30;
@@ -968,7 +1027,9 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
       if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
         std::memcpy(lastPeerAddress_, param->auth_cmpl.bda, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
-        attemptVirtualCablePlug(lastPeerAddress_, "auth-complete");
+        // Let Switch initiate the HID control channel after authentication.
+        // Proactively opening a virtual cable here can race with the host's own
+        // incoming CTRL connection and trigger invalid-state rejects.
       }
       break;
     case ESP_BT_GAP_MODE_CHG_EVT:
@@ -1037,6 +1098,8 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                    param->open.conn_status == ESP_HIDD_CONN_STATE_CONNECTED;
       readyForReports_ = connected_ && appRegistered_ && hidReady_;
       discoverable_ = !connected_;
+      reportCongested_ = false;
+      consecutiveSendReportFailures_ = 0;
       if (connected_) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
@@ -1062,6 +1125,11 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
     case ESP_HIDD_SEND_REPORT_EVT:
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
         sendReportFailureCount_ += 1;
+        if (consecutiveSendReportFailures_ < UINT8_MAX) {
+          consecutiveSendReportFailures_ += 1;
+        }
+      } else {
+        consecutiveSendReportFailures_ = 0;
       }
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;

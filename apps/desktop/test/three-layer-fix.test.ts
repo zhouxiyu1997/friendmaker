@@ -10,7 +10,10 @@ import { pixelizeImage } from "../src/image/pixelize.js";
 import { renderPreviewToBuffer } from "../src/image/renderPreview.js";
 import { generateScanlineCommands } from "../src/path/scanline.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
-import { getAckTimeoutForCommand } from "../src/serial/sender.js";
+import {
+  getAckTimeoutForCommand,
+  isCongestedControllerSendReportLine,
+} from "../src/serial/sender.js";
 import { SimulatedAckSender } from "../src/simulator/sender.js";
 import type { BrushSize, DrawingMask, DrawingProfile, Pixel, PixelMap, RawImageData } from "../src/types.js";
 
@@ -363,4 +366,25 @@ test("controller input report failures are not retried", async () => {
   );
 
   assert.equal(lines.some((line) => line.startsWith("WARN retry")), false);
+});
+
+test("congested controller send-report warnings are recognized as execution-fatal", () => {
+  assert.equal(
+    isCongestedControllerSendReportLine(
+      "WARN bt hid event=send-report status=1 reason=8 report=48",
+    ),
+    true,
+  );
+  assert.equal(
+    isCongestedControllerSendReportLine(
+      "WARN bt hid event=send-report status=1 reason=8 report=33",
+    ),
+    false,
+  );
+  assert.equal(
+    isCongestedControllerSendReportLine(
+      "INFO bt hid event=send-report status=1 reason=8 report=48",
+    ),
+    false,
+  );
 });

@@ -145,7 +145,7 @@ const FIRMWARE_ENVIRONMENTS = [
   {
     id: "esp32dev_wireless",
     label: "ESP32-WROOM-32 / ESP-32S",
-    description: "推荐主线，最终用于 Bluetooth Classic 模拟 Switch Pro 手柄。",
+    description: "推荐主线，显式兼容常见 2MB flash 通用板，最终用于 Bluetooth Classic 模拟 Switch Pro 手柄。",
     recommended: true,
   },
   {
@@ -187,6 +187,7 @@ interface ManagedExecution {
   sender: SenderControls | null;
   progressMap: number[] | null;
   recoverySession: RecoverySessionRecord | null;
+  completionPromise: Promise<void> | null;
 }
 
 let executionCounter = 0;
@@ -208,6 +209,7 @@ function createEmptyExecution(): ManagedExecution {
     sender: null,
     progressMap: null,
     recoverySession: null,
+    completionPromise: null,
   };
 }
 
@@ -217,7 +219,32 @@ function resetManagedExecutionState(): void {
   managedExecution = createEmptyExecution();
 }
 
-class ManagedSerialSessionSender implements SenderControls {
+const SELECTED_UPLOAD_PORT_RETRY_GUIDANCE =
+  "Reconnect the board, make sure no other app is using the port, or choose a different port and retry.";
+
+export function formatMissingSelectedUploadPortMessage(selectedPortPath: string): string {
+  return `Selected port ${selectedPortPath} is no longer detected. Reconnect the board or choose a different port and retry.`;
+}
+
+export function formatSelectedUploadPortFailureMessage(
+  selectedPortPath: string,
+  message: string,
+): string {
+  return `Upload failed on the selected port ${selectedPortPath}. ${message} ${SELECTED_UPLOAD_PORT_RETRY_GUIDANCE}`;
+}
+
+function validateSelectedUploadPort(
+  selectedPortPath: string,
+  detectedPortPaths: string[],
+): string | null {
+  if (detectedPortPaths.length === 0 || detectedPortPaths.includes(selectedPortPath)) {
+    return null;
+  }
+
+  return formatMissingSelectedUploadPortMessage(selectedPortPath);
+}
+
+export class ManagedSerialSessionSender implements SenderControls {
   private paused = false;
   private stopped = false;
   private interruptAckWait: (() => void) | null = null;
@@ -233,15 +260,19 @@ class ManagedSerialSessionSender implements SenderControls {
   }
 
   stop(): void {
-    this.stopped = true;
+    this.requestStop();
   }
 
   forceStop(): void {
+    this.requestStop();
+  }
+
+  private requestStop(): void {
     this.stopped = true;
     this.interruptAckWait?.();
     this.interruptAckWait = null;
     void this.sessionManager.disconnect({ force: true }).catch(() => {
-      // Forced stop uses disconnect only to interrupt a blocking ACK wait.
+      // Stop uses disconnect only to interrupt a blocking ACK wait immediately.
     });
   }
 
@@ -586,22 +617,17 @@ class FirmwareFlashManager {
       }
 
       const detectedPortPaths = await this.listDetectedPorts();
-      const selectedPortDetected =
-        detectedPortPaths.length === 0 || detectedPortPaths.includes(selectedPortPath);
+      const selectedPortValidationError = validateSelectedUploadPort(
+        selectedPortPath,
+        detectedPortPaths,
+      );
 
       if (this.cancelRequested) {
         throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
       }
 
-      if (!selectedPortDetected) {
-        this.state.uploadPortPath = null;
-        this.state.fallbackToAutoDetect = true;
-        this.appendLine(
-          `WARN selected port ${selectedPortPath} is no longer detected. Falling back to PlatformIO auto-detect.`,
-        );
-        await this.runPlatformIoUpload(environment.id, null);
-        this.finish("completed", null);
-        return;
+      if (selectedPortValidationError) {
+        throw new Error(selectedPortValidationError);
       }
 
       this.state.uploadPortPath = selectedPortPath;
@@ -619,18 +645,7 @@ class FirmwareFlashManager {
         if (!isUploadPortFailure(message)) {
           throw error;
         }
-
-        if (this.cancelRequested) {
-          throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
-        }
-
-        this.state.uploadPortPath = null;
-        this.state.fallbackToAutoDetect = true;
-        this.appendLine(
-          `WARN upload on ${selectedPortPath} failed with a port-related error. Retrying with PlatformIO auto-detect.`,
-        );
-        await this.runPlatformIoUpload(environment.id, null);
-        this.finish("completed", null);
+        throw new Error(formatSelectedUploadPortFailureMessage(selectedPortPath, message));
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1331,11 +1346,12 @@ async function startManagedExecution(body: {
     sender,
     progressMap: body.progressMap ?? null,
     recoverySession: body.recoverySession ?? null,
+    completionPromise: null,
   };
 
   managedExecution = execution;
 
-  void runManagedExecution(
+  const completionPromise = runManagedExecution(
     execution,
     withDefined({
       commands: body.commands,
@@ -1357,6 +1373,7 @@ async function startManagedExecution(body: {
       errorAtCommand?: number;
     },
   );
+  execution.completionPromise = completionPromise;
 
   return snapshotManagedExecution(execution);
 }
@@ -1720,20 +1737,19 @@ async function handleExecutionStop(response: ServerResponse): Promise<void> {
 
 async function handleExecutionReset(response: ServerResponse): Promise<void> {
   try {
-    if (managedExecution.sender) {
-      if (managedExecution.sender instanceof ManagedSerialSessionSender) {
-        managedExecution.sender.forceStop();
-      } else {
-        managedExecution.sender.stop();
-      }
-    }
+    const executionToReset = managedExecution;
 
-    if (managedExecution.recoverySession) {
-      applyRecoveryProgress(managedExecution.recoverySession, managedExecution.completedCommands);
-      await updateRecoverySessionStatus(
-        managedExecution,
-        resolveRecoveryTerminalStatus(managedExecution),
-      );
+    if (executionToReset.sender) {
+      executionToReset.status = "stopping";
+      appendManagedExecutionLine(executionToReset, "INFO execution reset requested");
+
+      if (executionToReset.sender instanceof ManagedSerialSessionSender) {
+        executionToReset.sender.forceStop();
+      } else {
+        executionToReset.sender.stop();
+      }
+
+      await executionToReset.completionPromise;
     }
 
     resetManagedExecutionState();

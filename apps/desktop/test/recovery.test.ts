@@ -289,6 +289,52 @@ test("recovery cleanup removes expired completed sessions and orphaned command f
   }
 });
 
+test("recovery sessions keep unique job ids even within the same millisecond", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-unique-"));
+  const profile = makeProfile({ canvasWidth: 5, canvasHeight: 1 });
+  const pixelMap = makePixelMap(5, 1, [
+    { x: 2, y: 0, colorIndex: 0, colorHex: "#000000" },
+  ]);
+  const scanlinePlan = generateScanlinePlan(pixelMap, profile);
+  const commands = serializeCommands(scanlinePlan.commands);
+  const store = new RecoverySessionStore(recoverySessionsRoot);
+  const originalNow = Date.now;
+
+  Date.now = () => 1_714_816_800_000;
+
+  try {
+    const first = await store.createSession({
+      commands,
+      resumePlan: scanlinePlan.resumePlan,
+      sourceLabel: "same-image.png",
+      profileSummary: makeRecoveryProfileSummary(profile),
+      serialOptions: {
+        baudRate: profile.baudRate,
+        ackTimeoutMs: profile.ackTimeoutMs,
+        retries: profile.commandRetryCount,
+      },
+    });
+    const second = await store.createSession({
+      commands,
+      resumePlan: scanlinePlan.resumePlan,
+      sourceLabel: "same-image.png",
+      profileSummary: makeRecoveryProfileSummary(profile),
+      serialOptions: {
+        baudRate: profile.baudRate,
+        ackTimeoutMs: profile.ackTimeoutMs,
+        retries: profile.commandRetryCount,
+      },
+    });
+    const sessions = await store.listSessions();
+
+    assert.notEqual(first.jobId, second.jobId);
+    assert.equal(sessions.length, 2);
+  } finally {
+    Date.now = originalNow;
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
 test("startup cleanup converts stale running sessions into recoverable sessions", async () => {
   const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-startup-"));
   const profile = makeProfile({ canvasWidth: 5, canvasHeight: 1 });
@@ -466,6 +512,78 @@ test("recovery session API persists visible files across restarts and can discar
 
     if (secondServer) {
       await secondServer.close();
+    }
+
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("execution reset keeps unfinished recovery sessions recoverable", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-reset-"));
+  const profile = makeProfile({ canvasWidth: 6, canvasHeight: 1 });
+  const pixelMap = makePixelMap(6, 1, [
+    { x: 1, y: 0, colorIndex: 0, colorHex: "#000000" },
+    { x: 4, y: 0, colorIndex: 0, colorHex: "#000000" },
+  ]);
+  const scanlinePlan = generateScanlinePlan(pixelMap, profile);
+  const commands = serializeCommands(scanlinePlan.commands);
+  const requestBody = {
+    target: "simulate",
+    commands,
+    ackDelayMs: 200,
+    resumePlan: scanlinePlan.resumePlan,
+    sourceLabel: "reset-demo.png",
+    profileSummary: makeRecoveryProfileSummary(profile),
+  };
+
+  let server: Awaited<ReturnType<typeof startWebServer>> | null = null;
+
+  try {
+    server = await startWebServer({ port: 0, recoverySessionsRoot });
+    const startResponse = await fetch(`${server.url}/api/execution/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+    assert.equal(startResponse.ok, true);
+    const startPayload = (await startResponse.json()) as {
+      recoverySession?: { jobId: string };
+    };
+
+    assert.ok(startPayload.recoverySession);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const resetResponse = await fetch(`${server.url}/api/execution/reset`, {
+      method: "POST",
+    });
+    assert.equal(resetResponse.ok, true);
+    const resetPayload = (await resetResponse.json()) as {
+      execution?: { status?: string };
+    };
+
+    assert.equal(resetPayload.execution?.status, "idle");
+
+    const sessionsResponse = await fetch(`${server.url}/api/recovery/sessions`);
+    assert.equal(sessionsResponse.ok, true);
+    const sessionsPayload = (await sessionsResponse.json()) as {
+      sessions?: Array<{
+        jobId: string;
+        status: string;
+        completedCommands: number;
+        nextResumeSegmentIndex: number | null;
+      }>;
+    };
+    const session = sessionsPayload.sessions?.find(
+      (item) => item.jobId === startPayload.recoverySession?.jobId,
+    );
+
+    assert.ok(session);
+    assert.equal(session.status, "recoverable");
+    assert.ok(session.completedCommands < commands.length);
+    assert.notEqual(session.nextResumeSegmentIndex, null);
+  } finally {
+    if (server) {
+      await server.close();
     }
 
     await rm(recoverySessionsRoot, { recursive: true, force: true });

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 
 import { deriveResumeProgress } from "../app/recovery.js";
@@ -95,9 +96,12 @@ function createJobId(sourceLabel: string, now = new Date()): string {
     String(now.getHours()).padStart(2, "0"),
     String(now.getMinutes()).padStart(2, "0"),
     String(now.getSeconds()).padStart(2, "0"),
+    "-",
+    String(now.getMilliseconds()).padStart(3, "0"),
   ].join("");
+  const uniqueSuffix = randomBytes(3).toString("hex");
 
-  return `${timestamp}-${sanitizeLabelSegment(path.basename(sourceLabel))}`;
+  return `${timestamp}-${uniqueSuffix}-${sanitizeLabelSegment(path.basename(sourceLabel))}`;
 }
 
 function toSummary(record: RecoverySessionRecord): RecoverySessionSummary {

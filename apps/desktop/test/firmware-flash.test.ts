@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  formatMissingSelectedUploadPortMessage,
+  formatSelectedUploadPortFailureMessage,
   isUploadPortFailure,
   summarizePlatformIoFailure,
 } from "../src/web/server.js";
@@ -33,5 +36,50 @@ test("isUploadPortFailure recognizes upload-port-specific serial failures", () =
   assert.equal(
     isUploadPortFailure("Compiling .pio/build/esp32dev_wireless/src/main.cpp.o"),
     false,
+  );
+});
+
+test("firmware flash keeps the user on the selected upload port when that port disappears", () => {
+  assert.equal(
+    formatMissingSelectedUploadPortMessage("COM7"),
+    "Selected port COM7 is no longer detected. Reconnect the board or choose a different port and retry.",
+  );
+});
+
+test("firmware flash reports port-specific upload failures without switching to auto-detect", () => {
+  assert.equal(
+    formatSelectedUploadPortFailureMessage(
+      "COM7",
+      "could not open port 'COM7': Permission denied",
+    ),
+    "Upload failed on the selected port COM7. could not open port 'COM7': Permission denied Reconnect the board, make sure no other app is using the port, or choose a different port and retry.",
+  );
+});
+
+test("esp32 wireless firmware keeps a 2MB-compatible upload header for generic boards", async () => {
+  const platformioSource = await readFile(
+    new URL("../../../firmware/esp32/platformio.ini", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    platformioSource,
+    /\[env:esp32dev_wireless\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB/u,
+  );
+});
+
+test("controller firmware keeps bluetooth identity stable and waits for host HID open after auth", async () => {
+  const firmwareSource = await readFile(
+    new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    firmwareSource,
+    /deriveDeterministicBaseMac[\s\S]*source=%s/u,
+  );
+  assert.doesNotMatch(
+    firmwareSource,
+    /ESP_BT_GAP_AUTH_CMPL_EVT[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "auth-complete"\)/u,
   );
 });

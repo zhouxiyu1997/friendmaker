@@ -136,6 +136,7 @@ const state = {
   controller: {
     busy: false,
     target: "serial",
+    autoReconnectAttempted: false,
     status: {
       tone: "idle",
       pill: "待连接",
@@ -156,6 +157,15 @@ const state = {
       connectedValue: null,
       pairedValue: null,
       readyValue: null,
+      rawReadyValue: null,
+      readyInferredValue: false,
+      unstableValue: false,
+      reconnectRecommendedValue: false,
+      sendReportFailureCount: 0,
+      lastSendReportStatus: null,
+      lastSendReportReason: null,
+      lastAclDisconnectReason: null,
+      lastDropReason: "-",
       updatedAt: null,
     },
   },
@@ -1194,8 +1204,12 @@ function formatFirmwarePortLabel(flash) {
     return flash.uploadPortPath;
   }
 
-  if (flash?.selectedPortPath) {
+  if (flash?.fallbackToAutoDetect && flash?.selectedPortPath) {
     return `自动检测（初始选择 ${flash.selectedPortPath}）`;
+  }
+
+  if (flash?.selectedPortPath) {
+    return flash.selectedPortPath;
   }
 
   return "-";
@@ -1213,7 +1227,7 @@ function updateFirmwareResultFromFlashSnapshot(flash) {
       ? "固定端口刷入失败，正在改用 PlatformIO 自动探测可用端口重试。"
       : flash.uploadPortPath
         ? "PlatformIO 正在按当前选中的串口编译并上传固件，请稍等片刻。"
-        : "PlatformIO 正在自动探测可用串口并上传固件，请稍等片刻。";
+        : "PlatformIO 正在准备按当前选中的串口上传固件，请稍等片刻。";
     setFirmwareResult({
       status: "running",
       title: "正在刷入固件",
@@ -1593,6 +1607,7 @@ function stopWindowsSerialDriverPolling() {
 }
 
 els.controllerInfoButton.addEventListener("click", async () => {
+  state.controller.autoReconnectAttempted = false;
   setControllerPendingStatus({
     title: "正在检查当前手柄状态",
     detail: "正在读取开发板当前蓝牙状态；如果已经连上 Switch，会直接复用当前连接。",
@@ -1628,6 +1643,7 @@ els.controllerInfoButton.addEventListener("click", async () => {
 });
 
 els.controllerResetButton.addEventListener("click", async () => {
+  state.controller.autoReconnectAttempted = false;
   setControllerPendingStatus({
     title: "正在重置手柄蓝牙",
     detail: "正在重启蓝牙协议栈并读取最新状态，请稍等片刻。",
@@ -1643,6 +1659,7 @@ els.controllerResetButton.addEventListener("click", async () => {
 els.controllerDisconnectButton.addEventListener("click", async () => {
   setControllerBusy(true);
   stopControllerStatusPolling();
+  state.controller.autoReconnectAttempted = false;
 
   try {
     const response = await fetch("/api/serial-session/disconnect", {
@@ -2203,6 +2220,15 @@ function setControllerPendingStatus({ title, detail }) {
     connectedValue: null,
     pairedValue: null,
     readyValue: false,
+    rawReadyValue: null,
+    readyInferredValue: false,
+    unstableValue: false,
+    reconnectRecommendedValue: false,
+    sendReportFailureCount: 0,
+    lastSendReportStatus: null,
+    lastSendReportReason: null,
+    lastAclDisconnectReason: null,
+    lastDropReason: "-",
     initStep: "-",
     initError: "-",
   });
@@ -2294,6 +2320,36 @@ async function pollControllerStatus() {
   if (!ok) {
     stopControllerStatusPolling();
     appendLog(els.controllerLogOutput, "读取手柄状态失败，请重新点击“连接手柄”后再试。");
+    return;
+  }
+
+  if (state.controller.status.reconnectRecommendedValue === true) {
+    stopControllerStatusPolling();
+
+    if (!state.controller.autoReconnectAttempted) {
+      state.controller.autoReconnectAttempted = true;
+      appendLog(
+        els.controllerLogOutput,
+        "检测到手柄已经连上但报告通道持续拥塞，自动重置蓝牙并重试一次。",
+      );
+      setControllerPendingStatus({
+        title: "正在自动恢复手柄连接",
+        detail: "检测到当前连接容易立刻断联，正在重置蓝牙并重新进入可发现状态。",
+      });
+
+      const payload = await runControllerCommands(["BT RESET", "I"], "自动恢复手柄连接");
+
+      if (payload) {
+        startControllerStatusPolling();
+      }
+
+      return;
+    }
+
+    appendLog(
+      els.controllerLogOutput,
+      "自动重试后连接仍然不稳定。请重新点击“连接手柄”；如果还是容易断联，再按一下开发板上的 EN 键后重试。",
+    );
     return;
   }
 

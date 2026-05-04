@@ -24,6 +24,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   void setLeftStickFromVector(int x, int y);
   void updateInputReport();
   void ensureSendTask();
+  uint16_t idleSendIntervalMs() const;
   bool isHidReportChannelOpen() const;
   bool isControllerInputReady() const;
   bool sendCurrentInputReport(bool logFailure);
@@ -79,6 +80,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   uint8_t lastSendReportReason_ = 0;
   uint8_t lastSendReportId_ = 0;
   bool reportCongested_ = false;
+  uint8_t consecutiveSendReportFailures_ = 0;
   uint32_t sendReportFailureCount_ = 0;
   const char *lastDropReason_ = "none";
 };

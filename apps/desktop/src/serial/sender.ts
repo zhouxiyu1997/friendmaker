@@ -18,6 +18,7 @@ import type { ProgressUpdate, SenderControls } from "../types.js";
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
 const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
+const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
 const COLOR_PALETTE_SLOT_COUNT = 9;
 const COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
 const COLOR_PALETTE_MENU_PRESS_DURATION_MS = 90;
@@ -195,6 +196,17 @@ function getEmbeddedDeviceLine(line: string): string | null {
   return DEVICE_LINE_PREFIXES.some((prefix) => candidate.startsWith(prefix)) ? candidate : null;
 }
 
+export function isCongestedControllerSendReportLine(line: string): boolean {
+  const match =
+    /^WARN bt hid event=send-report status=(\d+) reason=(\d+) report=(\d+)$/u.exec(line.trim());
+
+  if (!match?.[1] || !match[2] || !match[3]) {
+    return false;
+  }
+
+  return match[1] !== "0" && match[2] === "8" && match[3] === "48";
+}
+
 function waitForAck(
   parser: ReadlineParser,
   port: SerialPort,
@@ -215,6 +227,7 @@ function waitForAck(
     }
 
     let settled = false;
+    let congestedControllerSendReportCount = 0;
 
     const finish = (callback: () => void) => {
       if (settled) {
@@ -273,6 +286,15 @@ function waitForAck(
           ),
         );
         return;
+      }
+
+      if (isCongestedControllerSendReportLine(line)) {
+        congestedControllerSendReportCount += 1;
+
+        if (congestedControllerSendReportCount >= CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD) {
+          finish(() => reject(new Error("controller input report failed")));
+          return;
+        }
       }
 
       options?.onDeviceLine?.(line);
