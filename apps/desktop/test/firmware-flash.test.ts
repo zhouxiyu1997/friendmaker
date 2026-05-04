@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -33,5 +34,33 @@ test("isUploadPortFailure recognizes upload-port-specific serial failures", () =
   assert.equal(
     isUploadPortFailure("Compiling .pio/build/esp32dev_wireless/src/main.cpp.o"),
     false,
+  );
+});
+
+test("esp32 wireless firmware keeps a 2MB-compatible upload header for generic boards", async () => {
+  const platformioSource = await readFile(
+    new URL("../../../firmware/esp32/platformio.ini", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    platformioSource,
+    /\[env:esp32dev_wireless\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB/u,
+  );
+});
+
+test("controller firmware keeps bluetooth identity stable and waits for host HID open after auth", async () => {
+  const firmwareSource = await readFile(
+    new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    firmwareSource,
+    /deriveDeterministicBaseMac[\s\S]*source=%s/u,
+  );
+  assert.doesNotMatch(
+    firmwareSource,
+    /ESP_BT_GAP_AUTH_CMPL_EVT[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "auth-complete"\)/u,
   );
 });

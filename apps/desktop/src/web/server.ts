@@ -145,7 +145,7 @@ const FIRMWARE_ENVIRONMENTS = [
   {
     id: "esp32dev_wireless",
     label: "ESP32-WROOM-32 / ESP-32S",
-    description: "推荐主线，最终用于 Bluetooth Classic 模拟 Switch Pro 手柄。",
+    description: "推荐主线，显式兼容常见 2MB flash 通用板，最终用于 Bluetooth Classic 模拟 Switch Pro 手柄。",
     recommended: true,
   },
   {

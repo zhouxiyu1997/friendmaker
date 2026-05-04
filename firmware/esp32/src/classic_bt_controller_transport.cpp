@@ -73,6 +73,27 @@ bool isIgnorableBluetoothError(esp_err_t err) {
   return err == ESP_OK || err == ESP_ERR_INVALID_STATE;
 }
 
+bool deriveDeterministicBaseMac(uint8_t baseMac[6]) {
+  uint8_t factoryMac[6] = {};
+  const esp_err_t err = esp_efuse_mac_get_default(factoryMac);
+
+  if (err != ESP_OK) {
+    Serial.printf("WARN efuse_mac_get_default failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  // Keep the Nintendo-like OUI we already expose to Switch, but derive the
+  // device-specific suffix from the chip eFuse so the controller identity stays
+  // stable even if the user reflashes or the NVS namespace is rebuilt.
+  baseMac[0] = 0xD4;
+  baseMac[1] = 0xF0;
+  baseMac[2] = 0x57;
+  baseMac[3] = factoryMac[3];
+  baseMac[4] = factoryMac[4];
+  baseMac[5] = factoryMac[5];
+  return true;
+}
+
 String formatBluetoothAddress(const uint8_t address[6]) {
   char buffer[18];
   std::snprintf(
@@ -221,38 +242,49 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
     return false;
   }
 
+  uint8_t baseMac[6] = {};
+  const char *baseMacSource = "efuse-derived";
+  bool shouldPersistDerivedMac = false;
   nvs_handle handle;
   err = nvs_open("storage", NVS_READWRITE, &handle);
-  if (err != ESP_OK) {
-    Serial.printf("WARN nvs_open failed err=%s\n", esp_err_to_name(err));
-    return false;
+  if (err == ESP_OK) {
+    size_t size = sizeof(baseMac);
+    err = nvs_get_blob(handle, "mac_addr", baseMac, &size);
+    if (err == ESP_OK && size == sizeof(baseMac)) {
+      baseMacSource = "nvs";
+    } else {
+      if (!deriveDeterministicBaseMac(baseMac)) {
+        nvs_close(handle);
+        return false;
+      }
+      shouldPersistDerivedMac = true;
+    }
+  } else {
+    Serial.printf(
+        "WARN nvs_open failed err=%s; using deterministic base mac fallback\n",
+        esp_err_to_name(err));
+    if (!deriveDeterministicBaseMac(baseMac)) {
+      return false;
+    }
   }
 
-  uint8_t baseMac[6] = {};
-  size_t size = sizeof(baseMac);
-  err = nvs_get_blob(handle, "mac_addr", baseMac, &size);
-  if (err != ESP_OK || size != sizeof(baseMac)) {
-    baseMac[0] = 0xD4;
-    baseMac[1] = 0xF0;
-    baseMac[2] = 0x57;
-    for (size_t index = 3; index < sizeof(baseMac); index += 1) {
-      baseMac[index] = static_cast<uint8_t>(esp_random() & 0xFF);
-    }
+  if (shouldPersistDerivedMac) {
     err = nvs_set_blob(handle, "mac_addr", baseMac, sizeof(baseMac));
     if (err != ESP_OK) {
-      nvs_close(handle);
       Serial.printf("WARN nvs_set_blob failed err=%s\n", esp_err_to_name(err));
-      return false;
-    }
-    err = nvs_commit(handle);
-    if (err != ESP_OK) {
-      nvs_close(handle);
-      Serial.printf("WARN nvs_commit failed err=%s\n", esp_err_to_name(err));
-      return false;
+    } else {
+      err = nvs_commit(handle);
+      if (err != ESP_OK) {
+        Serial.printf("WARN nvs_commit failed err=%s\n", esp_err_to_name(err));
+      }
     }
   }
 
-  nvs_close(handle);
+  if (baseMacSource == "nvs") {
+    nvs_close(handle);
+  } else if (err == ESP_OK || shouldPersistDerivedMac) {
+    nvs_close(handle);
+  }
 
   err = esp_base_mac_addr_set(baseMac);
   if (err != ESP_OK) {
@@ -261,13 +293,14 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   }
 
   Serial.printf(
-      "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
+      "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X source=%s\n",
       baseMac[0],
       baseMac[1],
       baseMac[2],
       baseMac[3],
       baseMac[4],
-      baseMac[5]);
+      baseMac[5],
+      baseMacSource);
   return true;
 }
 
@@ -994,7 +1027,9 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
       if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
         std::memcpy(lastPeerAddress_, param->auth_cmpl.bda, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
-        attemptVirtualCablePlug(lastPeerAddress_, "auth-complete");
+        // Let Switch initiate the HID control channel after authentication.
+        // Proactively opening a virtual cable here can race with the host's own
+        // incoming CTRL connection and trigger invalid-state rejects.
       }
       break;
     case ESP_BT_GAP_MODE_CHG_EVT:
