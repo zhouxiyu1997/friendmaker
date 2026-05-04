@@ -422,14 +422,15 @@ const TIMING_BENCHMARK_MODES = {
   },
   repro: {
     buttonLabel: "6 行 x 240",
-    title: "真实长程复现（6 行 x 240 点阵）",
+    title: "真实长程复现（以中心为基准的 6 行 x 240 点阵）",
     pattern: "dot-matrix",
     rowCount: 6,
     columnCount: 240,
+    centerAroundCurrent: true,
     confirmMessage:
-      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。这个基准会连续画 6 行 x 240 点，共 1440 次落笔、2879 条动作，专门复现长直线和蛇形换行后的慢性偏移。现在开始运行 6 行 x 240 点阵复现基准吗？",
+      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。这个基准会先以当前中心为中线左移到起画点，再连续画 6 行 x 240 点，共 1440 次落笔、2998 条动作，专门复现长直线和蛇形换行后的慢性偏移。现在开始运行 6 行 x 240 点阵复现基准吗？",
     runningDetail:
-      "正在跑真实长程复现（6 行 x 240 点阵）。请重点观察每行后半段、换行后的首点，以及长时间连续落笔后有没有慢性累积偏移。",
+      "正在跑真实长程复现（以中心为基准的 6 行 x 240 点阵）。请重点观察每行后半段、换行后的首点，以及长时间连续落笔后有没有慢性累积偏移。",
     successDetail:
       "真实长程复现已经跑完。请重点看长直线末段、蛇形换行处和最后几行是否仍然整齐，这一档最接近真实问题场景。",
   },
@@ -3279,12 +3280,22 @@ function buildSquareSpiralBenchmarkCommands(spiralDepth) {
   return commands;
 }
 
-function buildDotMatrixBenchmarkCommands(rowCount, columnCount) {
+function buildDotMatrixBenchmarkCommands(rowCount, columnCount, options = {}) {
   if (rowCount <= 0 || columnCount <= 0) {
     return [];
   }
 
-  const commands = ["P"];
+  const commands = [];
+
+  if (options.centerAroundCurrent === true && columnCount > 1) {
+    const centeringMoves = Math.floor((columnCount - 1) / 2);
+
+    for (let step = 0; step < centeringMoves; step += 1) {
+      commands.push("M -1 0");
+    }
+  }
+
+  commands.push("P");
 
   for (let row = 0; row < rowCount; row += 1) {
     const horizontalStep = row % 2 === 0 ? 1 : -1;
@@ -3305,7 +3316,9 @@ function buildDotMatrixBenchmarkCommands(rowCount, columnCount) {
 
 function buildTimingBenchmarkCommands(mode) {
   if (mode.pattern === "dot-matrix") {
-    return buildDotMatrixBenchmarkCommands(mode.rowCount ?? 0, mode.columnCount ?? 0);
+    return buildDotMatrixBenchmarkCommands(mode.rowCount ?? 0, mode.columnCount ?? 0, {
+      centerAroundCurrent: mode.centerAroundCurrent === true,
+    });
   }
 
   return buildSquareSpiralBenchmarkCommands(mode.spiralDepth ?? 0);
@@ -3880,12 +3893,16 @@ function getTimingBenchmarkActionCount(mode) {
   if (mode.pattern === "dot-matrix") {
     const rowCount = Math.max(0, Math.round(mode.rowCount ?? 0));
     const columnCount = Math.max(0, Math.round(mode.columnCount ?? 0));
+    const centeringMoves =
+      mode.centerAroundCurrent === true && columnCount > 1
+        ? Math.floor((columnCount - 1) / 2)
+        : 0;
 
     if (rowCount === 0 || columnCount === 0) {
       return 0;
     }
 
-    return 2 * rowCount * columnCount - 1;
+    return centeringMoves + 2 * rowCount * columnCount - 1;
   }
 
   const spiralDepth = Math.max(0, Math.round(mode.spiralDepth ?? 0));

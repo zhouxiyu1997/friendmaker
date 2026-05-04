@@ -738,7 +738,7 @@
           <div class="page-intro-copy">
             <p class="page-kicker">调试测速</p>
             <h2>按现象调参数，不用背英文名</h2>
-            <p>这页把两个 timing 翻译成更好理解的“稳定等待”和“按键保持”。先做小动作，再跑快速检查，最后用 6 行 x 240 点阵做长程复现。</p>
+            <p>这页把两个 timing 翻译成更好理解的“稳定等待”和“按键保持”。先做小动作，再跑快速检查，最后用以中心为基准的 6 行 x 240 点阵做长程复现。</p>
           </div>
           <div class="page-step-row" aria-label="调试测速步骤">
             <span class="page-step">1. 先试 1 格</span>
@@ -782,7 +782,7 @@
                     <span class="timing-flow-index">3</span>
                     <div>
                       <strong>从短测跑到长测</strong>
-                      <p>先跑快速检查，再看累计漂移，最后用 6 行 x 240 点阵做真实复现。</p>
+                      <p>先跑快速检查，再看累计漂移，最后用以中心为基准的 6 行 x 240 点阵做真实复现。</p>
                     </div>
                   </article>
                 </div>
@@ -812,7 +812,7 @@
 
                   <article class="timing-symptom-item">
                     <strong>长测后才开始漂</strong>
-                    <p>直接跑 6 行 x 240 点阵，看长直线末段和换行处是不是开始错位。</p>
+                    <p>直接跑以中心为基准的 6 行 x 240 点阵，看长直线末段和换行处是不是开始错位。</p>
                   </article>
                 </div>
               </article>
@@ -951,7 +951,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>再选一个测试</h2>
-              <p>从左到右越来越严格。先跑快速检查，再看累计漂移，最后再用 6 行 x 240 点阵复现真实长程问题。</p>
+              <p>从左到右越来越严格。先跑快速检查，再看累计漂移，最后再用以中心为基准的 6 行 x 240 点阵复现真实长程问题。</p>
             </div>
 
             <div class="timing-benchmark-grid">
@@ -980,8 +980,8 @@
                   <span class="timing-guide-badge">最后复现</span>
                   <h3>真实长程复现</h3>
                 </div>
-                <p>6 行 x 240 点阵。最适合复现长直线、换行后才出现的慢性偏移。</p>
-                <p id="timing-benchmark-repro-summary" class="timing-benchmark-summary">约 5.3 分钟 · 2879 动作</p>
+                <p>以中心为基准的 6 行 x 240 点阵。最适合复现长直线、换行后才出现的慢性偏移。</p>
+                <p id="timing-benchmark-repro-summary" class="timing-benchmark-summary">约 5.5 分钟 · 2998 动作</p>
                 <button id="timing-repro-benchmark-button" class="ghost" type="button">运行 6 行 x 240</button>
               </article>
             </div>
