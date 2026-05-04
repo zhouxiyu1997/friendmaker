@@ -24,10 +24,11 @@
 `朋友制作器` 是一个面向 `macOS / Windows + ESP32-WROOM-32 / ESP-32S` 的自动绘制工具。  
 它会将图片转换成像素网格和手柄动作脚本，再通过 ESP32 模拟 Switch Pro Controller 输入，在游戏画板中自动完成绘制。当前版本主要面向《朋友收集：梦想生活》与 `Tomodachi Life` 的绘图场景。
 
-这个项目已经历过多轮迭代，当前 README 以最新的 `桌面端三页工作流` 为准：
+这个项目已经历过多轮迭代，当前 README 以最新的 `桌面端四页工作流` 为准：
 
 - `刷入固件`
 - `手柄测试`
+- `调试测速`
 - `脚本生成 / 恢复绘制`
 
 当前最推荐的体验路线仍然是 `单色绘制` 和 `官方色绘制`。  
@@ -66,7 +67,7 @@
 - 支持异形图纸模板裁切与模板预览
 - 支持 `自动扣背景`，适合白底、浅灰底、棋盘格假透明图
 - 通过带 `SEQ <session> <seq>` 去重帧的串口协议将绘制脚本逐条发送给 ESP32，并等待 `ACK`
-- 在界面中完成脚本生成、固件刷写、手柄连接与按钮测试，以及暂停、继续和中断绘制
+- 在界面中完成脚本生成、固件刷写、手柄连接、按钮测试与调试测速，以及暂停、继续和中断绘制
 - 支持本地恢复任务：暂停、中断、异常或应用重启后，仍可从恢复点继续
 
 ### 整体架构
@@ -88,19 +89,22 @@
 
 1. `刷入固件`
 2. `手柄测试`
-3. `脚本生成`
+3. `调试测速`
+4. `脚本生成`
 
 对应的实际动作是：
 
 1. 在 `刷入固件` 页更新推荐固件并确认串口正常
 2. 在 `手柄测试` 页完成蓝牙连接、按钮和方向测试
-3. 回到 `脚本生成` 页导入图片、检查预览并正式开始绘制
+3. 在 `调试测速` 页优先调 `inputDelay`，再微调 `buttonPressDuration`，先把稳定性跑出来
+4. 回到 `脚本生成` 页导入图片、检查预览并正式开始绘制
 
 ### 当前版本定位
 
 - 当前主线已经从早期的“手工脚本 + 命令行试验”迭代到“桌面端闭环工作流”
 - README 默认描述 `桌面端安装包 / 桌面端页面` 的最新行为
 - 与绘图质量和成功率直接相关的能力，会优先以 `输入稳定性` 和 `恢复能力` 为准
+- `inputDelay` 更像稳定性旋钮，`buttonPressDuration` 更像力度旋钮；建议先调稳定，再看速度
 - `自定义多色` 虽然可见、可测试，但暂时不建议作为首次试用路线
 
 ### 绘制模式
@@ -400,10 +404,11 @@ docs/media/          README 展示图片与视频
 `Friend Maker` is an automatic drawing toolkit for `macOS / Windows + ESP32-WROOM-32 / ESP-32S`.  
 It converts images into pixel grids and controller action scripts, then uses an ESP32 to emulate Switch Pro Controller input and draw automatically on the in-game canvas. The current version is primarily tailored for drawing workflows in `Tomodachi Life` and 《朋友收集：梦想生活》.
 
-The project has already gone through many iterations, and this README now follows the latest `desktop three-page workflow`:
+The project has already gone through many iterations, and this README now follows the latest `desktop four-page workflow`:
 
 - `Firmware Flash`
 - `Controller Test`
+- `Timing Tune / Benchmark`
 - `Script Studio / Recovery`
 
 The recommended paths are still `mono drawing` and `official palette drawing`.  
@@ -442,7 +447,7 @@ Reference documents:
 - Support irregular drawing templates and template-aware preview cropping
 - Support `automatic background removal` for white, light gray, and fake transparency checkerboard backgrounds
 - Send drawing commands to the ESP32 over a `SEQ <session> <seq>` deduplicating serial protocol and wait for `ACK`
-- Handle script generation, firmware flashing, controller connection and button testing, plus pause, resume, and stop actions from the shared app interface
+- Handle script generation, firmware flashing, controller connection, button testing, timing tuning, and benchmark actions from the shared app interface
 - Preserve local recovery jobs so paused, interrupted, failed, or restarted sessions can still be resumed from a recovery point
 
 ### Architecture
@@ -464,19 +469,22 @@ The most stable workflow, and the one used by the documentation by default, is:
 
 1. `Flash firmware`
 2. `Test controller`
-3. `Generate script`
+3. `Tune timing`
+4. `Generate script`
 
 The practical actions are:
 
 1. Update the recommended firmware in the `Firmware Flash` page and confirm the serial port works
 2. Complete Bluetooth connection, button tests, and direction tests in the `Controller Test` page
-3. Return to the `Script Studio` page, import an image, review the preview, and start drawing
+3. In the `Timing Tune / Benchmark` page, increase `inputDelay` first, then fine-tune `buttonPressDuration` until the link feels stable
+4. Return to the `Script Studio` page, import an image, review the preview, and start drawing
 
 ### Current Product Focus
 
 - The main path has evolved from early command-line experiments into a desktop-app-centered closed loop
 - This README describes the latest packaged desktop app and page flow by default
 - Features that affect success rate are prioritized around `input stability` and `recovery`
+- `inputDelay` behaves more like a stability knob, while `buttonPressDuration` behaves more like a press-strength knob; tune for stability first, speed second
 - `Custom multicolor` is available for testing, but it is still not the recommended first-run path
 
 ### Drawing Modes

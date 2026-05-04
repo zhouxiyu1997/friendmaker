@@ -19,7 +19,6 @@ import {
   type DrawCommand,
 } from "../protocol/commands.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
-import { DEFAULT_SAFE_INPUT_TIMING } from "../protocol/timing.js";
 
 export type PathStrategy = "scanline" | "nearest";
 export interface GeneratedScanlinePlan {
@@ -748,9 +747,9 @@ export function generateScanlinePlan(
   let segmentIndex = 0;
 
   const inputConfig = inputConfigCommand(
-    DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
-    DEFAULT_SAFE_INPUT_TIMING.inputDelayMs,
-    DEFAULT_SAFE_INPUT_TIMING.homeMs,
+    profile.buttonPressDuration,
+    profile.inputDelay,
+    profile.homeDuration,
   );
   commands.push(inputConfig);
 

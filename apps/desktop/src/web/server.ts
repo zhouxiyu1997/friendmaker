@@ -894,6 +894,14 @@ function normalizeImageOffsetPercent(value: unknown, fallback = 0): number {
   return Math.max(-100, Math.min(100, Math.round(value)));
 }
 
+function normalizePositiveDuration(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.min(60_000, Math.round(value)));
+}
+
 function normalizeRecoveryProfileSummary(value: unknown): ExecutionStartProfileSummary {
   const summary = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
@@ -1024,6 +1032,8 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     palette?: string[];
     previewScale?: number;
     removeBackground?: boolean;
+    inputDelay?: number;
+    buttonPressDuration?: number;
   };
 
   if (!body.imageDataUrl) {
@@ -1060,6 +1070,11 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const profile = {
     ...baseProfile,
     brushSize: normalizeBrushSize(body.brushSize, baseProfile.brushSize),
+    inputDelay: normalizePositiveDuration(body.inputDelay, baseProfile.inputDelay),
+    buttonPressDuration: normalizePositiveDuration(
+      body.buttonPressDuration,
+      baseProfile.buttonPressDuration,
+    ),
   };
   const drawingMask = await loadDrawingTemplateMask(template.id, profile.canvasWidth, profile.canvasHeight);
 
@@ -1094,6 +1109,9 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
       commandRetryCount: profile.commandRetryCount,
+      inputDelay: profile.inputDelay,
+      buttonPressDuration: profile.buttonPressDuration,
+      homeDuration: profile.homeDuration,
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,

@@ -58,6 +58,11 @@ const state = {
     },
     installLineCount: 0,
   },
+  sharedTiming: {
+    inputDelay: 100,
+    buttonPressDuration: 100,
+    homeDuration: 1800,
+  },
   studio: {
     busy: false,
     target: "serial",
@@ -87,6 +92,9 @@ const state = {
       baudRate: 115200,
       ackTimeoutMs: 2000,
       commandRetryCount: 1,
+      inputDelay: 100,
+      buttonPressDuration: 100,
+      homeDuration: 1800,
       templateId: "none",
       templateLabel: "无模板（正方形）",
     },
@@ -166,6 +174,25 @@ const state = {
       lastSendReportReason: null,
       lastAclDisconnectReason: null,
       lastDropReason: "-",
+      updatedAt: null,
+    },
+  },
+  timingLab: {
+    busy: false,
+    quickStep: 1,
+    benchmark: {
+      status: "idle",
+      detail:
+        "点击“运行标准方圈”或“运行长程方圈”后，这里会显示本次 timing、理论动作耗时、实测耗时和平均每动作耗时。",
+      label: "标准扩张方圈",
+      buttonPressDuration: 100,
+      inputDelay: 100,
+      homeDuration: 1800,
+      commandCount: 0,
+      measuredMs: null,
+      theoreticalMs: null,
+      averageMs: null,
+      deviceSummary: "-",
       updatedAt: null,
     },
   },
@@ -260,6 +287,7 @@ const els = {
   firmwareLogOutput: document.getElementById("firmware-log-output"),
   firmwareClearLogButton: document.getElementById("firmware-clear-log-button"),
   controllerPortSelect: document.getElementById("controller-port-select"),
+  controllerTimingHint: document.getElementById("controller-timing-hint"),
   controllerStepSelect: document.getElementById("controller-step-select"),
   controllerRefreshButton: document.getElementById("controller-refresh-button"),
   controllerInfoButton: document.getElementById("controller-info-button"),
@@ -286,6 +314,29 @@ const els = {
   controllerStatusTime: document.getElementById("controller-status-time"),
   controllerLogOutput: document.getElementById("controller-log-output"),
   controllerClearLogButton: document.getElementById("controller-clear-log-button"),
+  timingPortSelect: document.getElementById("timing-port-select"),
+  timingStepSelect: document.getElementById("timing-step-select"),
+  timingInputDelayRange: document.getElementById("timing-input-delay-range"),
+  timingInputDelayInput: document.getElementById("timing-input-delay-input"),
+  timingButtonPressRange: document.getElementById("timing-button-press-range"),
+  timingButtonPressInput: document.getElementById("timing-button-press-input"),
+  timingResetButton: document.getElementById("timing-reset-button"),
+  timingStatusHint: document.getElementById("timing-status-hint"),
+  timingActionButtons: [...document.querySelectorAll("[data-timing-action]")],
+  timingBenchmarkButton: document.getElementById("timing-benchmark-button"),
+  timingLongBenchmarkButton: document.getElementById("timing-long-benchmark-button"),
+  timingBenchmarkCard: document.getElementById("timing-benchmark-card"),
+  timingBenchmarkPill: document.getElementById("timing-benchmark-pill"),
+  timingBenchmarkTitle: document.getElementById("timing-benchmark-title"),
+  timingBenchmarkDetail: document.getElementById("timing-benchmark-detail"),
+  timingBenchmarkTiming: document.getElementById("timing-benchmark-timing"),
+  timingBenchmarkMeasured: document.getElementById("timing-benchmark-measured"),
+  timingBenchmarkTheoretical: document.getElementById("timing-benchmark-theoretical"),
+  timingBenchmarkAverage: document.getElementById("timing-benchmark-average"),
+  timingBenchmarkDeviceSummary: document.getElementById("timing-benchmark-device-summary"),
+  timingBenchmarkTime: document.getElementById("timing-benchmark-time"),
+  timingLogOutput: document.getElementById("timing-log-output"),
+  timingClearLogButton: document.getElementById("timing-clear-log-button"),
 };
 
 let studioExecutionPollTimer = null;
@@ -319,7 +370,48 @@ const STUDIO_IMAGE_OFFSET_LIMITS = {
   max: 100,
 };
 
-const VALID_PAGE_NAMES = new Set(["studio", "firmware", "controller"]);
+const SHARED_TIMING_STORAGE_KEY = "friend-maker.shared-timing";
+const DEFAULT_SHARED_TIMING = {
+  inputDelay: 100,
+  buttonPressDuration: 100,
+  homeDuration: 1800,
+};
+const SHARED_TIMING_LIMITS = {
+  inputDelay: { min: 60, max: 220, step: 10 },
+  buttonPressDuration: { min: 60, max: 160, step: 5 },
+};
+const TIMING_BENCHMARK_DIRECTIONS = [
+  { dx: 1, dy: 0 },
+  { dx: 0, dy: 1 },
+  { dx: -1, dy: 0 },
+  { dx: 0, dy: -1 },
+];
+const TIMING_BENCHMARK_MODES = {
+  standard: {
+    buttonLabel: "标准方圈",
+    title: "标准扩张方圈",
+    spiralDepth: 6,
+    confirmMessage:
+      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。现在开始运行标准扩张方圈吗？",
+    runningDetail:
+      "正在发送标准扩张方圈，请观察方圈边缘是否开始变斜、拐角是否失真，以及有没有明显漏笔、跳笔或累计漂移。",
+    successDetail:
+      "标准扩张方圈已经跑完。它更适合快速比较这组 timing 是更稳了，还是只是更快了。",
+  },
+  long: {
+    buttonLabel: "长程方圈",
+    title: "长程扩张方圈",
+    spiralDepth: 12,
+    confirmMessage:
+      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。现在开始运行长程扩张方圈吗？",
+    runningDetail:
+      "正在发送长程扩张方圈，请重点观察累计漂移、拐角转向是否开始失真，以及长时间动作后有没有越来越明显的漏笔或跳笔。",
+    successDetail:
+      "长程扩张方圈已经跑完。请重点看长时间累计后有没有漂移，以及方圈是否还能保持规整，而不只是看它是不是更快。",
+  },
+};
+
+const VALID_PAGE_NAMES = new Set(["studio", "firmware", "controller", "timing"]);
 const TEMPLATE_CATEGORY_LABELS = {
   all: "全部模板",
   tops: "上衣 / 长衣",
@@ -434,7 +526,7 @@ els.thresholdRange.addEventListener("input", () => {
   scheduleStudioPreviewRefresh();
 });
 
-[els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect].forEach((select) => {
+[els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect, els.timingPortSelect].forEach((select) => {
   select.addEventListener("change", () => {
     state.selectedPortPath = select.value;
     state.missingSelectedPortPath = null;
@@ -442,7 +534,42 @@ els.thresholdRange.addEventListener("input", () => {
     syncStudioUi();
     syncFirmwareUi();
     syncControllerUi();
+    syncTimingLabUi();
+    syncTimingLabUi();
   });
+});
+
+els.timingStepSelect.addEventListener("change", () => {
+  state.timingLab.quickStep = Number(els.timingStepSelect.value || state.timingLab.quickStep);
+  syncTimingLabUi();
+});
+
+els.timingInputDelayRange.addEventListener("input", () => {
+  setSharedInputDelay(els.timingInputDelayRange.value);
+});
+
+els.timingInputDelayInput.addEventListener("change", () => {
+  setSharedInputDelay(els.timingInputDelayInput.value);
+});
+
+els.timingInputDelayInput.addEventListener("blur", () => {
+  syncTimingLabUi();
+});
+
+els.timingButtonPressRange.addEventListener("input", () => {
+  setSharedButtonPressDuration(els.timingButtonPressRange.value);
+});
+
+els.timingButtonPressInput.addEventListener("change", () => {
+  setSharedButtonPressDuration(els.timingButtonPressInput.value);
+});
+
+els.timingButtonPressInput.addEventListener("blur", () => {
+  syncTimingLabUi();
+});
+
+els.timingResetButton.addEventListener("click", () => {
+  resetSharedTiming();
 });
 
 els.firmwareEnvSelect.addEventListener("change", () => {
@@ -809,6 +936,8 @@ function buildStudioGeneratePayload() {
     threshold: Number(els.thresholdRange.value),
     previewScale: 12,
     removeBackground: state.studio.removeBackground,
+    inputDelay: state.sharedTiming.inputDelay,
+    buttonPressDuration: state.sharedTiming.buttonPressDuration,
   };
 }
 
@@ -845,6 +974,10 @@ function applyGeneratedStudioPayload(payload) {
     baudRate: payload.profile.baudRate ?? 115200,
     ackTimeoutMs: payload.profile.ackTimeoutMs ?? 2000,
     commandRetryCount: payload.profile.commandRetryCount ?? 1,
+    inputDelay: payload.profile.inputDelay ?? state.sharedTiming.inputDelay,
+    buttonPressDuration:
+      payload.profile.buttonPressDuration ?? state.sharedTiming.buttonPressDuration,
+    homeDuration: payload.profile.homeDuration ?? state.sharedTiming.homeDuration,
     templateId: payload.profile.templateId ?? state.studio.templateId,
     templateLabel: payload.profile.templateLabel ?? state.studio.templateLabel,
   };
@@ -1696,6 +1829,20 @@ els.controllerActionButtons.forEach((button) => {
   });
 });
 
+els.timingActionButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const action = button.dataset.timingAction ?? "";
+    const commands = mapControllerActionToCommands(action, Number(els.timingStepSelect.value));
+
+    if (commands.length === 0) {
+      appendLog(els.timingLogOutput, `未知调试动作：${action}`);
+      return;
+    }
+
+    await runTimingLabCommands(commands, `调试动作 ${action}`);
+  });
+});
+
 els.controllerSendCustomButton.addEventListener("click", async () => {
   const commands = els.controllerCustomCommands.value
     .split(/\r?\n/u)
@@ -1712,6 +1859,30 @@ els.controllerSendCustomButton.addEventListener("click", async () => {
 
 els.controllerClearLogButton.addEventListener("click", () => {
   clearLog(els.controllerLogOutput);
+});
+
+els.timingBenchmarkButton.addEventListener("click", async () => {
+  const shouldRun = window.confirm(TIMING_BENCHMARK_MODES.standard.confirmMessage);
+
+  if (!shouldRun) {
+    return;
+  }
+
+  await runTimingBenchmark("standard");
+});
+
+els.timingLongBenchmarkButton.addEventListener("click", async () => {
+  const shouldRun = window.confirm(TIMING_BENCHMARK_MODES.long.confirmMessage);
+
+  if (!shouldRun) {
+    return;
+  }
+
+  await runTimingBenchmark("long");
+});
+
+els.timingClearLogButton.addEventListener("click", () => {
+  clearLog(els.timingLogOutput);
 });
 
 function switchPage(pageName, options = {}) {
@@ -2129,6 +2300,7 @@ function setControllerBusy(isBusy) {
   });
   els.controllerSendCustomButton.disabled = isBusy;
   syncControllerUi();
+  syncTimingLabUi();
 }
 
 function applySerialSessionSnapshot(snapshot) {
@@ -2148,6 +2320,7 @@ function applySerialSessionSnapshot(snapshot) {
     lastUsedAt: typeof snapshot.lastUsedAt === "number" ? snapshot.lastUsedAt : null,
   };
   syncControllerUi();
+  syncTimingLabUi();
 }
 
 async function loadSerialSessionStatus() {
@@ -2780,14 +2953,108 @@ function syncWindowsSerialDriverUi() {
       : "安装 CH340/CH341 驱动（备选）";
 }
 
+function renderTimingBenchmarkResult() {
+  const benchmark = state.timingLab.benchmark;
+  const benchmarkLabel = benchmark.label || "扩张方圈";
+  const tone =
+    benchmark.status === "running"
+      ? "running"
+      : benchmark.status === "success"
+        ? "success"
+        : benchmark.status === "error"
+          ? "error"
+          : "idle";
+  const pill =
+    benchmark.status === "running"
+      ? "测速中"
+      : benchmark.status === "success"
+        ? "成功"
+        : benchmark.status === "error"
+          ? "失败"
+          : "未开始";
+  const title =
+    benchmark.status === "running"
+      ? `正在运行${benchmarkLabel}`
+      : benchmark.status === "success"
+        ? `${benchmarkLabel}完成`
+        : benchmark.status === "error"
+          ? `${benchmarkLabel}失败`
+          : "等待开始测速";
+
+  els.timingBenchmarkCard.className = `firmware-status-card timing-benchmark-card firmware-status-${tone}`;
+  els.timingBenchmarkPill.textContent = pill;
+  els.timingBenchmarkTitle.textContent = title;
+  els.timingBenchmarkDetail.textContent = benchmark.detail;
+  els.timingBenchmarkTiming.textContent = formatTimingSummary({
+    buttonPressDuration: benchmark.buttonPressDuration,
+    inputDelay: benchmark.inputDelay,
+    homeDuration: benchmark.homeDuration,
+  });
+  els.timingBenchmarkMeasured.textContent =
+    typeof benchmark.measuredMs === "number" ? `${benchmark.measuredMs} ms` : "-";
+  els.timingBenchmarkTheoretical.textContent =
+    typeof benchmark.theoreticalMs === "number"
+      ? `${benchmark.theoreticalMs} ms（${benchmark.commandCount} 动作）`
+      : "-";
+  els.timingBenchmarkAverage.textContent =
+    typeof benchmark.averageMs === "number" ? `${benchmark.averageMs} ms / 动作` : "-";
+  els.timingBenchmarkDeviceSummary.textContent = benchmark.deviceSummary || "-";
+  els.timingBenchmarkTime.textContent =
+    benchmark.updatedAt instanceof Date ? benchmark.updatedAt.toLocaleTimeString() : "-";
+}
+
+function syncTimingLabUi() {
+  const hasPort = Boolean(state.selectedPortPath);
+  const controllerReady = isControllerReadyForStudio();
+  const executionActive = isStudioExecutionActive();
+  const inputTiming = state.sharedTiming;
+  const disabled = state.timingLab.busy || executionActive || state.serialSession.busy;
+
+  state.timingLab.quickStep =
+    state.timingLab.quickStep === 3 || state.timingLab.quickStep === 5 ? state.timingLab.quickStep : 1;
+
+  els.timingPortSelect.disabled = disabled;
+  els.timingStepSelect.disabled = disabled;
+  els.timingStepSelect.value = String(state.timingLab.quickStep);
+  els.timingInputDelayRange.disabled = disabled;
+  els.timingInputDelayInput.disabled = disabled;
+  els.timingButtonPressRange.disabled = disabled;
+  els.timingButtonPressInput.disabled = disabled;
+  els.timingResetButton.disabled = disabled;
+  els.timingInputDelayRange.value = String(inputTiming.inputDelay);
+  els.timingInputDelayInput.value = String(inputTiming.inputDelay);
+  els.timingButtonPressRange.value = String(inputTiming.buttonPressDuration);
+  els.timingButtonPressInput.value = String(inputTiming.buttonPressDuration);
+
+  const canSendTimingCommands = !disabled && hasPort && controllerReady;
+
+  els.timingActionButtons.forEach((button) => {
+    button.disabled = !canSendTimingCommands;
+  });
+  els.timingBenchmarkButton.disabled = !canSendTimingCommands;
+  els.timingLongBenchmarkButton.disabled = !canSendTimingCommands;
+
+  if (!hasPort) {
+    els.timingStatusHint.textContent = "请先选择一个串口设备，再开始试按或测速。";
+  } else if (!controllerReady) {
+    els.timingStatusHint.textContent =
+      `当前会先下发 ${buildSharedTimingConfigCommand()}。开始前请先到“手柄测试”页把手柄连接到“已就绪”。`;
+  } else {
+    els.timingStatusHint.textContent =
+      `当前会先下发 ${buildSharedTimingConfigCommand()}。快速调试、标准方圈和长程方圈都会沿用这组 timing。建议测速时切到画笔工具和 1 号笔。`;
+  }
+
+  renderTimingBenchmarkResult();
+}
+
 function syncControllerUi() {
   const hasPort = Boolean(state.selectedPortPath);
   const ready = state.controller.status.readyValue === true;
-  const canSendTestCommands = !state.controller.busy && hasPort && ready;
+  const canSendTestCommands = !state.controller.busy && !state.serialSession.busy && hasPort && ready;
 
-  els.controllerPortSelect.disabled = state.controller.busy;
+  els.controllerPortSelect.disabled = state.controller.busy || state.serialSession.busy;
 
-  const shouldDisable = state.controller.busy || !hasPort;
+  const shouldDisable = state.controller.busy || state.serialSession.busy || !hasPort;
   els.controllerInfoButton.disabled = shouldDisable;
   els.controllerResetButton.disabled = shouldDisable;
   els.controllerSendCustomButton.disabled = !canSendTestCommands;
@@ -2796,7 +3063,14 @@ function syncControllerUi() {
   els.controllerActionButtons.forEach((button) => {
     button.disabled = !canSendTestCommands;
   });
+  els.controllerTimingHint.textContent = `当前动作测试会先套用 ${buildSharedTimingConfigCommand()}。`;
   renderSerialSessionStatus();
+}
+
+function setTimingLabBusy(isBusy) {
+  state.timingLab.busy = isBusy;
+  syncTimingLabUi();
+  syncControllerUi();
 }
 
 function appendExecutionLines(logTarget, lines) {
@@ -2849,34 +3123,173 @@ async function runExecution({
   }
 }
 
-async function runControllerCommands(commands, label) {
+function prependSharedTimingCommand(commands) {
+  return [buildSharedTimingConfigCommand(), ...commands];
+}
+
+async function runTimedSerialCommands({
+  commands,
+  label,
+  logTarget,
+  setBusy,
+  successLabel,
+}) {
   if (!state.selectedPortPath) {
-    appendLog(els.controllerLogOutput, "请先选择一个串口设备。");
+    appendLog(logTarget, "请先选择一个串口设备。");
     return null;
   }
 
-  appendLog(
-    els.controllerLogOutput,
-    `${label}：${state.selectedPortPath}`,
-  );
+  const timedCommands = prependSharedTimingCommand(commands);
+  appendLog(logTarget, `${label}：${state.selectedPortPath} · ${formatTimingSummary(state.sharedTiming)}`);
 
+  const startedAt = Date.now();
   const payload = await runExecution({
-    commands,
+    commands: timedCommands,
     target: "serial",
     portPath: state.selectedPortPath,
     baudRate: state.studio.profile.baudRate,
     ackTimeoutMs: state.studio.profile.ackTimeoutMs,
     retries: state.studio.profile.commandRetryCount,
-    setBusy: setControllerBusy,
+    setBusy,
+    logTarget,
+    successLabel,
+  });
+
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    payload,
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    actionCommandCount: commands.length,
+  };
+}
+
+async function runControllerCommands(commands, label) {
+  const result = await runTimedSerialCommands({
+    commands,
+    label,
     logTarget: els.controllerLogOutput,
+    setBusy: setControllerBusy,
     successLabel: label,
   });
+  const payload = result?.payload ?? null;
 
   if (payload?.lines) {
     updateControllerStatusFromLines(payload.lines);
   }
 
   return payload;
+}
+
+async function runTimingLabCommands(commands, label) {
+  const result = await runTimedSerialCommands({
+    commands,
+    label,
+    logTarget: els.timingLogOutput,
+    setBusy: setTimingLabBusy,
+    successLabel: label,
+  });
+
+  if (result?.payload?.lines) {
+    updateControllerStatusFromLines(result.payload.lines);
+  }
+
+  return result;
+}
+
+function buildTimingBenchmarkCommands(mode) {
+  const commands = ["P"];
+  let directionIndex = 0;
+
+  for (let length = 1; length <= mode.spiralDepth; length += 1) {
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      const direction = TIMING_BENCHMARK_DIRECTIONS[directionIndex % TIMING_BENCHMARK_DIRECTIONS.length];
+
+      if (!direction) {
+        continue;
+      }
+
+      for (let step = 0; step < length; step += 1) {
+        commands.push(`M ${direction.dx} ${direction.dy}`);
+        commands.push("P");
+      }
+
+      directionIndex += 1;
+    }
+  }
+
+  return commands;
+}
+
+function summarizeTimingDeviceLines(lines) {
+  const summary = (lines ?? [])
+    .filter(
+      (line) =>
+        !line.startsWith("INFO target=") &&
+        !line.startsWith("INFO port=") &&
+        line !== "INFO completed",
+    )
+    .slice(-3);
+
+  return summary.length > 0 ? summary.join(" | ") : "本次没有额外设备信息。";
+}
+
+async function runTimingBenchmark(modeKey = "standard") {
+  const mode = TIMING_BENCHMARK_MODES[modeKey] ?? TIMING_BENCHMARK_MODES.standard;
+  const benchmarkCommands = buildTimingBenchmarkCommands(mode);
+  const commandCount = benchmarkCommands.length;
+  const benchmarkTiming = { ...state.sharedTiming };
+  state.timingLab.benchmark = {
+    ...state.timingLab.benchmark,
+    status: "running",
+    label: mode.title,
+    detail: mode.runningDetail,
+    buttonPressDuration: benchmarkTiming.buttonPressDuration,
+    inputDelay: benchmarkTiming.inputDelay,
+    homeDuration: benchmarkTiming.homeDuration,
+    commandCount,
+    measuredMs: null,
+    theoreticalMs: null,
+    averageMs: null,
+    deviceSummary: "等待设备返回...",
+    updatedAt: new Date(),
+  };
+  syncTimingLabUi();
+
+  const result = await runTimingLabCommands(
+    benchmarkCommands,
+    `${mode.buttonLabel}测速`,
+  );
+
+  if (!result) {
+    state.timingLab.benchmark = {
+      ...state.timingLab.benchmark,
+      status: "error",
+      detail: `${mode.title}没有完成。请查看下方日志，确认手柄连接是否仍处于“已就绪”，或把 timing 再调慢一点后重试。`,
+      deviceSummary: "测速失败，请查看日志。",
+      updatedAt: new Date(),
+    };
+    syncTimingLabUi();
+    return;
+  }
+
+  const theoreticalMs =
+    result.actionCommandCount *
+    (benchmarkTiming.buttonPressDuration + benchmarkTiming.inputDelay);
+  state.timingLab.benchmark = {
+    ...state.timingLab.benchmark,
+    status: "success",
+    detail: mode.successDetail,
+    measuredMs: result.elapsedMs,
+    theoreticalMs,
+    averageMs:
+      result.actionCommandCount > 0 ? Math.round(result.elapsedMs / result.actionCommandCount) : null,
+    deviceSummary: summarizeTimingDeviceLines(result.payload.lines),
+    updatedAt: new Date(),
+  };
+  syncTimingLabUi();
 }
 
 function mapControllerActionToCommands(action, step) {
@@ -2990,7 +3403,12 @@ function pickPreferredPortPath() {
 }
 
 function renderPortSelects() {
-  const selects = [els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect];
+  const selects = [
+    els.studioPortSelect,
+    els.firmwarePortSelect,
+    els.controllerPortSelect,
+    els.timingPortSelect,
+  ];
 
   selects.forEach((select) => {
     select.innerHTML = "";
@@ -3283,6 +3701,14 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function snapNumberToStep(value, min, step) {
+  if (!Number.isFinite(step) || step <= 0) {
+    return value;
+  }
+
+  return min + Math.round((value - min) / step) * step;
+}
+
 function parseIntegerInput(value) {
   const normalized = String(value ?? "").trim();
 
@@ -3302,6 +3728,115 @@ function normalizeStudioNumericValue(value, fallback, limits) {
   }
 
   return clampNumber(parsed, limits.min, limits.max);
+}
+
+function normalizeTimingValue(value, fallback, limits) {
+  const parsed = parseIntegerInput(value);
+
+  if (parsed === null) {
+    return fallback;
+  }
+
+  const clamped = clampNumber(parsed, limits.min, limits.max);
+  const snapped = snapNumberToStep(clamped, limits.min, limits.step);
+  return clampNumber(snapped, limits.min, limits.max);
+}
+
+function formatTimingSummary(timing) {
+  return `button ${timing.buttonPressDuration}ms · delay ${timing.inputDelay}ms · home ${timing.homeDuration}ms`;
+}
+
+function buildSharedTimingConfigCommand() {
+  return `CFG INPUT ${state.sharedTiming.buttonPressDuration} ${state.sharedTiming.inputDelay} ${state.sharedTiming.homeDuration}`;
+}
+
+function syncSharedTimingIntoStudioProfile() {
+  state.studio.profile = {
+    ...state.studio.profile,
+    inputDelay: state.sharedTiming.inputDelay,
+    buttonPressDuration: state.sharedTiming.buttonPressDuration,
+    homeDuration: state.sharedTiming.homeDuration,
+  };
+}
+
+function persistSharedTiming() {
+  try {
+    window.localStorage.setItem(SHARED_TIMING_STORAGE_KEY, JSON.stringify(state.sharedTiming));
+  } catch {
+    // Ignore storage failures and keep the current in-memory timing.
+  }
+}
+
+function applySharedTiming(nextTiming, { persist = true } = {}) {
+  state.sharedTiming = {
+    inputDelay: normalizeTimingValue(
+      nextTiming?.inputDelay,
+      DEFAULT_SHARED_TIMING.inputDelay,
+      SHARED_TIMING_LIMITS.inputDelay,
+    ),
+    buttonPressDuration: normalizeTimingValue(
+      nextTiming?.buttonPressDuration,
+      DEFAULT_SHARED_TIMING.buttonPressDuration,
+      SHARED_TIMING_LIMITS.buttonPressDuration,
+    ),
+    homeDuration: DEFAULT_SHARED_TIMING.homeDuration,
+  };
+  syncSharedTimingIntoStudioProfile();
+
+  if (persist) {
+    persistSharedTiming();
+  }
+}
+
+function loadSharedTiming() {
+  try {
+    const rawValue = window.localStorage.getItem(SHARED_TIMING_STORAGE_KEY);
+
+    if (!rawValue) {
+      applySharedTiming(DEFAULT_SHARED_TIMING, { persist: false });
+      return;
+    }
+
+    const parsed = JSON.parse(rawValue);
+    applySharedTiming(parsed, { persist: false });
+  } catch {
+    applySharedTiming(DEFAULT_SHARED_TIMING, { persist: false });
+  }
+}
+
+function updateSharedTiming(nextTiming) {
+  const previousInputDelay = state.sharedTiming.inputDelay;
+  const previousButtonPressDuration = state.sharedTiming.buttonPressDuration;
+  applySharedTiming(
+    {
+      inputDelay: nextTiming.inputDelay ?? state.sharedTiming.inputDelay,
+      buttonPressDuration: nextTiming.buttonPressDuration ?? state.sharedTiming.buttonPressDuration,
+    },
+    { persist: true },
+  );
+  const changed =
+    previousInputDelay !== state.sharedTiming.inputDelay ||
+    previousButtonPressDuration !== state.sharedTiming.buttonPressDuration;
+
+  syncStudioUi();
+  syncControllerUi();
+  syncTimingLabUi();
+
+  if (changed) {
+    scheduleStudioPreviewRefresh();
+  }
+}
+
+function setSharedInputDelay(value) {
+  updateSharedTiming({ inputDelay: value });
+}
+
+function setSharedButtonPressDuration(value) {
+  updateSharedTiming({ buttonPressDuration: value });
+}
+
+function resetSharedTiming() {
+  updateSharedTiming(DEFAULT_SHARED_TIMING);
 }
 
 function setStudioImageScalePercent(value) {
@@ -3390,8 +3925,10 @@ async function init() {
     updateHash: window.location.hash.length > 0,
     scrollToPage: window.location.hash.length > 0,
   });
+  loadSharedTiming();
   state.studio.canvasSize = Number(els.sizeSelect.value || state.studio.canvasSize);
   state.studio.brushSize = Number(els.brushSizeSelect.value || state.studio.brushSize);
+  state.timingLab.quickStep = Number(els.timingStepSelect.value || state.timingLab.quickStep);
   state.studio.imageScalePercent = normalizeStudioNumericValue(
     els.scaleInput.value || els.scaleRange.value,
     state.studio.imageScalePercent,
@@ -3422,6 +3959,7 @@ async function init() {
   syncStudioUi();
   syncFirmwareUi();
   syncControllerUi();
+  syncTimingLabUi();
   renderControllerStatus();
 
   if (state.serialSession.connected && state.selectedPortPath) {

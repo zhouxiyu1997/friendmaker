@@ -853,6 +853,26 @@ input[type="range"]:focus-visible,
   margin-top: 18px;
 }
 
+.timing-note-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(245, 191, 85, 0.34);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(245, 191, 85, 0.2), rgba(255, 255, 255, 0.84));
+}
+
+.timing-note-card strong {
+  font-size: 15px;
+}
+
+.timing-note-card p {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
 .test-block {
   padding: 16px;
   border: 1px solid var(--line);
@@ -913,6 +933,10 @@ input[type="range"]:focus-visible,
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.timing-button-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .firmware-log-panel {
   grid-column: 1 / -1;
 }
@@ -938,6 +962,10 @@ input[type="range"]:focus-visible,
 
 .controller-log-panel {
   grid-column: 2;
+}
+
+.timing-log-panel {
+  grid-column: 1 / -1;
 }
 
 .firmware-status-card {
