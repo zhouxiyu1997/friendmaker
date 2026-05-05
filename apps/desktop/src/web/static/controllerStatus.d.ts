@@ -15,8 +15,10 @@ export interface DerivedControllerStatus {
   connectedValue: boolean | null;
   pairedValue: boolean | null;
   readyValue: boolean | null;
+  reportChannelOpenValue: boolean | null;
   rawReadyValue: boolean | null;
   readyInferredValue: boolean;
+  identityMismatchValue: boolean;
   unstableValue: boolean;
   reconnectRecommendedValue: boolean;
   sendReportFailureCount: number;
@@ -25,6 +27,8 @@ export interface DerivedControllerStatus {
   lastAclDisconnectReason: number | null;
   lastDropReason: string;
   peer: string;
+  localMac: string;
+  reply02Mac: string;
   initStep: string;
   initError: string;
 }

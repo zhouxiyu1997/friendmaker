@@ -119,10 +119,17 @@ export function deriveControllerStatus(lines) {
   const connected = boolFromInfo(info.bt_connected);
   const paired = boolFromInfo(info.bt_paired);
   const rawReady = boolFromInfo(info.bt_ready_for_reports);
+  const reportChannelOpen = boolFromInfo(info.bt_report_channel_open);
   const sendReportFailureCount = numberFromInfo(info.bt_send_report_failures) ?? 0;
   const lastSendReportStatus = numberFromInfo(info.bt_last_send_report_status);
   const lastSendReportReason = numberFromInfo(info.bt_last_send_report_reason);
   const lastAclDisconnectReason = numberFromInfo(info.bt_last_acl_disconnect_reason);
+  const localMac = info.bt_local_mac ?? "-";
+  const reply02Mac = info.bt_reply02_mac ?? "-";
+  const identityMismatch =
+    localMac !== "-" &&
+    reply02Mac !== "-" &&
+    localMac !== reply02Mac;
   const congestedSendReport =
     lastSendReportStatus !== null &&
     lastSendReportStatus > 0 &&
@@ -149,17 +156,33 @@ export function deriveControllerStatus(lines) {
     detail = readyInferredFromPairing
       ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
       : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+    if (identityMismatch) {
+      tone = "warning";
+      pill = "身份异常";
+      title = "手柄身份不一致";
+      detail =
+        `开发板已经能发送输入，但它当前蓝牙地址是 ${localMac}，对外回复的 device-info 地址却是 ${reply02Mac}。这种身份不一致会让首配、回连或跨设备识别变得不稳定，建议更新固件后重试。`;
+    }
   } else if (unstableInferredReady) {
     tone = "warning";
     pill = "不稳定";
     title = "连接容易断开";
     detail =
       `开发板已经连上 Switch，但 HID 报告通道仍在拥塞（最近一次 send-report status=${lastSendReportStatus ?? "-"} reason=${lastSendReportReason ?? "-"}，累计失败 ${sendReportFailureCount} 次），现在继续测试或开画都容易断联。建议先重置蓝牙后重新连接。`;
+  } else if (identityMismatch) {
+    tone = "warning";
+    pill = "身份异常";
+    title = "控制器身份不一致";
+    detail =
+      `当前蓝牙地址是 ${localMac}，但 device-info 回复地址是 ${reply02Mac}。这会让 Switch 在发现、配对或回连阶段更容易把这块板子当成不稳定手柄。建议重新刷固件后再试。`;
   } else if (connected === true) {
     tone = "running";
     pill = "已连接";
     title = "连接已建立";
-    detail = "HID 连接已经建立，正在等待配对完成或报告通道完全就绪。";
+    detail =
+      reportChannelOpen === true
+        ? "HID 连接和报告通道已经打开，正在等待 Switch 完成控制器子命令握手。"
+        : "HID 连接已经建立，正在等待报告通道完全就绪。";
   } else if (authComplete === true) {
     tone = "running";
     pill = "已认证";
@@ -194,11 +217,15 @@ export function deriveControllerStatus(lines) {
     connectedValue: connected,
     pairedValue: paired,
     readyValue: ready,
+    reportChannelOpenValue: reportChannelOpen,
     peer: info.bt_last_peer ?? "-",
+    localMac,
+    reply02Mac,
     initStep: info.bt_init_step ?? "-",
     initError,
     rawReadyValue: rawReady,
     readyInferredValue: readyInferredFromPairing,
+    identityMismatchValue: identityMismatch,
     unstableValue: unstableInferredReady,
     reconnectRecommendedValue: unstableInferredReady,
     sendReportFailureCount,

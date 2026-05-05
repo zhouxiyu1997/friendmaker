@@ -30,6 +30,7 @@ test("readInfoLineMap keeps info fields clean when warn lines are glued on", () 
     "INFO bt_init_step=discoverable",
     "INFO bt_init_error=ESP_OKWARN bt hid event=send-report status=1 reason=8 report=48",
     "INFO bt_last_peer=11:22:33:44:55:66INFO bt_last_send_report_status=1",
+    "INFO bt_local_mac=D4:F0:57:AA:BB:CCINFO bt_reply02_mac=D4:F0:57:AA:BB:CC",
   ]);
 
   assert.equal(info.transport, "classic-bt-uartswitchcon");
@@ -38,6 +39,8 @@ test("readInfoLineMap keeps info fields clean when warn lines are glued on", () 
   assert.equal(info.bt_init_error, "ESP_OK");
   assert.equal(info.bt_last_peer, "11:22:33:44:55:66");
   assert.equal(info.bt_last_send_report_status, "1");
+  assert.equal(info.bt_local_mac, "D4:F0:57:AA:BB:CC");
+  assert.equal(info.bt_reply02_mac, "D4:F0:57:AA:BB:CC");
 });
 
 test("deriveControllerStatus prefers connected-ready progress over stale init error display", () => {
@@ -89,6 +92,32 @@ test("deriveControllerStatus marks congested inferred-ready links as unstable", 
   assert.equal(status?.sendReportFailureCount, 7236);
   assert.equal(status?.lastSendReportReason, 8);
   assert.equal(status?.lastAclDisconnectReason, 19);
+});
+
+test("deriveControllerStatus flags device identity mismatches before the controller is ready", () => {
+  const status = deriveControllerStatus([
+    "INFO transport=classic-bt-uartswitchcon",
+    "INFO bt_profile=uartswitchcon-pro-controller",
+    "INFO bt_discoverable=false",
+    "INFO bt_auth_complete=true",
+    "INFO bt_connected=false",
+    "INFO bt_paired=false",
+    "INFO bt_ready_for_reports=false",
+    "INFO bt_report_channel_open=false",
+    "INFO bt_local_mac=D4:F0:57:AA:BB:CC",
+    "INFO bt_reply02_mac=D4:F0:57:11:22:33",
+    "INFO bt_init_step=auth-complete",
+    "INFO bt_init_error=ESP_OK",
+  ]);
+
+  assert.ok(status);
+  assert.equal(status?.tone, "warning");
+  assert.equal(status?.pill, "身份异常");
+  assert.equal(status?.title, "控制器身份不一致");
+  assert.equal(status?.localMac, "D4:F0:57:AA:BB:CC");
+  assert.equal(status?.reply02Mac, "D4:F0:57:11:22:33");
+  assert.equal(status?.identityMismatchValue, true);
+  assert.equal(status?.reportChannelOpenValue, false);
 });
 
 test("shouldReuseExistingControllerConnection keeps active bluetooth sessions intact", () => {
