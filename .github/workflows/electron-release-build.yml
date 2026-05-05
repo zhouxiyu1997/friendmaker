@@ -41,6 +41,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync package version with release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          release_version="${RELEASE_TAG#v}"
+          npm version "$release_version" --no-git-tag-version --allow-same-version
+
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$package_version" != "$release_version" ]]; then
+            echo "::error::package.json version is ${package_version}, expected ${release_version}"
+            exit 1
+          fi
+
       - name: Type check
         run: npm run check
 
