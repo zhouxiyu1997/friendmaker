@@ -9,7 +9,7 @@
     />
     <meta
       name="keywords"
-      content="Friend Maker, 朋友制作器, Tomodachi Life, 朋友收集梦想生活, Nintendo Switch auto draw, ESP32 Pro Controller emulator, pixel art drawing automation"
+      content="Friend Maker, 朋友制作器, Tomodachi Life, 朋友收集梦想生活, Nintendo Switch auto draw, ESP32 Bluetooth Classic Pro Controller emulator, pixel art drawing automation"
     />
     <title>朋友制作器 / Friend Maker | Tomodachi Life 自动绘制工具</title>
     <link rel="stylesheet" href="/styles.css" />
@@ -24,7 +24,7 @@
           <h1 class="hero-brand">朋友制作器 / Friend Maker</h1>
           <p class="hero-body">
             自动绘画的基本原理，是通过数据线连接电脑与 ESP32 开发板，先刷入固定固件，再由电脑发送绘图指令，开发板按规律模拟
-            Switch 手柄输入完成自动绘画。
+            Switch Pro 手柄输入完成自动绘画。
           </p>
           <p class="subcopy">
             推荐顺序是先刷固件，再做手柄测试，最后回到“脚本生成”页导入图片并先点“仅生成命令”。手柄测试未通过时，不允许开始正式绘制。开始前请确认
@@ -452,14 +452,14 @@
           <div class="page-step-row" aria-label="刷入固件步骤">
             <span class="page-step">1. 选择目标环境</span>
             <span class="page-step">2. 确认串口设备</span>
-            <span class="page-step">3. 编译并刷入固件</span>
+            <span class="page-step">3. 擦除并刷入固件</span>
           </div>
         </section>
         <main class="firmware-grid">
           <section class="panel">
             <div class="panel-head">
               <h2>刷入固件</h2>
-              <p>这里会调用本机的 PlatformIO，直接把固件编译并刷入 ESP32。</p>
+              <p>这里会调用本机的 PlatformIO，先擦除 ESP32 的 NVS/配对状态，再编译并刷入固件。</p>
             </div>
 
             <div class="field-grid">
@@ -497,7 +497,7 @@
             <div class="action-row">
               <button id="firmware-refresh-button" class="ghost" type="button">刷新串口</button>
               <button id="firmware-install-tooling-button" class="ghost hidden" type="button">准备 PlatformIO</button>
-              <button id="firmware-flash-button" class="primary">编译并刷入固件</button>
+              <button id="firmware-flash-button" class="primary">擦除并刷入固件</button>
               <button id="firmware-stop-button" class="ghost" type="button">停止刷入</button>
             </div>
           </section>
@@ -512,7 +512,7 @@
               <span id="firmware-status-pill" class="status-pill">待执行</span>
               <strong id="firmware-status-title" class="status-title">等待刷入固件</strong>
               <p id="firmware-status-detail" class="status-detail">
-                点击“编译并刷入固件”后，这里会显示成功或失败。
+                点击“擦除并刷入固件”后，这里会显示成功或失败。
               </p>
             </div>
 
@@ -559,8 +559,8 @@
             <p>这里把连接、可发现、认证、配对和动作测试拆开显示，方便先排链路问题，再排按键动作。</p>
           </div>
           <div class="page-step-row" aria-label="手柄测试步骤">
-            <span class="page-step">1. 刷新并连接手柄</span>
-            <span class="page-step">2. 确认状态变为可发送</span>
+            <span class="page-step">1. Switch 停在更改握法/顺序</span>
+            <span class="page-step">2. 连接到可发送状态</span>
             <span class="page-step">3. 做方向和按钮测试</span>
           </div>
         </section>
@@ -568,7 +568,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>手柄测试</h2>
-              <p>这里用单步命令测试真实设备动作，不依赖整张图片脚本。</p>
+              <p>这里用 Pro Controller 身份做单步动作测试，不依赖整张图片脚本。</p>
             </div>
 
             <div class="field-grid">
@@ -587,16 +587,29 @@
                   <option value="4">4 格</option>
                 </select>
               </label>
+
+              <label>
+                <span>蓝牙兼容模式</span>
+                <select id="controller-profile-select">
+                  <option value="AUTO" selected>Auto</option>
+                  <option value="PRO">Pro Controller</option>
+                </select>
+              </label>
             </div>
 
             <div class="action-row slim">
               <button id="controller-refresh-button" class="ghost" type="button">刷新串口</button>
               <button id="controller-info-button" class="ghost" type="button">连接手柄</button>
               <button id="controller-reset-button" class="ghost" type="button">重置手柄蓝牙</button>
+              <button id="controller-clear-pairing-button" class="ghost" type="button">清除开发板配对</button>
+              <button id="controller-apply-profile-button" class="ghost" type="button">应用蓝牙模式</button>
+              <button id="controller-export-diag-button" class="ghost" type="button">导出诊断</button>
               <button id="controller-disconnect-button" class="ghost" type="button">断开串口</button>
             </div>
             <p id="controller-serial-session-status" class="hint">串口会在首次发送测试命令时自动连接。</p>
             <p id="controller-timing-hint" class="hint">动作测试会先套用“调试测速”页里的当前 timing。</p>
+            <p class="hint">如果 Switch 已保存太多旧手柄，先在 Switch 的 System Settings → Controllers and Sensors → Disconnect Controllers 清除旧记录，再点“清除开发板配对”。刷入固件页现在会自动擦除 ESP32 NVS 后再刷入。</p>
+            <p class="hint">固件只使用 Pro Controller：Left Joy-Con 虽然更容易配对，但缺少完整方向键/ABXY/R/ZR；把方向键映射到摇杆会增加校准误差，影响绘图精度。</p>
 
             <div class="controller-test-layout">
               <div class="test-block">
@@ -701,6 +714,22 @@
                 <div class="firmware-meta-row">
                   <dt>最近主机</dt>
                   <dd id="controller-status-peer">-</dd>
+                </div>
+                <div class="firmware-meta-row">
+                  <dt>设备名</dt>
+                  <dd id="controller-status-device-name">-</dd>
+                </div>
+                <div class="firmware-meta-row">
+                  <dt>最近稳定</dt>
+                  <dd id="controller-status-last-good">-</dd>
+                </div>
+                <div class="firmware-meta-row">
+                  <dt>失败次数</dt>
+                  <dd id="controller-status-failures">-</dd>
+                </div>
+                <div class="firmware-meta-row">
+                  <dt>静默窗口</dt>
+                  <dd id="controller-status-warmup">-</dd>
                 </div>
                 <div class="firmware-meta-row">
                   <dt>初始化步骤</dt>

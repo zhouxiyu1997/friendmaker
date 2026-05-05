@@ -386,6 +386,25 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     return true;
   }
 
+  if (line == "BT DIAG") {
+    Serial.println("INFO bt_diag_begin=true");
+    Serial.printf("INFO transport=%s\n", controller.transportName());
+    controller.printTransportStatus(Serial);
+    Serial.println("INFO bt_diag_end=true");
+    return true;
+  }
+
+  if (line.startsWith("BT PROFILE ")) {
+    const String profileName = line.substring(String("BT PROFILE ").length());
+    if (!controller.configureBluetoothProfile(profileName)) {
+      error = "bt profile failed";
+      return false;
+    }
+
+    Serial.printf("INFO action=bt-profile value=\"%s\"\n", profileName.c_str());
+    return true;
+  }
+
   if (line == "BT RESET" || line == "BT RESET LAST-PEER") {
     const bool reconnectLastPeer = line == "BT RESET LAST-PEER";
     if (!controller.resetBluetooth(reconnectLastPeer)) {
@@ -396,6 +415,16 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     Serial.printf(
         "INFO action=bt-reset reconnect_last_peer=%s\n",
         reconnectLastPeer ? "true" : "false");
+    return true;
+  }
+
+  if (line == "BT UNPAIR" || line == "BT CLEAR PAIRING") {
+    if (!controller.clearBluetoothPairing()) {
+      error = "bt clear pairing failed";
+      return false;
+    }
+
+    Serial.println("INFO action=bt-clear-pairing");
     return true;
   }
 

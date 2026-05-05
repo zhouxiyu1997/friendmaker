@@ -165,7 +165,7 @@ const FIRMWARE_ENVIRONMENTS = [
   {
     id: "xiao_esp32c3_serial",
     label: "XIAO ESP32-C3（串口测试）",
-    description: "仅用于协议、ACK 和串口联调，不是最终的 Switch Pro 路线。",
+    description: "仅用于协议、ACK 和串口联调，不是最终的 Bluetooth Classic Switch Pro 手柄路线。",
     recommended: false,
   },
 ] as const;
@@ -238,7 +238,7 @@ export function formatSelectedUploadPortFailureMessage(
   selectedPortPath: string,
   message: string,
 ): string {
-  return `Upload failed on the selected port ${selectedPortPath}. ${message} ${SELECTED_UPLOAD_PORT_RETRY_GUIDANCE}`;
+  return `Firmware flash failed on the selected port ${selectedPortPath}. ${message} ${SELECTED_UPLOAD_PORT_RETRY_GUIDANCE}`;
 }
 
 function validateSelectedUploadPort(
@@ -588,6 +588,7 @@ class FirmwareFlashManager {
     this.stopReason = null;
 
     this.appendLine(`INFO flashing environment=${environment.id} label=${environment.label}`);
+    this.appendLine("INFO flash mode=erase-then-upload");
     this.appendLine(`INFO selected upload port=${selectedPortPath}`);
     this.appendLine(`INFO flash timeout=${formatDuration(FIRMWARE_FLASH_TIMEOUT_MS)}`);
     if (session.connected) {
@@ -665,6 +666,11 @@ class FirmwareFlashManager {
       this.state.uploadPortPath = selectedPortPath;
 
       try {
+        await this.runPlatformIoErase(environment.id, selectedPortPath);
+        if (this.cancelRequested) {
+          throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
+        }
+        this.appendLine("INFO firmware erase completed; starting upload");
         await this.runPlatformIoUpload(environment.id, selectedPortPath);
         this.finish("completed", null);
         return;
@@ -711,8 +717,23 @@ class FirmwareFlashManager {
     }
   }
 
+  private async runPlatformIoErase(
+    environmentId: FirmwareEnvironmentId,
+    uploadPortPath: string | null,
+  ): Promise<void> {
+    await this.runPlatformIoTarget(environmentId, "erase", uploadPortPath);
+  }
+
   private async runPlatformIoUpload(
     environmentId: FirmwareEnvironmentId,
+    uploadPortPath: string | null,
+  ): Promise<void> {
+    await this.runPlatformIoTarget(environmentId, "upload", uploadPortPath);
+  }
+
+  private async runPlatformIoTarget(
+    environmentId: FirmwareEnvironmentId,
+    target: "erase" | "upload",
     uploadPortPath: string | null,
   ): Promise<void> {
     const platformIoPath = this.state.platformIoPath;
@@ -725,15 +746,15 @@ class FirmwareFlashManager {
       "-e",
       environmentId,
       "-t",
-      "upload",
+      target,
       ...(uploadPortPath ? ["--upload-port", uploadPortPath] : []),
     ];
     const platformIoEnv = await webRuntime.toolingManager.getPlatformIoEnv();
 
     this.appendLine(
       uploadPortPath
-        ? `INFO trying explicit upload port ${uploadPortPath}`
-        : "INFO trying PlatformIO auto-detect for the upload port",
+        ? `INFO trying explicit upload port ${uploadPortPath} for ${target}`
+        : `INFO trying PlatformIO auto-detect for ${target}`,
     );
     this.appendLine(`$ ${platformIoPath} ${args.join(" ")}`);
 

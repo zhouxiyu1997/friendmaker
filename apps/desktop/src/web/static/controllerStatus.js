@@ -100,10 +100,9 @@ export function shouldReuseExistingControllerConnection(status) {
     return false;
   }
 
-  return (
-    status?.readyValue === true ||
-    status?.connectedValue === true ||
-    status?.authValue === true
+  return status?.readyValue === true || (
+    status?.connectedValue === true &&
+    status?.pairedValue === true
   );
 }
 
@@ -118,11 +117,29 @@ export function deriveControllerStatus(lines) {
   const authComplete = boolFromInfo(info.bt_auth_complete);
   const connected = boolFromInfo(info.bt_connected);
   const paired = boolFromInfo(info.bt_paired);
+  const pairedInferred = boolFromInfo(info.bt_paired_inferred);
   const rawReady = boolFromInfo(info.bt_ready_for_reports);
   const sendReportFailureCount = numberFromInfo(info.bt_send_report_failures) ?? 0;
   const lastSendReportStatus = numberFromInfo(info.bt_last_send_report_status);
   const lastSendReportReason = numberFromInfo(info.bt_last_send_report_reason);
   const lastAclDisconnectReason = numberFromInfo(info.bt_last_acl_disconnect_reason);
+  const profileMode = info.bt_profile_mode ?? "-";
+  const activeProfile = info.bt_active_profile ?? info.bt_profile ?? info.bt_mode ?? "-";
+  const deviceName = info.bt_device_name ?? "-";
+  const baseMac = info.bt_base_mac ?? "-";
+  const controllerType = numberFromInfo(info.bt_controller_type);
+  const bondedDevices = numberFromInfo(info.bt_bonded_devices);
+  const lastGoodProfile = info.bt_last_good_profile ?? "-";
+  const lastConnectionEvent = info.bt_last_connection_event ?? "-";
+  const connectionFailureCount = numberFromInfo(info.bt_connection_failures) ?? 0;
+  const failuresBeforeStable = numberFromInfo(info.bt_failures_before_stable) ?? 0;
+  const lastStableDurationMs = numberFromInfo(info.bt_last_stable_duration_ms) ?? 0;
+  const postOpenQuietMs = numberFromInfo(info.bt_post_open_quiet_ms) ?? 0;
+  const postOpenQuietRemainingMs = numberFromInfo(info.bt_post_open_quiet_remaining_ms) ?? 0;
+  const pairingSetupTimeoutMs = numberFromInfo(info.bt_pairing_setup_timeout_ms) ?? 0;
+  const connectedUnpairedMs = numberFromInfo(info.bt_connected_unpaired_ms) ?? 0;
+  const idlePrePairingReportMs = numberFromInfo(info.bt_idle_pre_pairing_report_ms) ?? 0;
+  const idleConnectedReportMs = numberFromInfo(info.bt_idle_connected_report_ms) ?? 0;
   const congestedSendReport =
     lastSendReportStatus !== null &&
     lastSendReportStatus > 0 &&
@@ -149,6 +166,9 @@ export function deriveControllerStatus(lines) {
     detail = readyInferredFromPairing
       ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
       : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+    if (lastStableDurationMs >= 60000) {
+      detail = `${detail} 当前蓝牙 profile 已达到稳定窗口。`;
+    }
   } else if (unstableInferredReady) {
     tone = "warning";
     pill = "不稳定";
@@ -159,7 +179,9 @@ export function deriveControllerStatus(lines) {
     tone = "running";
     pill = "已连接";
     title = "连接已建立";
-    detail = "HID 连接已经建立，正在等待配对完成或报告通道完全就绪。";
+    detail = pairingSetupTimeoutMs > 0
+      ? `HID 连接已经建立，正在等待配对完成；如果 ${Math.ceil(pairingSetupTimeoutMs / 1000)} 秒内没有完成，固件会自动断开并重新广播。`
+      : "HID 连接已经建立，正在等待配对完成或报告通道完全就绪。";
   } else if (authComplete === true) {
     tone = "running";
     pill = "已认证";
@@ -183,16 +205,35 @@ export function deriveControllerStatus(lines) {
     title,
     detail,
     transport: info.transport ?? "-",
-    profile: info.bt_profile ?? info.bt_mode ?? "-",
+    profile: profileMode !== "-" ? `${profileMode} / ${activeProfile}` : activeProfile,
+    profileMode,
+    activeProfile,
+    deviceName,
+    baseMac,
+    controllerType,
+    bondedDevices,
+    lastGoodProfile,
+    lastConnectionEvent,
+    connectionFailureCount,
+    failuresBeforeStable,
+    lastStableDurationMs,
+    postOpenQuietMs,
+    postOpenQuietRemainingMs,
+    pairingSetupTimeoutMs,
+    connectedUnpairedMs,
+    idlePrePairingReportMs,
+    idleConnectedReportMs,
     discoverable: boolLabel(discoverable, ["可发现", "未发现"]),
     auth: boolLabel(authComplete, ["已通过", "未通过"]),
     connected: boolLabel(connected, ["已连接", "未连接"]),
     paired: boolLabel(paired, ["已配对", "未配对"]),
+    pairedInferred: boolLabel(pairedInferred, ["复用配对", "常规配对"]),
     ready: boolLabel(ready, ["可发送", "未就绪"]),
     discoverableValue: discoverable,
     authValue: authComplete,
     connectedValue: connected,
     pairedValue: paired,
+    pairedInferredValue: pairedInferred,
     readyValue: ready,
     peer: info.bt_last_peer ?? "-",
     initStep: info.bt_init_step ?? "-",

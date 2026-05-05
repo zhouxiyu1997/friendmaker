@@ -47,14 +47,16 @@ npm run dev -- --image ./examples/demo.svg --port <your-serial-port> --send
 ## Flash firmware for ESP32-WROOM-32 / ESP-32S
 
 ```bash
-pio run -e esp32dev_wireless -t upload
+pio run -e esp32dev_wireless -t erase --upload-port <your-serial-port>
+pio run -e esp32dev_wireless -t upload --upload-port <your-serial-port>
 pio device monitor -b 115200
 ```
 
 If your clone board uploads more reliably as NodeMCU-32S, switch to:
 
 ```bash
-pio run -e nodemcu_32s_wireless -t upload
+pio run -e nodemcu_32s_wireless -t erase --upload-port <your-serial-port>
+pio run -e nodemcu_32s_wireless -t upload --upload-port <your-serial-port>
 pio device monitor -b 115200
 ```
 

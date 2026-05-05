@@ -1,5 +1,6 @@
 #include "classic_bt_controller_transport.h"
 
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 
@@ -22,6 +23,10 @@
 namespace {
 
 constexpr uint8_t kControllerTypeProCon = 0x03;
+constexpr uint8_t kProfileModeAuto = 0;
+constexpr uint8_t kProfileModeProBalanced = 2;
+constexpr uint8_t kActiveProfileUnknown = 0;
+constexpr uint8_t kActiveProfileProBalanced = 2;
 constexpr uint8_t kStickCenter = 128;
 constexpr uint8_t kStickMin = 0;
 constexpr uint8_t kStickMax = 255;
@@ -31,10 +36,77 @@ constexpr uint8_t kStickMax = 255;
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
 constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
-constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
-constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
-constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
-constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
+constexpr uint32_t kStableConnectionMs = 60000;
+constexpr uint16_t kBondedReconnectInferReadyMs = 1500;
+constexpr char kProfileModeNvsKey[] = "bt_mode";
+constexpr char kLastGoodProfileNvsKey[] = "bt_last_good";
+
+struct BtCompatibilityProfile {
+  uint8_t id;
+  const char *name;
+  const char *deviceName;
+  uint8_t controllerType;
+  uint16_t idleDisconnectedReportMs;
+  uint16_t idlePrePairingReportMs;
+  uint16_t idleCongestedReportMs;
+  uint16_t idleConnectedReportMs;
+  uint16_t postOpenQuietMs;
+  uint16_t pairingSetupTimeoutMs;
+  uint16_t reconnectBackoffMs;
+};
+
+constexpr BtCompatibilityProfile kProBalancedProfile = {
+    kActiveProfileProBalanced,
+    "pro_balanced",
+    "Pro Controller",
+    kControllerTypeProCon,
+    150,
+    150,
+    75,
+    25,
+    800,
+    18000,
+    1000,
+};
+
+const BtCompatibilityProfile &profileForId(uint8_t id) {
+  // Pro Controller is the only active identity. The id is kept so persisted
+  // profile handling can stay stable if more profiles are added later.
+  (void)id;
+  return kProBalancedProfile;
+}
+
+const char *profileModeName(uint8_t mode) {
+  switch (mode) {
+    case kProfileModeAuto:
+      return "auto";
+    case kProfileModeProBalanced:
+      return "pro_balanced";
+    default:
+      return "unknown";
+  }
+}
+
+uint8_t profileIdFromName(const String &profileName) {
+  if (profileName.equalsIgnoreCase("PRO") ||
+      profileName.equalsIgnoreCase("BALANCED") ||
+      profileName.equalsIgnoreCase("PRO_BALANCED") ||
+      profileName.equalsIgnoreCase("PRO-CONTROLLER")) {
+    return kActiveProfileProBalanced;
+  }
+  return kActiveProfileUnknown;
+}
+
+uint8_t profileModeFromName(const String &profileName) {
+  if (profileName.equalsIgnoreCase("AUTO")) {
+    return kProfileModeAuto;
+  }
+  const uint8_t profileId = profileIdFromName(profileName);
+  if (profileId == kActiveProfileProBalanced) {
+    return kProfileModeProBalanced;
+  }
+  return UINT8_MAX;
+}
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -195,7 +267,7 @@ uint8_t kReply3001[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-uint8_t kReply3333[] = {
+uint8_t kReply3333ProCon[] = {
     0x31, 0x8e, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x08, 0x80, 0x00,
     0xa0, 0x21, 0x01, 0x00, 0x00, 0x00, 0x03, 0x00, 0x05, 0x01, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -236,6 +308,194 @@ void ClassicBtControllerTransport::begin() {
   }
 }
 
+void ClassicBtControllerTransport::selectActiveProfileForMode() {
+  if (profileMode_ == kProfileModeProBalanced) {
+    activeProfileId_ = kActiveProfileProBalanced;
+    return;
+  }
+
+  activeProfileId_ =
+      lastGoodProfileId_ != kActiveProfileUnknown ? lastGoodProfileId_ : kActiveProfileProBalanced;
+}
+
+void ClassicBtControllerTransport::applyActiveBluetoothProfile() {
+  const BtCompatibilityProfile &profile = profileForId(activeProfileId_);
+  kHidAppParam.name = const_cast<char *>(profile.deviceName);
+  kReply02[16] = profile.controllerType;
+  kReply02[24] = 0x02;
+  kReplySpiAddress0[36] = profile.controllerType;
+
+  if (hasBaseMac_) {
+    std::memcpy(&kReply02[18], baseMac_, sizeof(baseMac_));
+  }
+
+  const uint8_t gripColors[] = {0x95, 0x15, 0x15, 0x15, 0x15, 0x95};
+  std::memcpy(&kReplySpiAddress50[28], gripColors, sizeof(gripColors));
+}
+
+bool ClassicBtControllerTransport::saveBluetoothProfileMode() {
+  nvs_handle handle;
+  esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt profile nvs_open failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  err = nvs_set_str(handle, kProfileModeNvsKey, profileModeName(profileMode_));
+  if (err == ESP_OK) {
+    err = nvs_commit(handle);
+  }
+  nvs_close(handle);
+
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt profile save failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+  return true;
+}
+
+bool ClassicBtControllerTransport::saveLastGoodBluetoothProfile() {
+  nvs_handle handle;
+  esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt last-good nvs_open failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  const char *profileName = profileForId(activeProfileId_).name;
+  err = nvs_set_str(handle, kLastGoodProfileNvsKey, profileName);
+  if (err == ESP_OK) {
+    err = nvs_commit(handle);
+  }
+  nvs_close(handle);
+
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt last-good save failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  lastGoodProfileId_ = activeProfileId_;
+  Serial.printf("INFO bt last_good_profile_saved=%s\n", profileName);
+  return true;
+}
+
+bool ClassicBtControllerTransport::clearLastGoodBluetoothProfile() {
+  nvs_handle handle;
+  esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt last-good clear nvs_open failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  err = nvs_erase_key(handle, kLastGoodProfileNvsKey);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    err = ESP_OK;
+  }
+  if (err == ESP_OK) {
+    err = nvs_commit(handle);
+  }
+  nvs_close(handle);
+
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt last-good clear failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  lastGoodProfileId_ = kActiveProfileUnknown;
+  stableProfileSaved_ = false;
+  Serial.println("INFO bt last_good_profile_cleared=true");
+  return true;
+}
+
+bool ClassicBtControllerTransport::removeBondedDevices() {
+  if (!gapReady_) {
+    Serial.println("WARN bt clear-pairing skipped reason=gap-not-ready");
+    return false;
+  }
+
+  int bondCount = esp_bt_gap_get_bond_device_num();
+  if (bondCount <= 0) {
+    Serial.println("INFO bt bonded_devices_cleared=0");
+    return true;
+  }
+
+  auto *bondedDevices =
+      static_cast<esp_bd_addr_t *>(std::calloc(static_cast<size_t>(bondCount), sizeof(esp_bd_addr_t)));
+  if (bondedDevices == nullptr) {
+    Serial.println("WARN bt clear-pairing failed reason=alloc");
+    return false;
+  }
+
+  int listCount = bondCount;
+  esp_err_t err = esp_bt_gap_get_bond_device_list(&listCount, bondedDevices);
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt get_bond_device_list failed err=%s\n", esp_err_to_name(err));
+    std::free(bondedDevices);
+    return false;
+  }
+
+  bool ok = true;
+  for (int index = 0; index < listCount; index += 1) {
+    err = esp_bt_gap_remove_bond_device(bondedDevices[index]);
+    Serial.printf(
+        "INFO bt remove_bond_device peer=%s err=%s\n",
+        formatBluetoothAddress(bondedDevices[index]).c_str(),
+        esp_err_to_name(err));
+    if (err != ESP_OK) {
+      ok = false;
+    }
+  }
+
+  std::free(bondedDevices);
+  Serial.printf("INFO bt bonded_devices_cleared=%d\n", ok ? listCount : 0);
+  return ok;
+}
+
+bool ClassicBtControllerTransport::clearBluetoothPairing() {
+  Serial.println("INFO bt clear-pairing requested");
+  const bool removedBonds = removeBondedDevices();
+  clearLastGoodBluetoothProfile();
+
+  suppressConnectionFailure_ = true;
+  shutdownClassicBluetooth(true);
+  clearInputs();
+  selectActiveProfileForMode();
+  applyActiveBluetoothProfile();
+  resetSessionStabilityTracking();
+  hasPeerAddress_ = false;
+  lastConnectionEventReason_ = "clear-pairing";
+
+  if (!initializeClassicBluetooth()) {
+    suppressConnectionFailure_ = false;
+    Serial.printf("WARN bt clear-pairing restart failed step=%s err=%s\n", initStep_, initError_);
+    return false;
+  }
+  suppressConnectionFailure_ = false;
+
+  Serial.printf(
+      "INFO bt clear-pairing completed bonds_removed=%s base_mac=%s\n",
+      boolName(removedBonds),
+      hasBaseMac_ ? formatBluetoothAddress(baseMac_).c_str() : "unknown");
+  return true;
+}
+
+bool ClassicBtControllerTransport::setBluetoothProfileMode(const String &profileName) {
+  const uint8_t mode = profileModeFromName(profileName);
+  if (mode == UINT8_MAX) {
+    Serial.printf("WARN bt profile invalid value=\"%s\"\n", profileName.c_str());
+    return false;
+  }
+
+  profileMode_ = mode;
+  selectActiveProfileForMode();
+  applyActiveBluetoothProfile();
+  stableProfileSaved_ = false;
+  connectionFailureCount_ = 0;
+  failuresBeforeStable_ = 0;
+  lastConnectionEventReason_ = "manual-profile";
+  return saveBluetoothProfileMode();
+}
+
 bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -253,6 +513,7 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   bool shouldPersistDerivedMac = false;
   nvs_handle handle;
   err = nvs_open("storage", NVS_READWRITE, &handle);
+  const bool nvsHandleOpen = err == ESP_OK;
   if (err == ESP_OK) {
     size_t size = sizeof(baseMac);
     err = nvs_get_blob(handle, "mac_addr", baseMac, &size);
@@ -286,9 +547,35 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
     }
   }
 
-  if (err == ESP_OK || shouldPersistDerivedMac) {
+  if (nvsHandleOpen) {
+    char profileModeNameBuffer[24] = {};
+    size_t profileModeSize = sizeof(profileModeNameBuffer);
+    const esp_err_t profileModeErr =
+        nvs_get_str(handle, kProfileModeNvsKey, profileModeNameBuffer, &profileModeSize);
+    if (profileModeErr == ESP_OK) {
+      const uint8_t mode = profileModeFromName(String(profileModeNameBuffer));
+      if (mode != UINT8_MAX) {
+        profileMode_ = mode;
+      }
+    }
+
+    char lastGoodProfileBuffer[24] = {};
+    size_t lastGoodProfileSize = sizeof(lastGoodProfileBuffer);
+    const esp_err_t lastGoodErr =
+        nvs_get_str(handle, kLastGoodProfileNvsKey, lastGoodProfileBuffer, &lastGoodProfileSize);
+    if (lastGoodErr == ESP_OK) {
+      lastGoodProfileId_ = profileIdFromName(String(lastGoodProfileBuffer));
+    }
+  }
+
+  if (nvsHandleOpen) {
     nvs_close(handle);
   }
+
+  std::memcpy(baseMac_, baseMac, sizeof(baseMac_));
+  hasBaseMac_ = true;
+  selectActiveProfileForMode();
+  applyActiveBluetoothProfile();
 
   err = esp_base_mac_addr_set(baseMac);
   if (err != ESP_OK) {
@@ -297,14 +584,17 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   }
 
   Serial.printf(
-      "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X source=%s\n",
+      "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X source=%s profile_mode=%s active_profile=%s last_good=%s\n",
       baseMac[0],
       baseMac[1],
       baseMac[2],
       baseMac[3],
       baseMac[4],
       baseMac[5],
-      baseMacSource);
+      baseMacSource,
+      profileModeName(profileMode_),
+      profileForId(activeProfileId_).name,
+      lastGoodProfileId_ == kActiveProfileUnknown ? "none" : profileForId(lastGoodProfileId_).name);
   return true;
 }
 
@@ -351,7 +641,7 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   gapReady_ = true;
 
   initStep_ = "set_device_name";
-  err = esp_bt_dev_set_device_name(BT_DEVICE_NAME);
+  err = esp_bt_dev_set_device_name(profileForId(activeProfileId_).deviceName);
   if (err != ESP_OK) {
     initError_ = esp_err_to_name(err);
     Serial.printf("WARN set_device_name failed err=%s\n", esp_err_to_name(err));
@@ -395,10 +685,12 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   }
 
   Serial.printf(
-      "INFO bt init requested name=\"%s\" provider=\"%s\" desc=\"%s\"\n",
-      BT_DEVICE_NAME,
+      "INFO bt init requested name=\"%s\" provider=\"%s\" desc=\"%s\" profile_mode=%s active_profile=%s\n",
+      profileForId(activeProfileId_).deviceName,
       BT_DEVICE_PROVIDER,
-      BT_DEVICE_DESCRIPTION);
+      BT_DEVICE_DESCRIPTION,
+      profileModeName(profileMode_),
+      profileForId(activeProfileId_).name);
   return true;
 }
 
@@ -431,9 +723,10 @@ void ClassicBtControllerTransport::clearConnectionState() {
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
   reconnectLastPeerOnRegister_ = false;
+  resetSessionStabilityTracking();
 }
 
-bool ClassicBtControllerTransport::shutdownClassicBluetooth() {
+bool ClassicBtControllerTransport::shutdownClassicBluetooth(bool unplugVirtualCable) {
   initStep_ = "shutdown";
   initError_ = "none";
   readyForReports_ = false;
@@ -444,11 +737,15 @@ bool ClassicBtControllerTransport::shutdownClassicBluetooth() {
     Serial.printf("WARN bt shutdown scan_mode err=%s\n", esp_err_to_name(scanErr));
   }
 
-  const esp_err_t unplugErr = esp_bt_hid_device_virtual_cable_unplug();
-  if (!isIgnorableBluetoothError(unplugErr)) {
-    Serial.printf("WARN bt shutdown vc_unplug err=%s\n", esp_err_to_name(unplugErr));
+  if (unplugVirtualCable) {
+    const esp_err_t unplugErr = esp_bt_hid_device_virtual_cable_unplug();
+    if (!isIgnorableBluetoothError(unplugErr)) {
+      Serial.printf("WARN bt shutdown vc_unplug err=%s\n", esp_err_to_name(unplugErr));
+    }
+    delay(200);
+  } else {
+    Serial.println("INFO bt shutdown keeping virtual cable");
   }
-  delay(200);
 
   const esp_err_t disconnectErr = esp_bt_hid_device_disconnect();
   if (!isIgnorableBluetoothError(disconnectErr)) {
@@ -605,27 +902,131 @@ void ClassicBtControllerTransport::ensureSendTask() {
       0);
 }
 
+void ClassicBtControllerTransport::resetSessionStabilityTracking() {
+  openedAtMs_ = 0;
+  pairedAtMs_ = 0;
+  stableProfileSaved_ = false;
+  pairedByBondedReconnect_ = false;
+  lastStableDurationMs_ = 0;
+  sessionFailureRecorded_ = false;
+}
+
+uint32_t ClassicBtControllerTransport::postOpenQuietRemainingMs() const {
+  if (!connected_ || openedAtMs_ == 0) {
+    return 0;
+  }
+
+  const uint32_t elapsed = millis() - openedAtMs_;
+  const uint16_t quietMs = profileForId(activeProfileId_).postOpenQuietMs;
+  return elapsed >= quietMs ? 0 : quietMs - elapsed;
+}
+
+bool ClassicBtControllerTransport::isPostOpenQuietActive() const {
+  return postOpenQuietRemainingMs() > 0;
+}
+
+void ClassicBtControllerTransport::recordConnectionFailure(const char *reason) {
+  if (sessionFailureRecorded_) {
+    return;
+  }
+
+  sessionFailureRecorded_ = true;
+
+  if (connectionFailureCount_ < UINT8_MAX) {
+    connectionFailureCount_ += 1;
+  }
+  lastConnectionEventReason_ = reason;
+}
+
+void ClassicBtControllerTransport::maybeMarkStableConnection() {
+  if (!connected_ || !paired_ || pairedAtMs_ == 0 || stableProfileSaved_) {
+    return;
+  }
+
+  const uint32_t stableDurationMs = millis() - pairedAtMs_;
+  if (stableDurationMs < kStableConnectionMs || consecutiveSendReportFailures_ > 0) {
+    return;
+  }
+
+  lastStableDurationMs_ = stableDurationMs;
+  failuresBeforeStable_ = connectionFailureCount_;
+  connectionFailureCount_ = 0;
+  stableProfileSaved_ = true;
+
+  if (profileMode_ == kProfileModeAuto) {
+    saveLastGoodBluetoothProfile();
+  }
+}
+
+void ClassicBtControllerTransport::maybeInferBondedReconnectReady() {
+  if (!connected_ || paired_ || openedAtMs_ == 0 || !authComplete_) {
+    return;
+  }
+
+  if (lastGoodProfileId_ == kActiveProfileUnknown || lastGoodProfileId_ != activeProfileId_) {
+    return;
+  }
+
+  if (!gapReady_ || esp_bt_gap_get_bond_device_num() <= 0) {
+    return;
+  }
+
+  if (millis() - openedAtMs_ < kBondedReconnectInferReadyMs) {
+    return;
+  }
+
+  pairedByBondedReconnect_ = true;
+  markControllerPaired();
+  Serial.printf(
+      "INFO bt paired inferred reason=bonded-reconnect profile=%s wait_ms=%u\n",
+      profileForId(activeProfileId_).name,
+      kBondedReconnectInferReadyMs);
+}
+
+void ClassicBtControllerTransport::maybeRecoverStuckPairing() {
+  if (!connected_ || paired_ || openedAtMs_ == 0) {
+    return;
+  }
+
+  const BtCompatibilityProfile &profile = profileForId(activeProfileId_);
+  if (millis() - openedAtMs_ < profile.pairingSetupTimeoutMs) {
+    return;
+  }
+
+  Serial.printf(
+      "WARN bt pairing timeout elapsed_ms=%lu profile=%s action=reconnectable\n",
+      static_cast<unsigned long>(millis() - openedAtMs_),
+      profile.name);
+  esp_bt_hid_device_disconnect();
+  enterReconnectableState("pairing-timeout");
+}
+
 uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
+  const BtCompatibilityProfile &profile = profileForId(activeProfileId_);
   if (!connected_ && !paired_) {
-    return kIdleDisconnectedReportIntervalMs;
+    return profile.idleDisconnectedReportMs;
   }
 
   if (reportCongested_ || consecutiveSendReportFailures_ >= 3) {
-    return kIdleCongestedReportIntervalMs;
+    return profile.idleCongestedReportMs;
   }
 
   if (!paired_ || !authComplete_) {
-    return kIdlePrePairingReportIntervalMs;
+    return profile.idlePrePairingReportMs;
   }
 
-  return kIdleConnectedReportIntervalMs;
+  return profile.idleConnectedReportMs;
 }
 
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   while (true) {
-    if (!transport->explicitInputActive_) {
-      transport->sendCurrentInputReport(false);
+    transport->maybeInferBondedReconnectReady();
+    transport->maybeMarkStableConnection();
+    transport->maybeRecoverStuckPairing();
+    if (!transport->explicitInputActive_ && transport->connected_ &&
+        !transport->isPostOpenQuietActive()) {
+      transport->sendCurrentInputReport(false, false, true);
     }
     vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
   }
@@ -633,6 +1034,8 @@ void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
 
 bool ClassicBtControllerTransport::pressButtons(
     uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
+  maybeMarkStableConnection();
+
   if (!beginExplicitInput()) {
     return false;
   }
@@ -649,6 +1052,8 @@ bool ClassicBtControllerTransport::pressButtons(
 
 bool ClassicBtControllerTransport::moveDirection(
     int x, int y, uint16_t holdMs, uint16_t settleMs) {
+  maybeMarkStableConnection();
+
   if (!beginExplicitInput()) {
     return false;
   }
@@ -667,25 +1072,58 @@ bool ClassicBtControllerTransport::moveDirection(
 }
 
 bool ClassicBtControllerTransport::resetConnection(bool reconnectLastPeer) {
+  maybeMarkStableConnection();
+
   const bool shouldReconnectLastPeer = reconnectLastPeer && hasPeerAddress_;
   Serial.printf(
       "INFO bt reset requested mode=stack-restart reconnect_last_peer=%s\n",
       boolName(shouldReconnectLastPeer));
 
+  suppressConnectionFailure_ = true;
   shutdownClassicBluetooth();
 
   clearInputs();
+  selectActiveProfileForMode();
+  applyActiveBluetoothProfile();
+  resetSessionStabilityTracking();
   reconnectLastPeerOnRegister_ = shouldReconnectLastPeer;
 
   if (!initializeClassicBluetooth()) {
+    suppressConnectionFailure_ = false;
     reconnectLastPeerOnRegister_ = false;
     Serial.printf("WARN bt reset restart failed step=%s err=%s\n", initStep_, initError_);
     return false;
   }
+  suppressConnectionFailure_ = false;
 
   Serial.printf(
       "INFO bt reset completed mode=stack-restart reconnect_last_peer=%s\n",
       boolName(reconnectLastPeerOnRegister_));
+  return true;
+}
+
+bool ClassicBtControllerTransport::configureBluetoothProfile(const String &profileName) {
+  Serial.printf("INFO bt profile requested value=\"%s\"\n", profileName.c_str());
+  if (!setBluetoothProfileMode(profileName)) {
+    return false;
+  }
+
+  suppressConnectionFailure_ = true;
+  shutdownClassicBluetooth();
+  clearInputs();
+  resetSessionStabilityTracking();
+
+  if (!initializeClassicBluetooth()) {
+    suppressConnectionFailure_ = false;
+    Serial.printf("WARN bt profile restart failed step=%s err=%s\n", initStep_, initError_);
+    return false;
+  }
+  suppressConnectionFailure_ = false;
+
+  Serial.printf(
+      "INFO bt profile applied mode=%s active=%s\n",
+      profileModeName(profileMode_),
+      profileForId(activeProfileId_).name);
   return true;
 }
 
@@ -699,7 +1137,16 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   reportCongested_ = false;
   consecutiveSendReportFailures_ = 0;
   lastDropReason_ = reason;
+  openedAtMs_ = 0;
+  pairedAtMs_ = 0;
   clearInputs();
+  if (!suppressConnectionFailure_) {
+    recordConnectionFailure(reason);
+  }
+  if (profileMode_ == kProfileModeAuto) {
+    applyActiveBluetoothProfile();
+    esp_bt_dev_set_device_name(profileForId(activeProfileId_).deviceName);
+  }
 
   esp_err_t err = ESP_OK;
   if (gapReady_ && appRegistered_) {
@@ -715,8 +1162,48 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
 }
 
 void ClassicBtControllerTransport::printStatus(Print &output) const {
+  const BtCompatibilityProfile &profile = profileForId(activeProfileId_);
   output.println("INFO bt_mode=classic-bt-hid");
-  output.println("INFO bt_profile=uartswitchcon-pro-controller");
+  output.print("INFO bt_profile_mode=");
+  output.println(profileModeName(profileMode_));
+  output.print("INFO bt_active_profile=");
+  output.println(profile.name);
+  output.print("INFO bt_profile=");
+  output.println(profile.name);
+  output.print("INFO bt_device_name=");
+  output.println(profile.deviceName);
+  output.print("INFO bt_base_mac=");
+  output.println(hasBaseMac_ ? formatBluetoothAddress(baseMac_) : "unknown");
+  output.print("INFO bt_controller_type=");
+  output.println(profile.controllerType);
+  output.print("INFO bt_button_map=");
+  output.println("pro");
+  output.print("INFO bt_bonded_devices=");
+  output.println(gapReady_ ? esp_bt_gap_get_bond_device_num() : -1);
+  output.print("INFO bt_last_good_profile=");
+  output.println(lastGoodProfileId_ == kActiveProfileUnknown ? "none" : profileForId(lastGoodProfileId_).name);
+  output.print("INFO bt_last_connection_event=");
+  output.println(lastConnectionEventReason_);
+  output.print("INFO bt_connection_failures=");
+  output.println(connectionFailureCount_);
+  output.print("INFO bt_failures_before_stable=");
+  output.println(failuresBeforeStable_);
+  output.print("INFO bt_last_stable_duration_ms=");
+  output.println(lastStableDurationMs_);
+  output.print("INFO bt_stable_profile_saved=");
+  output.println(boolName(stableProfileSaved_));
+  output.print("INFO bt_post_open_quiet_ms=");
+  output.println(profile.postOpenQuietMs);
+  output.print("INFO bt_post_open_quiet_remaining_ms=");
+  output.println(postOpenQuietRemainingMs());
+  output.print("INFO bt_pairing_setup_timeout_ms=");
+  output.println(profile.pairingSetupTimeoutMs);
+  output.print("INFO bt_connected_unpaired_ms=");
+  output.println(connected_ && !paired_ && openedAtMs_ != 0 ? millis() - openedAtMs_ : 0);
+  output.print("INFO bt_idle_pre_pairing_report_ms=");
+  output.println(profile.idlePrePairingReportMs);
+  output.print("INFO bt_idle_connected_report_ms=");
+  output.println(profile.idleConnectedReportMs);
   output.print("INFO bt_stack_started=");
   output.println(boolName(stackStarted_));
   output.print("INFO bt_bluedroid_ready=");
@@ -737,6 +1224,8 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println(boolName(pairingComplete_));
   output.print("INFO bt_paired=");
   output.println(boolName(paired_));
+  output.print("INFO bt_paired_inferred=");
+  output.println(boolName(pairedByBondedReconnect_));
   output.print("INFO bt_ready_for_reports=");
   output.println(boolName(isControllerInputReady()));
   output.print("INFO bt_init_step=");
@@ -782,7 +1271,8 @@ bool ClassicBtControllerTransport::isControllerInputReady() const {
   return isHidReportChannelOpen() && paired_;
 }
 
-bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool waitForSendEvent) {
+bool ClassicBtControllerTransport::sendCurrentInputReport(
+    bool logFailure, bool waitForSendEvent, bool allowSetupReport) {
   readyForReports_ = isHidReportChannelOpen();
 
   if (!readyForReports_) {
@@ -795,11 +1285,18 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool 
     return false;
   }
 
+  if (!paired_ && !allowSetupReport) {
+    if (logFailure) {
+      Serial.println("WARN bt report skipped reason=not-paired");
+    }
+    return false;
+  }
+
   updateInputReport();
 
   const bool shouldWaitForSendEvent = waitForSendEvent && paired_;
   uint32_t expectedEventCount = 0;
-  const bool shouldSendFullReport = connected_ || paired_;
+  const bool shouldSendFullReport = paired_;
   const uint8_t *payload = shouldSendFullReport ? report30_ : dummyReport_;
   const size_t payloadLength = shouldSendFullReport ? sizeof(report30_) : sizeof(dummyReport_);
 
@@ -909,6 +1406,12 @@ bool ClassicBtControllerTransport::waitForInputReportDrain(uint32_t timeoutMs, b
 bool ClassicBtControllerTransport::beginExplicitInput() {
   explicitInputActive_ = true;
 
+  const uint32_t quietRemainingMs = postOpenQuietRemainingMs();
+  if (quietRemainingMs > 0) {
+    Serial.printf("INFO bt post_open_quiet wait_ms=%lu\n", static_cast<unsigned long>(quietRemainingMs));
+    delay(quietRemainingMs);
+  }
+
   if (inputReportSendMutex_ == nullptr) {
     return true;
   }
@@ -987,6 +1490,7 @@ void ClassicBtControllerTransport::resetInputReportTracking() {
 void ClassicBtControllerTransport::markControllerPaired() {
   if (!paired_) {
     resetInputReportTracking();
+    pairedAtMs_ = millis();
   }
   paired_ = true;
   pairingComplete_ = true;
@@ -1129,13 +1633,15 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
     return;
   }
   if (data[9] == 48) {
+    pairedByBondedReconnect_ = false;
     markControllerPaired();
     sendSubcommandReply(0x21, kReply3001, sizeof(kReply3001), "reply3001");
     return;
   }
   if (data[9] == 33 && data[10] == 33) {
+    pairedByBondedReconnect_ = false;
     markControllerPaired();
-    sendSubcommandReply(0x21, kReply3333, sizeof(kReply3333), "reply3333");
+    sendSubcommandReply(0x21, kReply3333ProCon, sizeof(kReply3333ProCon), "reply3333-pro");
     return;
   }
 }
@@ -1164,11 +1670,20 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
       break;
     case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
       Serial.printf("INFO bt acl-connect status=%u\n", param->acl_conn_cmpl_stat.stat);
+      if (param->acl_conn_cmpl_stat.stat == ESP_BT_STATUS_SUCCESS) {
+        sessionFailureRecorded_ = false;
+      }
       break;
     case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT:
       Serial.printf("INFO bt acl-disconnect reason=%u\n", param->acl_disconn_cmpl_stat.reason);
       lastAclDisconnectReason_ = param->acl_disconn_cmpl_stat.reason;
       enterReconnectableState("acl-disconnect");
+      break;
+    case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT:
+      Serial.printf(
+          "INFO bt remove-bond-complete status=%d peer=%s\n",
+          param->remove_bond_dev_cmpl.status,
+          formatBluetoothAddress(param->remove_bond_dev_cmpl.bda).c_str());
       break;
     default:
       break;
@@ -1238,15 +1753,20 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       if (connected_) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
+        openedAtMs_ = millis();
+        pairedAtMs_ = 0;
+        stableProfileSaved_ = false;
+        sessionFailureRecorded_ = false;
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
-        sendCurrentInputReport(false);
       }
       Serial.printf(
-          "INFO bt hid event=open status=%d conn=%d peer=%s\n",
+          "INFO bt hid event=open status=%d conn=%d peer=%s profile=%s quiet_ms=%u\n",
           param->open.status,
           param->open.conn_status,
-          connected_ ? formatBluetoothAddress(lastPeerAddress_).c_str() : "unknown");
+          connected_ ? formatBluetoothAddress(lastPeerAddress_).c_str() : "unknown",
+          profileForId(activeProfileId_).name,
+          profileForId(activeProfileId_).postOpenQuietMs);
       break;
     case ESP_HIDD_CLOSE_EVT:
       lastHidCloseStatus_ = param->close.status;
@@ -1388,6 +1908,13 @@ bool ClassicBtControllerTransport::resetConnection(bool reconnectLastPeer) {
   return false;
 }
 
+bool ClassicBtControllerTransport::configureBluetoothProfile(const String &profileName) {
+  (void)profileName;
+  return false;
+}
+
+bool ClassicBtControllerTransport::clearBluetoothPairing() { return false; }
+
 void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println("INFO bt_mode=classic-bt-disabled");
 }
@@ -1404,11 +1931,30 @@ void ClassicBtControllerTransport::setLeftStickFromVector(int x, int y) {
 }
 void ClassicBtControllerTransport::updateInputReport() {}
 void ClassicBtControllerTransport::ensureSendTask() {}
+void ClassicBtControllerTransport::applyActiveBluetoothProfile() {}
+void ClassicBtControllerTransport::selectActiveProfileForMode() {}
+bool ClassicBtControllerTransport::saveBluetoothProfileMode() { return false; }
+bool ClassicBtControllerTransport::saveLastGoodBluetoothProfile() { return false; }
+bool ClassicBtControllerTransport::clearLastGoodBluetoothProfile() { return false; }
+bool ClassicBtControllerTransport::removeBondedDevices() { return false; }
+bool ClassicBtControllerTransport::setBluetoothProfileMode(const String &profileName) {
+  (void)profileName;
+  return false;
+}
+void ClassicBtControllerTransport::resetSessionStabilityTracking() {}
+void ClassicBtControllerTransport::recordConnectionFailure(const char *reason) { (void)reason; }
+void ClassicBtControllerTransport::maybeMarkStableConnection() {}
+void ClassicBtControllerTransport::maybeInferBondedReconnectReady() {}
+void ClassicBtControllerTransport::maybeRecoverStuckPairing() {}
+bool ClassicBtControllerTransport::isPostOpenQuietActive() const { return false; }
+uint32_t ClassicBtControllerTransport::postOpenQuietRemainingMs() const { return 0; }
 bool ClassicBtControllerTransport::isHidReportChannelOpen() const { return false; }
 bool ClassicBtControllerTransport::isControllerInputReady() const { return false; }
-bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool waitForSendEvent) {
+bool ClassicBtControllerTransport::sendCurrentInputReport(
+    bool logFailure, bool waitForSendEvent, bool allowSetupReport) {
   (void)logFailure;
   (void)waitForSendEvent;
+  (void)allowSetupReport;
   return false;
 }
 bool ClassicBtControllerTransport::shouldRetryAfterTransientSendFailure() const { return false; }

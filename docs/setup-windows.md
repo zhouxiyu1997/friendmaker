@@ -152,12 +152,14 @@ Flash the recommended firmware environment:
 
 ```powershell
 cd C:\path\to\friendmaker\firmware\esp32
+$env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t erase --upload-port COM3
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 
 If `pio` is already in `PATH`, you can also run:
 
 ```powershell
+pio run -e esp32dev_wireless -t erase --upload-port COM3
 pio run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 

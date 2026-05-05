@@ -26,10 +26,21 @@ bool MockControllerTransport::resetConnection(bool reconnectLastPeer) {
   return true;
 }
 
+bool MockControllerTransport::configureBluetoothProfile(const String &profileName) {
+  (void)profileName;
+  return true;
+}
+
+bool MockControllerTransport::clearBluetoothPairing() { return true; }
+
 void MockControllerTransport::printStatus(Print &output) const {
   output.print("INFO transport=");
   output.println(name());
   output.println("INFO bt_mode=mock");
+  output.println("INFO bt_profile_mode=auto");
+  output.println("INFO bt_active_profile=mock");
+  output.println("INFO bt_base_mac=mock");
+  output.println("INFO bt_bonded_devices=0");
   output.println("INFO connected=false");
 }
 
