@@ -85,6 +85,7 @@ function buildReferencePalette(): string[] {
 
 export const DEFAULT_PALETTE = buildReferencePalette();
 export const DEFAULT_OFFICIAL_PALETTE = OFFICIAL_PALETTE;
+export const DEFAULT_ACK_TIMEOUT_MS = 5_000;
 
 export const DEFAULT_PROFILE: DrawingProfile = {
   profileName: "switch-mono-256",
@@ -97,7 +98,7 @@ export const DEFAULT_PROFILE: DrawingProfile = {
   homeDuration: 1800,
   buttonPressDuration: 65,
   colorChangeDuration: 450,
-  ackTimeoutMs: 2_000,
+  ackTimeoutMs: DEFAULT_ACK_TIMEOUT_MS,
   commandRetryCount: 1,
   drawButton: "A",
   colorMode: "mono",

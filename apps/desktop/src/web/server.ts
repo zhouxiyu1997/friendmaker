@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { generateDrawPlan } from "../app/generateDrawPlan.js";
 import { buildRecoveryExecutionPlan, deriveResumeProgress } from "../app/recovery.js";
 import { applyCliOptions, type CliOptions } from "../cli/args.js";
+import { DEFAULT_ACK_TIMEOUT_MS } from "../config/defaultProfile.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
 import {
@@ -78,6 +79,10 @@ const defaultAppDataRoot = path.join(os.homedir(), ".friend-maker");
 const MAX_FIRMWARE_FLASH_LOG_LINES = 800;
 const FIRMWARE_FLASH_TIMEOUT_MS = 15 * 60 * 1_000;
 const FIRMWARE_FLASH_CANCEL_GRACE_MS = 5_000;
+
+function normalizeAckTimeoutMs(value?: number): number {
+  return Math.max(value ?? DEFAULT_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
+}
 const serialSessionManager = new SerialSessionManager();
 
 export interface StartWebServerOptions {
@@ -1173,7 +1178,7 @@ async function executeCommands(body: {
   }
 
   const target = body.target === "serial" ? "serial" : "simulate";
-  const ackTimeoutMs = body.ackTimeoutMs ?? 5_000;
+  const ackTimeoutMs = normalizeAckTimeoutMs(body.ackTimeoutMs);
   const retries = body.retries ?? 1;
   const lines: string[] = [`INFO target=${target} commands=${body.commands.length}`];
 
@@ -1241,7 +1246,7 @@ async function runManagedExecution(
     errorAtCommand?: number;
   },
 ): Promise<void> {
-  const ackTimeoutMs = body.ackTimeoutMs ?? 5_000;
+  const ackTimeoutMs = normalizeAckTimeoutMs(body.ackTimeoutMs);
   const retries = body.retries ?? 1;
 
   appendManagedExecutionLine(
@@ -1647,7 +1652,7 @@ async function handleExecutionStart(
             profileSummary: normalizeRecoveryProfileSummary(body.profileSummary),
             serialOptions: {
               baudRate: body.baudRate ?? 115200,
-              ackTimeoutMs: body.ackTimeoutMs ?? 5_000,
+              ackTimeoutMs: normalizeAckTimeoutMs(body.ackTimeoutMs),
               retries: body.retries ?? 1,
             },
           })

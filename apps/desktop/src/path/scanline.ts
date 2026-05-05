@@ -109,35 +109,6 @@ function buildSerpentineRows(pixels: Pixel[], fromBottom = false): Pixel[] {
   });
 }
 
-function rotatePixelsToNearestStart(
-  pixels: Pixel[],
-  current: { x: number; y: number },
-  grid: BrushGrid,
-): Pixel[] {
-  if (pixels.length <= 1) {
-    return pixels;
-  }
-
-  let nearestIndex = 0;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
-  pixels.forEach((pixel, index) => {
-    const target = toCanvasPosition(pixel, grid);
-    const distance = Math.abs(target.x - current.x) + Math.abs(target.y - current.y);
-
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestIndex = index;
-    }
-  });
-
-  if (nearestIndex === 0) {
-    return pixels;
-  }
-
-  return [...pixels.slice(nearestIndex), ...pixels.slice(0, nearestIndex)];
-}
-
 function chooseBestSerpentineOrder(
   pixels: Pixel[],
   current: { x: number; y: number },
@@ -147,26 +118,31 @@ function chooseBestSerpentineOrder(
     return pixels;
   }
 
-  const topDown = rotatePixelsToNearestStart(buildSerpentineRows(pixels, false), current, grid);
-  const bottomUp = rotatePixelsToNearestStart(buildSerpentineRows(pixels, true), current, grid);
+  const topDown = buildSerpentineRows(pixels, false);
+  const bottomUp = buildSerpentineRows(pixels, true);
+  const candidates = [
+    topDown,
+    [...topDown].reverse(),
+    bottomUp,
+    [...bottomUp].reverse(),
+  ];
+  let bestOrder = candidates[0] ?? pixels;
+  let bestDistance = Number.POSITIVE_INFINITY;
 
-  const topFirst = topDown[0];
-  const bottomFirst = bottomUp[0];
+  for (const candidate of candidates) {
+    if (candidate.length === 0) {
+      continue;
+    }
 
-  if (!topFirst) {
-    return bottomUp;
+    const distance = estimateTravelDistance(current, candidate, grid);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestOrder = candidate;
+    }
   }
 
-  if (!bottomFirst) {
-    return topDown;
-  }
-
-  const topStart = toCanvasPosition(topFirst, grid);
-  const bottomStart = toCanvasPosition(bottomFirst, grid);
-  const topDistance = Math.abs(topStart.x - current.x) + Math.abs(topStart.y - current.y);
-  const bottomDistance = Math.abs(bottomStart.x - current.x) + Math.abs(bottomStart.y - current.y);
-
-  return topDistance <= bottomDistance ? topDown : bottomUp;
+  return bestOrder;
 }
 
 function collectConnectedComponents(pixels: Pixel[]): Pixel[][] {
@@ -341,11 +317,7 @@ function getOrderedPixelsForColor(
   }
 
   const components = collectConnectedComponents(pixels);
-  const legacyPixels = rotatePixelsToNearestStart(
-    getLegacyScanlinePixels(pixels),
-    current,
-    grid,
-  );
+  const legacyPixels = chooseBestSerpentineOrder(pixels, current, grid);
 
   if (components.length <= 1) {
     return legacyPixels;
@@ -436,32 +408,33 @@ function findOptimalComponentOrder(
     pre: (typeof precomputed)[number],
     pos: { x: number; y: number },
   ): { pixels: Pixel[]; endPos: { x: number; y: number } } {
-    const td = rotatePixelsToNearestStart(pre.topDown, pos, grid);
-    const bu = rotatePixelsToNearestStart(pre.bottomUp, pos, grid);
+    const candidates = [
+      pre.topDown,
+      [...pre.topDown].reverse(),
+      pre.bottomUp,
+      [...pre.bottomUp].reverse(),
+    ];
+    let bestPixels: Pixel[] = [];
+    let bestDistance = Number.POSITIVE_INFINITY;
 
-    const tdStart = td[0];
-    const buStart = bu[0];
+    for (const candidate of candidates) {
+      if (candidate.length === 0) {
+        continue;
+      }
 
-    if (!tdStart) {
-      const last = bu[bu.length - 1];
-      return { pixels: bu, endPos: last ? toCanvasPosition(last, grid) : pos };
+      const distance = estimateTravelDistance(pos, candidate, grid);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestPixels = candidate;
+      }
     }
-    if (!buStart) {
-      const last = td[td.length - 1];
-      return { pixels: td, endPos: last ? toCanvasPosition(last, grid) : pos };
-    }
 
-    const tdPos = toCanvasPosition(tdStart, grid);
-    const buPos = toCanvasPosition(buStart, grid);
-    const tdDist = Math.abs(tdPos.x - pos.x) + Math.abs(tdPos.y - pos.y);
-    const buDist = Math.abs(buPos.x - pos.x) + Math.abs(buPos.y - pos.y);
-
-    if (tdDist <= buDist) {
-      const last = td[td.length - 1];
-      return { pixels: td, endPos: last ? toCanvasPosition(last, grid) : pos };
-    }
-    const last = bu[bu.length - 1];
-    return { pixels: bu, endPos: last ? toCanvasPosition(last, grid) : pos };
+    const last = bestPixels[bestPixels.length - 1];
+    return {
+      pixels: bestPixels,
+      endPos: last ? toCanvasPosition(last, grid) : pos,
+    };
   }
 
   let bestOrder: Pixel[] = [];

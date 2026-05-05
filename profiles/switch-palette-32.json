@@ -9,7 +9,7 @@
   "homeDuration": 1800,
   "buttonPressDuration": 100,
   "colorChangeDuration": 650,
-  "ackTimeoutMs": 2000,
+  "ackTimeoutMs": 5000,
   "commandRetryCount": 1,
   "drawButton": "A",
   "colorMode": "palette",
