@@ -1,4 +1,4 @@
-import type { DrawingMask, DrawingProfile, PixelizationResult } from "../types.js";
+import type { DrawingMask, DrawingProfile, NoiseCleanupMode, PixelMap, PixelizationResult } from "../types.js";
 import { createBrushGrid } from "../brushGrid.js";
 import type { ImageSource } from "./loadImage.js";
 import {
@@ -10,6 +10,7 @@ import {
 import { autoRemoveBackground } from "./removeBackground.js";
 import { resizeImage } from "./resizeImage.js";
 import { quantizePixels } from "./quantize.js";
+import { cleanupPixelMapNoise } from "./noiseCleanup.js";
 
 function collapsePixelMapForBrush(
   pixelMap: PixelizationResult["pixelMap"],
@@ -135,6 +136,16 @@ function collapsePixelMapForBrush(
   return collapsed;
 }
 
+function collectUsedColorIndexes(pixelMap: PixelMap): number[] {
+  return Array.from(
+    new Set(
+      pixelMap.flatMap((row) =>
+        row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).map((pixel) => pixel.colorIndex),
+      ),
+    ),
+  ).sort((a, b) => a - b);
+}
+
 export async function pixelizeImage(
   imageSource: ImageSource,
   profile: DrawingProfile,
@@ -144,6 +155,7 @@ export async function pixelizeImage(
     imageOffsetYPercent?: number;
     removeBackground?: boolean;
     drawingMask?: DrawingMask | null;
+    noiseCleanupMode?: NoiseCleanupMode;
   },
 ): Promise<PixelizationResult> {
   const grid = createBrushGrid(profile);
@@ -172,18 +184,16 @@ export async function pixelizeImage(
     monoThreshold: profile.monoThreshold,
     palette: profile.palette,
   });
-  const pixelMap = collapsePixelMapForBrush(fullPixelMap, profile, drawingMaskCoverageMap);
-
-  const usedColorIndexes = Array.from(
-    new Set(
-      pixelMap.flatMap((row) =>
-        row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).map((pixel) => pixel.colorIndex),
-      ),
-    ),
-  ).sort((a, b) => a - b);
+  const collapsedPixelMap = collapsePixelMapForBrush(fullPixelMap, profile, drawingMaskCoverageMap);
+  const cleanupResult = cleanupPixelMapNoise(collapsedPixelMap, {
+    mode: options?.noiseCleanupMode ?? "off",
+  });
+  const pixelMap = cleanupResult.pixelMap;
+  const usedColorIndexes = collectUsedColorIndexes(pixelMap);
 
   return {
     pixelMap,
     usedColorIndexes,
+    noiseCleanupStats: cleanupResult.stats,
   };
 }

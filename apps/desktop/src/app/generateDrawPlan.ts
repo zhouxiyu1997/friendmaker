@@ -5,7 +5,15 @@ import { renderPreviewToBuffer } from "../image/renderPreview.js";
 import { estimateRuntimeMs, generateScanlinePlan, type PathStrategy } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
-import type { CanvasBounds, DrawingMask, DrawingProfile, PixelMap, ResumePlan } from "../types.js";
+import type {
+  CanvasBounds,
+  DrawingMask,
+  DrawingProfile,
+  NoiseCleanupMode,
+  NoiseCleanupStats,
+  PixelMap,
+  ResumePlan,
+} from "../types.js";
 
 export interface DrawPlanPathStats {
   lineRunCount: number;
@@ -26,6 +34,7 @@ export interface DrawPlan {
   previewPng: Buffer;
   imageBounds: CanvasBounds | null;
   pathStats: DrawPlanPathStats;
+  noiseCleanupStats: NoiseCleanupStats;
 }
 
 export async function generateDrawPlan(
@@ -39,9 +48,10 @@ export async function generateDrawPlan(
     removeBackground?: boolean;
     drawingMask?: DrawingMask | null;
     pathStrategy?: PathStrategy;
+    noiseCleanupMode?: NoiseCleanupMode;
   },
 ): Promise<DrawPlan> {
-  const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
+  const { pixelMap, usedColorIndexes, noiseCleanupStats } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
   const scanlinePlan = generateScanlinePlan(pixelMap, profile, options?.pathStrategy);
   const drawCommands = scanlinePlan.commands;
@@ -71,6 +81,7 @@ export async function generateDrawPlan(
     previewPng,
     imageBounds,
     pathStats,
+    noiseCleanupStats,
   };
 }
 

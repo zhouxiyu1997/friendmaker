@@ -4,6 +4,7 @@ export type ControllerButton = "A" | "B" | "X" | "Y";
 export type StartCursor = "center" | "top-left";
 export type DrawingTool = "pen" | "eraser" | "fill" | "stamp" | "text" | "shape";
 export type BrushSize = 1 | 3 | 7 | 13 | 19 | 27;
+export type NoiseCleanupMode = "off" | "light" | "standard" | "strong";
 
 export interface RgbColor {
   r: number;
@@ -64,6 +65,23 @@ export interface DrawingProfile {
 export interface PixelizationResult {
   pixelMap: PixelMap;
   usedColorIndexes: number[];
+  noiseCleanupStats: NoiseCleanupStats;
+}
+
+export interface PixelMapNoiseStats {
+  thresholdCells: number;
+  usedColorCount: number;
+  drawableCellCount: number;
+  connectedComponentCount: number;
+  tinyComponentCount: number;
+}
+
+export interface NoiseCleanupStats {
+  mode: NoiseCleanupMode;
+  thresholdCells: number;
+  changedCellCount: number;
+  before: PixelMapNoiseStats;
+  after: PixelMapNoiseStats;
 }
 
 export interface CanvasBounds {
