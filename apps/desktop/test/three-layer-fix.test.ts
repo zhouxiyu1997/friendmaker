@@ -150,6 +150,23 @@ function makeDrawingMask(
   };
 }
 
+function getSerializedLineVectors(commands: string[]): Array<{ dx: number; dy: number }> {
+  return commands.flatMap((command) => {
+    const match = /^L\s+(-?\d+)\s+(-?\d+)$/u.exec(command);
+
+    if (!match?.[1] || !match[2]) {
+      return [];
+    }
+
+    return [
+      {
+        dx: Number.parseInt(match[1], 10),
+        dy: Number.parseInt(match[2], 10),
+      },
+    ];
+  });
+}
+
 test("BrushGrid keeps pixelize, preview, bounds, and centers aligned", async () => {
   const brushSizes: BrushSize[] = [1, 3, 7, 13, 19, 27];
   const blankImage = await transparentPng(256, 256);
@@ -177,7 +194,7 @@ test("BrushGrid keeps pixelize, preview, bounds, and centers aligned", async () 
   }
 });
 
-test("transparent cells split horizontal L runs", () => {
+test("transparent cells still split into two short horizontal L runs from center start", () => {
   const profile = makeProfile({ canvasWidth: 5, canvasHeight: 1, brushSize: 1 });
   const pixelMap = makePixelMap(5, 1, [
     { x: 0, y: 0 },
@@ -186,12 +203,13 @@ test("transparent cells split horizontal L runs", () => {
     { x: 4, y: 0 },
   ]);
   const commands = serializeCommands(generateScanlineCommands(pixelMap, profile));
+  const lineCommands = getSerializedLineVectors(commands);
 
-  assert.equal(commands.filter((command) => command === "L 1 0").length, 2);
-  assert.equal(commands.includes("L 4 0"), false);
+  assert.equal(lineCommands.length, 2);
+  assert.equal(lineCommands.every((command) => Math.abs(command.dx) === 1 && command.dy === 0), true);
 });
 
-test("a 200 pixel horizontal line becomes one L run", () => {
+test("a 200 pixel horizontal line stays one L run from center start", () => {
   const profile = makeProfile({ canvasWidth: 200, canvasHeight: 1, brushSize: 1 });
   const pixelMap = makePixelMap(
     200,
@@ -199,9 +217,10 @@ test("a 200 pixel horizontal line becomes one L run", () => {
     Array.from({ length: 200 }, (_, x) => ({ x, y: 0 })),
   );
   const commands = serializeCommands(generateScanlineCommands(pixelMap, profile));
+  const lineCommands = getSerializedLineVectors(commands);
 
-  assert.equal(commands.filter((command) => command.startsWith("L ")).length, 1);
-  assert.equal(commands.includes("L 199 0"), true);
+  assert.equal(lineCommands.length, 1);
+  assert.deepEqual(lineCommands[0], { dx: -199, dy: 0 });
 });
 
 test("large brush centered blocks use grid origin instead of top-left bias", async () => {

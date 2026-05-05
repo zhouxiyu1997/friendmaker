@@ -90,7 +90,7 @@ const state = {
     },
     profile: {
       baudRate: 115200,
-      ackTimeoutMs: 2000,
+      ackTimeoutMs: 5000,
       commandRetryCount: 1,
       inputDelay: 45,
       buttonPressDuration: 65,
@@ -998,7 +998,7 @@ function applyGeneratedStudioPayload(payload) {
     : [];
   state.studio.profile = {
     baudRate: payload.profile.baudRate ?? 115200,
-    ackTimeoutMs: payload.profile.ackTimeoutMs ?? 2000,
+    ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
     commandRetryCount: payload.profile.commandRetryCount ?? 1,
     inputDelay: payload.profile.inputDelay ?? state.sharedTiming.inputDelay,
     buttonPressDuration:

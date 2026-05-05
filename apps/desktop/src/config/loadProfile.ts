@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import type { DrawingProfile } from "../types.js";
-import { DEFAULT_PALETTE, DEFAULT_PROFILE } from "./defaultProfile.js";
+import { DEFAULT_ACK_TIMEOUT_MS, DEFAULT_PALETTE, DEFAULT_PROFILE } from "./defaultProfile.js";
 import { OFFICIAL_PALETTE } from "./officialPalette.js";
 
 const VALID_DRAWING_TOOLS = new Set<DrawingProfile["startTool"]>([
@@ -31,6 +31,10 @@ function toTool(value: unknown, fallback: DrawingProfile["startTool"]): DrawingP
 function toNonNegativeNumber(value: unknown, fallback: number): number {
   const normalized = toNumber(value, fallback);
   return normalized >= 0 ? normalized : fallback;
+}
+
+function toMinimumNumber(value: unknown, fallback: number, minimum: number): number {
+  return Math.max(toNumber(value, fallback), minimum);
 }
 
 function toBrushSize(value: unknown, fallback: DrawingProfile["brushSize"]): DrawingProfile["brushSize"] {
@@ -65,7 +69,11 @@ export async function loadProfile(profilePath?: string): Promise<DrawingProfile>
     homeDuration: toNumber(parsed.homeDuration, DEFAULT_PROFILE.homeDuration),
     buttonPressDuration: toNumber(parsed.buttonPressDuration, DEFAULT_PROFILE.buttonPressDuration),
     colorChangeDuration: toNumber(parsed.colorChangeDuration, DEFAULT_PROFILE.colorChangeDuration),
-    ackTimeoutMs: toNumber(parsed.ackTimeoutMs, DEFAULT_PROFILE.ackTimeoutMs),
+    ackTimeoutMs: toMinimumNumber(
+      parsed.ackTimeoutMs,
+      DEFAULT_PROFILE.ackTimeoutMs,
+      DEFAULT_ACK_TIMEOUT_MS,
+    ),
     commandRetryCount: toNumber(parsed.commandRetryCount, DEFAULT_PROFILE.commandRetryCount),
     drawButton: parsed.drawButton ?? DEFAULT_PROFILE.drawButton,
     colorMode:

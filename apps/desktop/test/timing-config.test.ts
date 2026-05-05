@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 
 import sharp from "sharp";
 
 import { buildRecoveryExecutionPlan } from "../src/app/recovery.js";
+import { DEFAULT_ACK_TIMEOUT_MS } from "../src/config/defaultProfile.js";
+import { loadProfile } from "../src/config/loadProfile.js";
 import { generateScanlinePlan } from "../src/path/scanline.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import type { DrawingProfile, Pixel, PixelMap } from "../src/types.js";
@@ -109,6 +114,7 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
   assert.equal(defaultResponse.ok, true);
   const defaultPayload = (await defaultResponse.json()) as {
     commands: string[];
+    profile: { ackTimeoutMs: number };
     stats: { estimatedRuntimeMs: number };
   };
 
@@ -126,6 +132,7 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
   const overridePayload = (await overrideResponse.json()) as {
     commands: string[];
     profile: {
+      ackTimeoutMs: number;
       inputDelay: number;
       buttonPressDuration: number;
       homeDuration: number;
@@ -134,7 +141,9 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
   };
 
   assert.equal(defaultPayload.commands[0], "CFG INPUT 65 45 1800");
+  assert.equal(defaultPayload.profile.ackTimeoutMs, DEFAULT_ACK_TIMEOUT_MS);
   assert.equal(overridePayload.commands[0], "CFG INPUT 40 30 1800");
+  assert.equal(overridePayload.profile.ackTimeoutMs, DEFAULT_ACK_TIMEOUT_MS);
   assert.equal(overridePayload.profile.inputDelay, 30);
   assert.equal(overridePayload.profile.buttonPressDuration, 40);
   assert.equal(overridePayload.profile.homeDuration, 1800);
@@ -142,4 +151,26 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
     overridePayload.stats.estimatedRuntimeMs < defaultPayload.stats.estimatedRuntimeMs,
     "expected faster timing overrides to reduce estimated runtime",
   );
+});
+
+test("loadProfile clamps legacy ack timeout values to the supported minimum", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "friendmaker-profile-"));
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const profilePath = path.join(tempDir, "legacy-profile.json");
+  await writeFile(
+    profilePath,
+    JSON.stringify({
+      ...makeProfile(),
+      profileName: "legacy-timeout-profile",
+      ackTimeoutMs: 2_000,
+    }),
+    "utf8",
+  );
+
+  const profile = await loadProfile(profilePath);
+
+  assert.equal(profile.ackTimeoutMs, DEFAULT_ACK_TIMEOUT_MS);
 });
