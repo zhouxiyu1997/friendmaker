@@ -78,6 +78,7 @@ const state = {
     previewGuideMode: "none",
     colorMode: "mono",
     colorCount: 32,
+    noiseCleanupMode: "off",
     removeBackground: false,
     usedColorIndexes: [],
     generatedPalette: [],
@@ -217,6 +218,7 @@ const els = {
   templatePreviewLabel: document.getElementById("template-preview-label"),
   colorModeSelect: document.getElementById("color-mode-select"),
   colorCountSelect: document.getElementById("color-count-select"),
+  noiseCleanupSelect: document.getElementById("noise-cleanup-select"),
   thresholdLabel: document.getElementById("threshold-label"),
   thresholdRange: document.getElementById("threshold-range"),
   thresholdValue: document.getElementById("threshold-value"),
@@ -530,6 +532,16 @@ els.colorModeSelect.addEventListener("change", () => {
 
 els.colorCountSelect.addEventListener("change", () => {
   state.studio.colorCount = Number(els.colorCountSelect.value || state.studio.colorCount);
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
+els.noiseCleanupSelect.addEventListener("change", () => {
+  const nextMode = els.noiseCleanupSelect.value;
+  state.studio.noiseCleanupMode =
+    nextMode === "light" || nextMode === "standard" || nextMode === "strong"
+      ? nextMode
+      : "off";
   syncStudioUi();
   scheduleStudioPreviewRefresh();
 });
@@ -962,6 +974,7 @@ function buildStudioGeneratePayload() {
     threshold: Number(els.thresholdRange.value),
     previewScale: 12,
     removeBackground: state.studio.removeBackground,
+    noiseCleanupMode: state.studio.noiseCleanupMode,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
   };
@@ -1020,6 +1033,12 @@ function applyGeneratedStudioPayload(payload) {
       ? payload.profile.colorMode
       : "mono";
   state.studio.colorCount = payload.profile.colorCount ?? state.studio.colorCount;
+  state.studio.noiseCleanupMode =
+    payload.profile.noiseCleanupMode === "light" ||
+    payload.profile.noiseCleanupMode === "standard" ||
+    payload.profile.noiseCleanupMode === "strong"
+      ? payload.profile.noiseCleanupMode
+      : "off";
   state.studio.removeBackground = payload.profile.removeBackground === true;
 
   els.commandsOutput.value = payload.commands.join("\n");
@@ -1035,8 +1054,11 @@ function applyGeneratedStudioPayload(payload) {
     els.statColors.textContent = `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 自动量化色`;
   }
   els.statPixels.textContent = String(payload.stats.totalPixels);
+  const cleanupChangedCells = payload.stats.noiseCleanup?.changedCellCount ?? 0;
   els.statCommands.textContent = payload.stats.pathStats
-    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}`
+    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}${
+        cleanupChangedCells > 0 ? ` · Δ ${cleanupChangedCells}` : ""
+      }`
     : String(payload.stats.commandCount);
   els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
   void updatePreviewBounds(payload);
@@ -1218,6 +1240,7 @@ async function executeStudioCommands({ logPrefix }) {
           imageScalePercent: state.studio.imageScalePercent,
           imageOffsetXPercent: state.studio.imageOffsetXPercent,
           imageOffsetYPercent: state.studio.imageOffsetYPercent,
+          noiseCleanupMode: state.studio.noiseCleanupMode,
         },
         portPath: state.selectedPortPath,
         baudRate: state.studio.profile.baudRate,
@@ -1988,6 +2011,7 @@ function setStudioBusy(isBusy) {
   els.offsetYRange.disabled = isBusy;
   els.sizeSelect.disabled = isBusy;
   els.brushSizeSelect.disabled = isBusy;
+  els.noiseCleanupSelect.disabled = isBusy;
   els.copyButton.disabled = isBusy || state.commands.length === 0;
   els.downloadButton.disabled = isBusy || state.commands.length === 0;
   syncStudioUi();
@@ -2867,6 +2891,7 @@ function syncStudioUi() {
   els.previewGuideSelect.value = state.studio.previewGuideMode;
   els.previewCanvas.dataset.guide = state.studio.previewGuideMode;
   els.colorModeSelect.value = state.studio.colorMode;
+  els.noiseCleanupSelect.value = state.studio.noiseCleanupMode;
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
   const backgroundHint = state.studio.removeBackground
@@ -2905,6 +2930,7 @@ function syncStudioUi() {
   els.offsetYRange.disabled = state.studio.busy || executionActive;
   els.offsetYInput.disabled = state.studio.busy || executionActive;
   els.colorModeSelect.disabled = state.studio.busy || executionActive;
+  els.noiseCleanupSelect.disabled = state.studio.busy || executionActive;
   els.autoRemoveBackgroundCheckbox.disabled = state.studio.busy || executionActive;
   els.previewGuideSelect.disabled = false;
   els.colorCountSelect.disabled =

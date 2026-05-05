@@ -31,7 +31,7 @@ import {
   type SerialSessionSnapshot,
 } from "../serial/sender.js";
 import { SimulatedAckSender } from "../simulator/sender.js";
-import type { ResumePlan, SenderControls } from "../types.js";
+import type { NoiseCleanupMode, ResumePlan, SenderControls } from "../types.js";
 import {
   RecoverySessionStore,
   applyRecoveryProgress,
@@ -83,6 +83,15 @@ const FIRMWARE_FLASH_CANCEL_GRACE_MS = 5_000;
 function normalizeAckTimeoutMs(value?: number): number {
   return Math.max(value ?? DEFAULT_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
 }
+
+const VALID_NOISE_CLEANUP_MODES = new Set<NoiseCleanupMode>(["off", "light", "standard", "strong"]);
+
+function normalizeNoiseCleanupMode(value: unknown): NoiseCleanupMode {
+  return typeof value === "string" && VALID_NOISE_CLEANUP_MODES.has(value as NoiseCleanupMode)
+    ? (value as NoiseCleanupMode)
+    : "off";
+}
+
 const serialSessionManager = new SerialSessionManager();
 
 export interface StartWebServerOptions {
@@ -1051,6 +1060,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     palette?: string[];
     previewScale?: number;
     removeBackground?: boolean;
+    noiseCleanupMode?: NoiseCleanupMode;
     inputDelay?: number;
     buttonPressDuration?: number;
   };
@@ -1079,6 +1089,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const imageScalePercent = normalizeImageScalePercent(body.imageScalePercent);
   const imageOffsetXPercent = normalizeImageOffsetPercent(body.imageOffsetXPercent);
   const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
+  const noiseCleanupMode = normalizeNoiseCleanupMode(body.noiseCleanupMode);
   const template = getDrawingTemplateDefinition(body.templateId ?? "none");
 
   if (!template) {
@@ -1107,6 +1118,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       imageOffsetYPercent,
       removeBackground: body.removeBackground === true,
       drawingMask,
+      noiseCleanupMode,
     },
   );
 
@@ -1124,6 +1136,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       colorMode: profile.colorMode,
       colorCount: profile.colorCount,
       removeBackground: body.removeBackground === true,
+      noiseCleanupMode,
       palette: plan.paletteHexes,
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
@@ -1140,6 +1153,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       estimatedRuntimeLabel: formatDuration(plan.estimatedRuntimeMs),
       imageBounds: plan.imageBounds,
       pathStats: plan.pathStats,
+      noiseCleanup: plan.noiseCleanupStats,
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,
     commands: plan.commands,
