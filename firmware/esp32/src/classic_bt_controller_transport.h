@@ -19,6 +19,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool initializeClassicBluetooth();
   bool initializeNvsAndBaseAddress();
   bool shutdownClassicBluetooth();
+  void rememberLocalControllerAddress(const uint8_t bluetoothAddress[6]);
   void clearConnectionState();
   void clearInputs();
   void setButtonBits(uint32_t buttonsMask);
@@ -72,7 +73,6 @@ class ClassicBtControllerTransport : public ControllerTransport {
   uint8_t rightStickX_ = 128;
   uint8_t rightStickY_ = 128;
   uint8_t report30_[48] = {};
-  uint8_t dummyReport_[11] = {};
   SemaphoreHandle_t inputReportSendMutex_ = nullptr;
   TaskHandle_t sendTaskHandle_ = nullptr;
   volatile bool explicitInputActive_ = false;
@@ -80,6 +80,8 @@ class ClassicBtControllerTransport : public ControllerTransport {
   volatile uint32_t inputReportSendEventCount_ = 0;
   volatile int lastInputReportStatus_ = -1;
   volatile uint8_t lastInputReportReason_ = 0;
+  uint8_t localControllerAddress_[6] = {};
+  bool hasLocalControllerAddress_ = false;
   uint8_t lastPeerAddress_[6] = {};
   bool hasPeerAddress_ = false;
   bool reconnectLastPeerOnRegister_ = false;

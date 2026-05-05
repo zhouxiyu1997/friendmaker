@@ -358,6 +358,7 @@ test("dynamic timeouts follow CFG INPUT timing", () => {
   assert.equal(getAckTimeoutForCommand("M 3 0", 500, timing), 1600);
   assert.equal(getAckTimeoutForCommand("L 3 0", 500, timing), 1800);
   assert.equal(getAckTimeoutForCommand("H", 500, timing), 4700);
+  assert.equal(getAckTimeoutForCommand("BT RESET LAST-PEER", 500, timing), 20_000);
 });
 
 test("palette-config commands get enough timeout for calibrated custom colors", () => {

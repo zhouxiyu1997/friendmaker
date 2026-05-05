@@ -1,5 +1,6 @@
 import {
   deriveControllerStatus,
+  shouldAutoReconnectLastPeer,
   shouldReuseExistingControllerConnection,
 } from "./controllerStatus.js";
 
@@ -158,6 +159,8 @@ const state = {
       paired: "未知",
       ready: "未知",
       peer: "-",
+      localMac: "-",
+      reply02Mac: "-",
       initStep: "-",
       initError: "-",
       discoverableValue: null,
@@ -167,6 +170,9 @@ const state = {
       readyValue: null,
       rawReadyValue: null,
       readyInferredValue: false,
+      reportChannelOpenValue: null,
+      identityMismatchValue: false,
+      switchAcceptedValue: false,
       unstableValue: false,
       reconnectRecommendedValue: false,
       sendReportFailureCount: 0,
@@ -1810,7 +1816,12 @@ els.controllerResetButton.addEventListener("click", async () => {
     detail: "正在重启蓝牙协议栈并读取最新状态，请稍等片刻。",
   });
 
-  const payload = await runControllerCommands(["BT RESET", "I"], "重置手柄蓝牙");
+  const payload = await runControllerCommands(
+    shouldAutoReconnectLastPeer(state.controller.status)
+      ? ["BT RESET LAST-PEER", "I"]
+      : ["BT RESET", "I"],
+    "重置手柄蓝牙",
+  );
 
   if (payload) {
     startControllerStatusPolling();
@@ -2433,6 +2444,9 @@ function setControllerPendingStatus({ title, detail }) {
     readyValue: false,
     rawReadyValue: null,
     readyInferredValue: false,
+    reportChannelOpenValue: null,
+    identityMismatchValue: false,
+    switchAcceptedValue: false,
     unstableValue: false,
     reconnectRecommendedValue: false,
     sendReportFailureCount: 0,
@@ -2440,6 +2454,8 @@ function setControllerPendingStatus({ title, detail }) {
     lastSendReportReason: null,
     lastAclDisconnectReason: null,
     lastDropReason: "-",
+    localMac: "-",
+    reply02Mac: "-",
     initStep: "-",
     initError: "-",
   });
@@ -2469,6 +2485,7 @@ function setControllerRecoveryFailedStatus(detail) {
 
 function isControllerConnectionStillInProgress(status = state.controller.status) {
   return (
+    status?.switchAcceptedValue !== true &&
     status?.readyValue !== true &&
     status?.tone !== "error" &&
     (status?.connectedValue === true ||
@@ -2479,6 +2496,8 @@ function isControllerConnectionStillInProgress(status = state.controller.status)
 
 async function handleControllerStatusPollTimeout() {
   stopControllerStatusPolling();
+  const shouldReconnectLastPeer = shouldAutoReconnectLastPeer(state.controller.status);
+  const resetCommands = shouldReconnectLastPeer ? ["BT RESET LAST-PEER", "I"] : ["BT RESET", "I"];
 
   if (
     isControllerConnectionStillInProgress() &&
@@ -2494,10 +2513,7 @@ async function handleControllerStatusPollTimeout() {
       detail: "开发板长时间停留在广播或握手状态，正在重置蓝牙并重新进入可发现状态。",
     });
 
-    const payload = await runControllerCommands(
-      ["BT RESET LAST-PEER", "I"],
-      "自动恢复手柄连接",
-    );
+    const payload = await runControllerCommands(resetCommands, "自动恢复手柄连接");
 
     if (payload) {
       startControllerStatusPolling();
@@ -2611,7 +2627,9 @@ async function pollControllerStatus() {
       });
 
       const payload = await runControllerCommands(
-        ["BT RESET LAST-PEER", "I"],
+        shouldAutoReconnectLastPeer(state.controller.status)
+          ? ["BT RESET LAST-PEER", "I"]
+          : ["BT RESET", "I"],
         "自动恢复手柄连接",
       );
 

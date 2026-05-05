@@ -18,6 +18,9 @@ import type { ProgressUpdate, SenderControls } from "../types.js";
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
 const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
+const SERIAL_OPEN_STABILIZE_DELAY_MS = 500;
+const SERIAL_OPEN_BOOT_DETECT_MS = 1_000;
+const SERIAL_OPEN_BOOT_TIMEOUT_MS = 12_000;
 const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
 const COLOR_PALETTE_SLOT_COUNT = 9;
 const COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
@@ -381,7 +384,7 @@ export function getAckTimeoutForCommand(
     return Math.max(baseTimeoutMs, 1_000 + timing.homeMs * 2 + timing.inputDelayMs);
   }
 
-  if (trimmed === "BT RESET") {
+  if (trimmed === "BT RESET" || trimmed === "BT RESET LAST-PEER") {
     return Math.max(baseTimeoutMs, 20_000);
   }
 
@@ -495,14 +498,17 @@ function openPort(port: SerialPort): Promise<void> {
   });
 }
 
-function flushPort(port: SerialPort): Promise<void> {
+function setPortSignals(
+  port: SerialPort,
+  options: { dtr?: boolean; rts?: boolean; brk?: boolean },
+): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!port.isOpen) {
       resolve();
       return;
     }
 
-    port.flush((error) => {
+    port.set(options, (error) => {
       if (error) {
         reject(error);
         return;
@@ -510,6 +516,74 @@ function flushPort(port: SerialPort): Promise<void> {
 
       resolve();
     });
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForDeviceBoot(
+  parser: ReadlineParser,
+  port: SerialPort,
+  options?: {
+    onDeviceLine?: (line: string) => void;
+  },
+): Promise<"booted" | "idle" | "timed_out"> {
+  return new Promise((resolve) => {
+    let finished = false;
+    let sawReset = false;
+
+    const finish = (result: "booted" | "idle" | "timed_out") => {
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+      clearTimeout(idleTimer);
+      clearTimeout(timeoutTimer);
+      parser.off("data", onData);
+      port.off("close", onClose);
+      port.off("error", onError);
+      resolve(result);
+    };
+
+    const onData = (rawLine: string | Buffer) => {
+      const line = sanitizeDeviceLine(rawLine);
+
+      if (!line) {
+        return;
+      }
+
+      options?.onDeviceLine?.(line);
+
+      if (line.startsWith("rst:")) {
+        sawReset = true;
+        return;
+      }
+
+      if (line.startsWith("BOOT ")) {
+        sawReset = true;
+        finish("booted");
+      }
+    };
+
+    const onClose = () => finish("timed_out");
+    const onError = () => finish("timed_out");
+
+    const idleTimer = setTimeout(() => {
+      if (!sawReset) {
+        finish("idle");
+      }
+    }, SERIAL_OPEN_BOOT_DETECT_MS);
+
+    const timeoutTimer = setTimeout(() => {
+      finish(sawReset ? "timed_out" : "idle");
+    }, SERIAL_OPEN_BOOT_TIMEOUT_MS);
+
+    parser.on("data", onData);
+    port.on("close", onClose);
+    port.on("error", onError);
   });
 }
 
@@ -585,18 +659,47 @@ export class SerialCommandSession {
         throw new Error("Serial session is not open.");
       }
 
+      this.parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
+
       try {
-        await flushPort(port);
+        await setPortSignals(port, { dtr: false, rts: false, brk: false });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        onDeviceLine?.(`WARN serial_flush_failed reason=${message}`);
+        onDeviceLine?.(`WARN serial_signal_init_failed reason=${message}`);
+      }
+
+      onDeviceLine?.(
+        `INFO serial_session=stabilizing port=${this.portPath} wait_ms=${SERIAL_OPEN_STABILIZE_DELAY_MS}`,
+      );
+      await sleep(SERIAL_OPEN_STABILIZE_DELAY_MS);
+
+      if (this.port !== port || !port.isOpen) {
+        throw new Error("Serial session is not open.");
+      }
+
+      if (this.parser) {
+        onDeviceLine?.(
+          `INFO serial_session=waiting_boot port=${this.portPath} timeout_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
+        );
+        const bootResult = await waitForDeviceBoot(this.parser, port, {
+          ...(onDeviceLine ? { onDeviceLine } : {}),
+        });
+
+        if (bootResult === "booted") {
+          onDeviceLine?.(`INFO serial_session=boot_ready port=${this.portPath}`);
+        } else if (bootResult === "timed_out") {
+          onDeviceLine?.(
+            `WARN serial_session=boot_wait_timeout port=${this.portPath} timeout_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
+          );
+        } else {
+          onDeviceLine?.(`INFO serial_session=boot_wait_skipped port=${this.portPath}`);
+        }
       }
 
       if (this.port !== port || !port.isOpen) {
         throw new Error("Serial session is not open.");
       }
 
-      this.parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
       this.lastUsedAtValue = Date.now();
       onDeviceLine?.(`INFO serial_session=open port=${this.portPath} baud=${this.baudRate}`);
     })();

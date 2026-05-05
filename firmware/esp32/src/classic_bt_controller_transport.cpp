@@ -236,6 +236,13 @@ void ClassicBtControllerTransport::begin() {
   }
 }
 
+void ClassicBtControllerTransport::rememberLocalControllerAddress(
+    const uint8_t bluetoothAddress[6]) {
+  std::memcpy(localControllerAddress_, bluetoothAddress, sizeof(localControllerAddress_));
+  hasLocalControllerAddress_ = true;
+  std::memcpy(&kReply02[18], bluetoothAddress, sizeof(localControllerAddress_));
+}
+
 bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -295,6 +302,14 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
     Serial.printf("WARN base_mac_set failed err=%s\n", esp_err_to_name(err));
     return false;
   }
+
+  uint8_t bluetoothMac[6] = {};
+  err = esp_read_mac(bluetoothMac, ESP_MAC_BT);
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt read_mac failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+  rememberLocalControllerAddress(bluetoothMac);
 
   Serial.printf(
       "INFO bt base_mac=%02X:%02X:%02X:%02X:%02X:%02X source=%s\n",
@@ -500,10 +515,6 @@ void ClassicBtControllerTransport::clearInputs() {
   std::memset(report30_, 0, sizeof(report30_));
   report30_[1] = 0x8E;
   report30_[11] = 0x80;
-
-  const uint8_t defaultDummy[] = {0x00, 0x8E, 0x00, 0x00, 0x00, 0x00,
-                                  0x08, 0x80, 0x00, 0x08, 0x80};
-  std::memcpy(dummyReport_, defaultDummy, sizeof(dummyReport_));
   updateInputReport();
 }
 
@@ -586,8 +597,6 @@ void ClassicBtControllerTransport::updateInputReport() {
   report30_[8] = static_cast<uint8_t>((rightStickX_ << 4) & 0xF0);
   report30_[9] = static_cast<uint8_t>((rightStickX_ & 0xF0) >> 4);
   report30_[10] = rightStickY_;
-
-  dummyReport_[0] = timer_;
 }
 
 void ClassicBtControllerTransport::ensureSendTask() {
@@ -699,6 +708,8 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   reportCongested_ = false;
   consecutiveSendReportFailures_ = 0;
   lastDropReason_ = reason;
+  initStep_ = "discoverable";
+  initError_ = "ESP_OK";
   clearInputs();
 
   esp_err_t err = ESP_OK;
@@ -739,6 +750,8 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println(boolName(paired_));
   output.print("INFO bt_ready_for_reports=");
   output.println(boolName(isControllerInputReady()));
+  output.print("INFO bt_report_channel_open=");
+  output.println(boolName(isHidReportChannelOpen()));
   output.print("INFO bt_init_step=");
   output.println(initStep_);
   output.print("INFO bt_init_error=");
@@ -770,6 +783,12 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
     output.print("INFO bt_last_peer=");
     output.println(formatBluetoothAddress(lastPeerAddress_));
   }
+  if (hasLocalControllerAddress_) {
+    output.print("INFO bt_local_mac=");
+    output.println(formatBluetoothAddress(localControllerAddress_));
+    output.print("INFO bt_reply02_mac=");
+    output.println(formatBluetoothAddress(&kReply02[18]));
+  }
 }
 
 const char *ClassicBtControllerTransport::name() const { return CONTROL_TRANSPORT; }
@@ -799,9 +818,8 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool 
 
   const bool shouldWaitForSendEvent = waitForSendEvent && paired_;
   uint32_t expectedEventCount = 0;
-  const bool shouldSendFullReport = connected_ || paired_;
-  const uint8_t *payload = shouldSendFullReport ? report30_ : dummyReport_;
-  const size_t payloadLength = shouldSendFullReport ? sizeof(report30_) : sizeof(dummyReport_);
+  const uint8_t *payload = report30_;
+  const size_t payloadLength = sizeof(report30_);
 
   if (inputReportSendMutex_ != nullptr) {
     xSemaphoreTakeRecursive(inputReportSendMutex_, portMAX_DELAY);
@@ -990,6 +1008,9 @@ void ClassicBtControllerTransport::markControllerPaired() {
   }
   paired_ = true;
   pairingComplete_ = true;
+  initStep_ = "paired";
+  initError_ = "ESP_OK";
+  lastDropReason_ = "none";
 }
 
 bool ClassicBtControllerTransport::sendSubcommandReply(
@@ -1147,6 +1168,8 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
   switch (gapEvent) {
     case ESP_BT_GAP_AUTH_CMPL_EVT:
       authComplete_ = param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS;
+      initStep_ = authComplete_ ? "auth-complete" : "auth-failed";
+      initError_ = authComplete_ ? "ESP_OK" : "auth_failed";
       Serial.printf(
           "INFO bt auth status=%d device=\"%s\"\n",
           param->auth_cmpl.stat,
@@ -1154,6 +1177,7 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
       if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
         std::memcpy(lastPeerAddress_, param->auth_cmpl.bda, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
+        lastDropReason_ = "none";
         // Let Switch initiate the HID control channel after authentication.
         // Proactively opening a virtual cable here can race with the host's own
         // incoming CTRL connection and trigger invalid-state rejects.
@@ -1231,6 +1255,18 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
     case ESP_HIDD_OPEN_EVT:
       connected_ = param->open.status == ESP_HIDD_SUCCESS &&
                    param->open.conn_status == ESP_HIDD_CONN_STATE_CONNECTED;
+      if (connected_) {
+        initStep_ = "hid-open";
+        initError_ = "ESP_OK";
+      } else if (
+          param->open.status == ESP_HIDD_SUCCESS &&
+          param->open.conn_status == ESP_HIDD_CONN_STATE_CONNECTING) {
+        initStep_ = "hid-connecting";
+        initError_ = "ESP_OK";
+      } else {
+        initStep_ = "hid-open-failed";
+        initError_ = "hid_open_failed";
+      }
       readyForReports_ = connected_ && appRegistered_ && hidReady_;
       discoverable_ = !connected_;
       reportCongested_ = false;
@@ -1238,6 +1274,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       if (connected_) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
+        lastDropReason_ = "none";
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
         sendCurrentInputReport(false);
@@ -1396,6 +1433,10 @@ const char *ClassicBtControllerTransport::name() const { return CONTROL_TRANSPOR
 
 bool ClassicBtControllerTransport::initializeClassicBluetooth() { return false; }
 bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() { return false; }
+void ClassicBtControllerTransport::rememberLocalControllerAddress(
+    const uint8_t bluetoothAddress[6]) {
+  (void)bluetoothAddress;
+}
 void ClassicBtControllerTransport::clearInputs() {}
 void ClassicBtControllerTransport::setButtonBits(uint32_t buttonsMask) { (void)buttonsMask; }
 void ClassicBtControllerTransport::setLeftStickFromVector(int x, int y) {

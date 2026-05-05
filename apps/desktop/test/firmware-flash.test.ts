@@ -101,6 +101,14 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
     firmwareSource,
     /deriveDeterministicBaseMac[\s\S]*source=%s/u,
   );
+  assert.match(
+    firmwareSource,
+    /esp_base_mac_addr_set\(baseMac\)[\s\S]*esp_read_mac\(bluetoothMac, ESP_MAC_BT\)[\s\S]*rememberLocalControllerAddress\(bluetoothMac\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /INFO bt_reply02_mac=[\s\S]*formatBluetoothAddress\(&kReply02\[18\]\)/u,
+  );
   assert.doesNotMatch(
     firmwareSource,
     /ESP_BT_GAP_AUTH_CMPL_EVT[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "auth-complete"\)/u,
@@ -116,5 +124,17 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   assert.doesNotMatch(
     firmwareSource,
     /else if \(hasPeerAddress_\)[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /ESP_HIDD_OPEN_EVT[\s\S]*ESP_HIDD_CONN_STATE_CONNECTING[\s\S]*initStep_ = "hid-connecting"/u,
+  );
+  assert.match(
+    firmwareSource,
+    /sendCurrentInputReport\(bool logFailure, bool waitForSendEvent\)[\s\S]*const uint8_t \*payload = report30_[\s\S]*const size_t payloadLength = sizeof\(report30_\)/u,
+  );
+  assert.doesNotMatch(
+    firmwareSource,
+    /sendCurrentInputReport\(bool logFailure, bool waitForSendEvent\)[\s\S]*dummyReport_/u,
   );
 });

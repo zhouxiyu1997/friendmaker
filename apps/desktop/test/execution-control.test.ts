@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import type {
@@ -57,4 +58,24 @@ test("ManagedSerialSessionSender.stop interrupts a blocking ACK wait and disconn
 
   await assert.rejects(sendPromise, /Execution stopped/u);
   assert.equal(disconnectCalls, 1);
+});
+
+test("SerialCommandSession waits for the port to stabilize before sending commands", async () => {
+  const senderSource = await readFile(
+    new URL("../src/serial/sender.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    senderSource,
+    /SERIAL_OPEN_STABILIZE_DELAY_MS = 500[\s\S]*SERIAL_OPEN_BOOT_TIMEOUT_MS = 12_000/u,
+  );
+  assert.match(
+    senderSource,
+    /setPortSignals\(port, \{ dtr: false, rts: false, brk: false \}\)[\s\S]*serial_session=stabilizing/u,
+  );
+  assert.match(
+    senderSource,
+    /waitForDeviceBoot\(this\.parser, port[\s\S]*serial_session=boot_ready[\s\S]*serial_session=boot_wait_skipped/u,
+  );
 });
