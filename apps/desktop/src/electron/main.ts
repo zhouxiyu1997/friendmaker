@@ -150,6 +150,7 @@ async function createMainWindow(): Promise<void> {
     port: 0,
     staticRoot: getStaticRoot(),
     firmwareRoot,
+    refreshFirmwareRoot: ensureWritableFirmwareRoot,
     appDataRoot: getPlatformIoSafeDataRoot(),
     recoverySessionsRoot: getRecoverySessionsRoot(),
     windowsDriverRoot: getWindowsDriverRoot(),

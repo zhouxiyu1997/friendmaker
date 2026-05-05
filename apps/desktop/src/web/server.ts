@@ -85,6 +85,7 @@ export interface StartWebServerOptions {
   port?: number;
   staticRoot?: string;
   firmwareRoot?: string;
+  refreshFirmwareRoot?: () => Promise<string>;
   windowsDriverRoot?: string;
   appDataRoot?: string;
   recoverySessionsRoot?: string;
@@ -104,6 +105,7 @@ interface WebRuntimeConfig {
   port: number;
   staticRoot: string;
   firmwareRoot: string;
+  refreshFirmwareRoot?: (() => Promise<string>) | undefined;
   toolingManager: FirmwareToolingManager;
   windowsSerialDriverManager: WindowsSerialDriverManager;
   flashManager: FirmwareFlashManager;
@@ -115,6 +117,7 @@ let webRuntime: WebRuntimeConfig = {
   port: defaultPort,
   staticRoot: defaultStaticRoot,
   firmwareRoot: defaultFirmwareRoot,
+  refreshFirmwareRoot: undefined,
   toolingManager: new FirmwareToolingManager({ appDataRoot: defaultAppDataRoot }),
   windowsSerialDriverManager: new WindowsSerialDriverManager(defaultWindowsDriverRoot),
   flashManager: null as unknown as FirmwareFlashManager,
@@ -242,6 +245,16 @@ function validateSelectedUploadPort(
   }
 
   return formatMissingSelectedUploadPortMessage(selectedPortPath);
+}
+
+export async function refreshFirmwareRootForFlash(): Promise<string> {
+  if (!webRuntime.refreshFirmwareRoot) {
+    return webRuntime.firmwareRoot;
+  }
+
+  const firmwareRoot = await webRuntime.refreshFirmwareRoot();
+  webRuntime.firmwareRoot = firmwareRoot;
+  return firmwareRoot;
 }
 
 export class ManagedSerialSessionSender implements SenderControls {
@@ -623,7 +636,8 @@ class FirmwareFlashManager {
 
       this.state.platformIoPath = platformIoPath;
       this.appendLine(`INFO PlatformIO=${platformIoPath}`);
-      this.appendLine(`INFO firmware root=${webRuntime.firmwareRoot}`);
+      const firmwareRoot = await refreshFirmwareRootForFlash();
+      this.appendLine(`INFO firmware root=${firmwareRoot}`);
 
       if (this.cancelRequested) {
         throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
@@ -2113,6 +2127,7 @@ export async function startWebServer(
     port: options.port ?? defaultPort,
     staticRoot: options.staticRoot ?? defaultStaticRoot,
     firmwareRoot: options.firmwareRoot ?? defaultFirmwareRoot,
+    refreshFirmwareRoot: options.refreshFirmwareRoot,
     toolingManager: new FirmwareToolingManager({
       appDataRoot: options.appDataRoot ?? defaultAppDataRoot,
       ...(options.toolingPaths ? { initialConfig: options.toolingPaths } : {}),

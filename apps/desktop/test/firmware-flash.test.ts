@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -6,6 +9,8 @@ import {
   formatMissingSelectedUploadPortMessage,
   formatSelectedUploadPortFailureMessage,
   isUploadPortFailure,
+  refreshFirmwareRootForFlash,
+  startWebServer,
   summarizePlatformIoFailure,
 } from "../src/web/server.js";
 
@@ -54,6 +59,24 @@ test("firmware flash reports port-specific upload failures without switching to 
     ),
     "Upload failed on the selected port COM7. could not open port 'COM7': Permission denied Reconnect the board, make sure no other app is using the port, or choose a different port and retry.",
   );
+});
+
+test("firmware flash refreshes the writable firmware root before compiling", async (t) => {
+  const initialRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-initial-"));
+  const refreshedRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-refreshed-"));
+  const server = await startWebServer({
+    port: 0,
+    firmwareRoot: initialRoot,
+    refreshFirmwareRoot: async () => refreshedRoot,
+  });
+
+  t.after(async () => {
+    await server.close();
+    await rm(initialRoot, { recursive: true, force: true });
+    await rm(refreshedRoot, { recursive: true, force: true });
+  });
+
+  assert.equal(await refreshFirmwareRootForFlash(), refreshedRoot);
 });
 
 test("esp32 wireless firmware keeps a 2MB-compatible upload header for generic boards", async () => {
