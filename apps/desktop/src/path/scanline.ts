@@ -9,6 +9,7 @@ import {
   basicPaletteConfigCommand,
   basicPaletteResetCommand,
   colorCommand,
+  colorFastCommand,
   drawCommand,
   endCommand,
   holdButtonCommand,
@@ -22,7 +23,9 @@ import {
 } from "../protocol/commands.js";
 import {
   calculateCommandRuntimeBreakdown,
+  estimateColorSelectDurationMs,
   estimateCommandRuntimeMs,
+  estimateFastColorSelectDurationMs,
   type CommandRuntimeBreakdown,
 } from "../protocol/runtimeEstimate.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
@@ -47,6 +50,7 @@ export interface ScanlinePlanningOptions {
   recenterHoldMs?: number;
   recenterSafetyMarginSteps?: number;
   recenterAwareRouting?: boolean;
+  optimizeColorBatches?: boolean;
 }
 
 export interface GeneratedScanlinePlan {
@@ -58,6 +62,15 @@ export interface GeneratedScanlinePlan {
 const PALETTE_SLOT_COUNT = 9;
 const EXACT_COMPONENT_ORDER_LIMIT = 6;
 const EXACT_COMPONENT_PIXEL_LIMIT = 300;
+const GREEDY_COMPONENT_ORDER_LIMIT = 1_000;
+const COLOR_BATCH_TRAVEL_ORDER_LIMIT = 36;
+const COLOR_BATCH_ANCHOR_SAMPLE_LIMIT = 8;
+const COLOR_BATCH_COMPONENT_INTERLEAVE_LIMIT = 5_000;
+const COLOR_BATCH_FRAGMENTED_INTERLEAVE_MIN_UNITS = 700;
+const COLOR_BATCH_FRAGMENTED_INTERLEAVE_DENSITY_LIMIT = 0.58;
+const COLOR_BATCH_SPATIAL_BUCKET_SIZE = 8;
+const COLOR_BATCH_SPATIAL_MIN_CANDIDATES = 24;
+const COLOR_BATCH_SPATIAL_MAX_CANDIDATES = 48;
 export const DEFAULT_RECENTER_HOLD_MS = 4_000;
 const DEFAULT_RECENTER_SAFETY_MARGIN_STEPS = 30;
 const NEIGHBOR_OFFSETS = [
@@ -66,6 +79,44 @@ const NEIGHBOR_OFFSETS = [
   { dx: 0, dy: 1 },
   { dx: 0, dy: -1 },
 ];
+
+interface UsedPaletteColor {
+  colorIndex: number;
+  colorHex: string;
+}
+
+interface PlannedPaletteColor extends UsedPaletteColor {
+  slotIndex: number;
+  configCommand: DrawCommand;
+}
+
+interface PlannedPaletteWorkUnit extends PlannedPaletteColor {
+  batchIndex: number;
+  pixels: Pixel[];
+}
+
+interface OrderedPaletteWorkUnit extends PlannedPaletteWorkUnit {
+  orderedPixels: Pixel[];
+}
+
+interface IndexedPaletteWorkUnit extends PlannedPaletteWorkUnit {
+  id: number;
+  anchors: Pixel[];
+  variants: Pixel[][];
+}
+
+interface PaletteWorkUnitOrder {
+  orderedPixels: Pixel[];
+  endPosition: { x: number; y: number };
+}
+
+interface PaletteWorkUnitSpatialIndex {
+  units: IndexedPaletteWorkUnit[];
+  active: boolean[];
+  remainingCount: number;
+  buckets: Map<string, number[]>;
+  bucketCoords: Array<{ x: number; y: number }>;
+}
 
 export interface RecenterTransitionOptions {
   mode: RecenterMode;
@@ -452,6 +503,10 @@ function getOrderedPixelsForColor(
     return legacyPixels;
   }
 
+  if (components.length > GREEDY_COMPONENT_ORDER_LIMIT) {
+    return legacyPixels;
+  }
+
   let orderedPixels: Pixel[];
 
   if (
@@ -671,6 +726,7 @@ function normalizePlanningOptions(
       recenterHoldMs: DEFAULT_RECENTER_HOLD_MS,
       recenterSafetyMarginSteps: DEFAULT_RECENTER_SAFETY_MARGIN_STEPS,
       recenterAwareRouting: false,
+      optimizeColorBatches: false,
     };
   }
 
@@ -681,6 +737,7 @@ function normalizePlanningOptions(
     recenterSafetyMarginSteps:
       options?.recenterSafetyMarginSteps ?? DEFAULT_RECENTER_SAFETY_MARGIN_STEPS,
     recenterAwareRouting: options?.recenterAwareRouting ?? true,
+    optimizeColorBatches: options?.optimizeColorBatches ?? false,
   };
 }
 
@@ -742,7 +799,7 @@ function shouldStartFromCanvasCenter(profile: DrawingProfile): boolean {
   return profile.startCursor === "center";
 }
 
-function getUsedPaletteColors(pixelMap: PixelMap): Array<{ colorIndex: number; colorHex: string }> {
+function getUsedPaletteColors(pixelMap: PixelMap): UsedPaletteColor[] {
   const colorByIndex = new Map<number, string>();
 
   for (const row of pixelMap) {
@@ -760,6 +817,731 @@ function getUsedPaletteColors(pixelMap: PixelMap): Array<{ colorIndex: number; c
   return Array.from(colorByIndex.entries())
     .sort((left, right) => left[0] - right[0])
     .map(([colorIndex, colorHex]) => ({ colorIndex, colorHex }));
+}
+
+function getEndPositionForOrderedPixels(
+  orderedPixels: Pixel[],
+  fallback: { x: number; y: number },
+  grid: BrushGrid,
+): { x: number; y: number } {
+  const lastPixel = orderedPixels[orderedPixels.length - 1];
+  return lastPixel ? toCanvasPosition(lastPixel, grid) : fallback;
+}
+
+function orderColorsByTravelCost(
+  colors: UsedPaletteColor[],
+  current: { x: number; y: number },
+  pixelsByColor: Map<number, Pixel[]>,
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): UsedPaletteColor[] {
+  const remaining = [...colors];
+  const ordered: UsedPaletteColor[] = [];
+  let currentPosition = current;
+
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestCost = Number.POSITIVE_INFINITY;
+    let bestEndPosition = currentPosition;
+
+    for (let index = 0; index < remaining.length; index += 1) {
+      const color = remaining[index]!;
+      const orderedPixels = getOrderedPixelsForColor(
+        pixelsByColor,
+        color.colorIndex,
+        currentPosition,
+        scoring,
+        pathStrategy,
+      );
+      const cost = estimateTravelCost(currentPosition, orderedPixels, scoring);
+      const isBetter =
+        cost < bestCost ||
+        (cost === bestCost && color.colorIndex < (remaining[bestIndex]?.colorIndex ?? color.colorIndex));
+
+      if (isBetter) {
+        bestIndex = index;
+        bestCost = cost;
+        bestEndPosition = getEndPositionForOrderedPixels(orderedPixels, currentPosition, scoring.grid);
+      }
+    }
+
+    const [selected] = remaining.splice(bestIndex, 1);
+
+    if (!selected) {
+      break;
+    }
+
+    ordered.push(selected);
+    currentPosition = bestEndPosition;
+  }
+
+  return ordered;
+}
+
+function getColorAnchorSamples(pixels: Pixel[]): Pixel[] {
+  if (pixels.length <= COLOR_BATCH_ANCHOR_SAMPLE_LIMIT) {
+    return pixels;
+  }
+
+  const samples: Pixel[] = [];
+  const seen = new Set<string>();
+
+  function addSample(pixel: Pixel | undefined): void {
+    if (!pixel) {
+      return;
+    }
+
+    const key = pixelKey(pixel);
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    samples.push(pixel);
+  }
+
+  addSample(pixels[0]);
+  addSample(pixels[pixels.length - 1]);
+
+  let minX = pixels[0];
+  let maxX = pixels[0];
+  let minY = pixels[0];
+  let maxY = pixels[0];
+
+  for (const pixel of pixels) {
+    if (!minX || pixel.x < minX.x) minX = pixel;
+    if (!maxX || pixel.x > maxX.x) maxX = pixel;
+    if (!minY || pixel.y < minY.y) minY = pixel;
+    if (!maxY || pixel.y > maxY.y) maxY = pixel;
+  }
+
+  addSample(minX);
+  addSample(maxX);
+  addSample(minY);
+  addSample(maxY);
+
+  const stride = Math.max(1, Math.floor(pixels.length / COLOR_BATCH_ANCHOR_SAMPLE_LIMIT));
+  for (
+    let index = stride;
+    index < pixels.length && samples.length < COLOR_BATCH_ANCHOR_SAMPLE_LIMIT;
+    index += stride
+  ) {
+    addSample(pixels[index]);
+  }
+
+  return samples;
+}
+
+function orderColorsByAnchorCost(
+  colors: UsedPaletteColor[],
+  current: { x: number; y: number },
+  pixelsByColor: Map<number, Pixel[]>,
+  scoring: RouteScoringContext,
+): UsedPaletteColor[] {
+  const remaining = colors.map((color) => ({
+    color,
+    anchors: getColorAnchorSamples(pixelsByColor.get(color.colorIndex) ?? []),
+  }));
+  const ordered: UsedPaletteColor[] = [];
+  let currentPosition = current;
+
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestCost = Number.POSITIVE_INFINITY;
+    let bestAnchor: Pixel | null = null;
+
+    for (let index = 0; index < remaining.length; index += 1) {
+      const candidate = remaining[index]!;
+      let candidateCost = Number.POSITIVE_INFINITY;
+      let candidateAnchor: Pixel | null = null;
+
+      for (const anchor of candidate.anchors) {
+        const cost = transitionCostToPixel(currentPosition, anchor, scoring);
+
+        if (cost < candidateCost) {
+          candidateCost = cost;
+          candidateAnchor = anchor;
+        }
+      }
+
+      const isBetter =
+        candidateCost < bestCost ||
+        (candidateCost === bestCost &&
+          candidate.color.colorIndex <
+            (remaining[bestIndex]?.color.colorIndex ?? candidate.color.colorIndex));
+
+      if (isBetter) {
+        bestIndex = index;
+        bestCost = candidateCost;
+        bestAnchor = candidateAnchor;
+      }
+    }
+
+    const [selected] = remaining.splice(bestIndex, 1);
+
+    if (!selected) {
+      break;
+    }
+
+    ordered.push(selected.color);
+
+    if (bestAnchor) {
+      currentPosition = toCanvasPosition(bestAnchor, scoring.grid);
+    }
+  }
+
+  return ordered;
+}
+
+function orderPaletteColors(
+  colors: UsedPaletteColor[],
+  current: { x: number; y: number },
+  pixelsByColor: Map<number, Pixel[]>,
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): UsedPaletteColor[] {
+  if (colors.length <= COLOR_BATCH_TRAVEL_ORDER_LIMIT) {
+    return orderColorsByTravelCost(colors, current, pixelsByColor, scoring, pathStrategy);
+  }
+
+  return orderColorsByAnchorCost(colors, current, pixelsByColor, scoring);
+}
+
+function getColorBatchSlotOrder(colorCount: number, optimizeColorBatches: boolean): number[] {
+  if (!optimizeColorBatches) {
+    return Array.from({ length: colorCount }, (_, index) => index);
+  }
+
+  return Array.from({ length: colorCount }, (_, index) => PALETTE_SLOT_COUNT - 1 - index);
+}
+
+function planPaletteColorBatch(
+  colors: UsedPaletteColor[],
+  optimizeColorBatches: boolean,
+  createConfigCommand: (color: UsedPaletteColor, slotIndex: number) => DrawCommand,
+): PlannedPaletteColor[] {
+  const slotOrder = getColorBatchSlotOrder(colors.length, optimizeColorBatches);
+
+  return colors.map((color, index) => {
+    const slotIndex = slotOrder[index] ?? index;
+    return {
+      ...color,
+      slotIndex,
+      configCommand: createConfigCommand(color, slotIndex),
+    };
+  });
+}
+
+function getRemainingPaletteConfigCommands(
+  batch: PlannedPaletteColor[],
+  startIndex: number,
+): DrawCommand[] {
+  return batch.slice(startIndex).map((color) => color.configCommand);
+}
+
+function getNeededPaletteConfigCommands(
+  batch: PlannedPaletteColor[],
+  workUnits: readonly PlannedPaletteWorkUnit[],
+  startIndex: number,
+): DrawCommand[] {
+  const neededSlots = new Set(
+    workUnits.slice(startIndex).map((unit) => unit.slotIndex),
+  );
+
+  return batch
+    .filter((color) => neededSlots.has(color.slotIndex))
+    .map((color) => color.configCommand);
+}
+
+function colorSelectCommand(slotIndex: number, useFastSwitch: boolean): DrawCommand {
+  return useFastSwitch ? colorFastCommand(slotIndex) : colorCommand(slotIndex);
+}
+
+function getPaletteSelectCostMs(
+  selectedSlot: number | null,
+  targetSlot: number,
+  profile: DrawingProfile,
+): number {
+  if (selectedSlot === targetSlot) {
+    return 0;
+  }
+
+  const timing = {
+    buttonPressMs: profile.buttonPressDuration,
+    inputDelayMs: profile.inputDelay,
+    homeMs: profile.homeDuration,
+  };
+
+  return selectedSlot === null
+    ? estimateColorSelectDurationMs(targetSlot, timing)
+    : estimateFastColorSelectDurationMs(selectedSlot, targetSlot, timing);
+}
+
+function getOrderedPixelsForComponent(
+  pixels: Pixel[],
+  current: { x: number; y: number },
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): Pixel[] {
+  return pathStrategy === "nearest"
+    ? getNearestNeighborPixels(pixels, current, scoring)
+    : chooseBestSerpentineOrder(pixels, current, scoring);
+}
+
+function getComponentOrderVariants(pixels: Pixel[], pathStrategy: PathStrategy): Pixel[][] {
+  if (pathStrategy === "nearest" || pixels.length <= 1) {
+    return pixels.length > 0 ? [pixels] : [];
+  }
+
+  const topDown = buildSerpentineRows(pixels, false);
+  const bottomUp = buildSerpentineRows(pixels, true);
+  const variants = [
+    topDown,
+    [...topDown].reverse(),
+    bottomUp,
+    [...bottomUp].reverse(),
+  ].filter((variant) => variant.length > 0);
+  const seen = new Set<string>();
+
+  return variants.filter((variant) => {
+    const first = variant[0];
+    const last = variant[variant.length - 1];
+    const key = `${first ? pixelKey(first) : ""}:${last ? pixelKey(last) : ""}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function getPaletteWorkUnitAnchors(
+  pixels: Pixel[],
+  variants: Pixel[][],
+): Pixel[] {
+  const anchors: Pixel[] = [];
+  const seen = new Set<string>();
+
+  function addAnchor(pixel: Pixel | undefined): void {
+    if (!pixel) {
+      return;
+    }
+
+    const key = pixelKey(pixel);
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    anchors.push(pixel);
+  }
+
+  for (const variant of variants) {
+    addAnchor(variant[0]);
+  }
+
+  for (const pixel of getColorAnchorSamples(pixels)) {
+    addAnchor(pixel);
+  }
+
+  return anchors;
+}
+
+function createPaletteWorkUnits(
+  batch: PlannedPaletteColor[],
+  pixelsByColor: Map<number, Pixel[]>,
+): PlannedPaletteWorkUnit[] {
+  return batch.flatMap((color, batchIndex) => {
+    const pixels = pixelsByColor.get(color.colorIndex) ?? [];
+    const components = collectConnectedComponents(pixels);
+
+    return components.map((component) => ({
+      ...color,
+      batchIndex,
+      pixels: component,
+    }));
+  });
+}
+
+function shouldTryPaletteWorkUnitInterleaving(
+  workUnits: readonly PlannedPaletteWorkUnit[],
+): boolean {
+  if (workUnits.length > COLOR_BATCH_COMPONENT_INTERLEAVE_LIMIT) {
+    return false;
+  }
+
+  const pixelCount = workUnits.reduce((total, unit) => total + unit.pixels.length, 0);
+  const componentDensity = pixelCount > 0 ? workUnits.length / pixelCount : 0;
+
+  return !(
+    workUnits.length >= COLOR_BATCH_FRAGMENTED_INTERLEAVE_MIN_UNITS &&
+    componentDensity >= COLOR_BATCH_FRAGMENTED_INTERLEAVE_DENSITY_LIMIT
+  );
+}
+
+function spatialBucketCoord(point: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: Math.floor(point.x / COLOR_BATCH_SPATIAL_BUCKET_SIZE),
+    y: Math.floor(point.y / COLOR_BATCH_SPATIAL_BUCKET_SIZE),
+  };
+}
+
+function spatialBucketKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+function createPaletteWorkUnitSpatialIndex(
+  workUnits: PlannedPaletteWorkUnit[],
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): PaletteWorkUnitSpatialIndex {
+  const buckets = new Map<string, number[]>();
+  const bucketCoords: Array<{ x: number; y: number }> = [];
+
+  const units = workUnits.map((unit, id): IndexedPaletteWorkUnit => {
+    const variants = getComponentOrderVariants(unit.pixels, pathStrategy);
+    const anchors = getPaletteWorkUnitAnchors(unit.pixels, variants);
+    return {
+      ...unit,
+      id,
+      anchors,
+      variants,
+    };
+  });
+
+  for (const unit of units) {
+    const seenBuckets = new Set<string>();
+
+    for (const anchor of unit.anchors) {
+      const coord = spatialBucketCoord(toCanvasPosition(anchor, scoring.grid));
+      const key = spatialBucketKey(coord.x, coord.y);
+
+      if (seenBuckets.has(key)) {
+        continue;
+      }
+
+      seenBuckets.add(key);
+
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.push(unit.id);
+      } else {
+        buckets.set(key, [unit.id]);
+        bucketCoords.push({ x: coord.x, y: coord.y });
+      }
+    }
+  }
+
+  return {
+    units,
+    active: units.map(() => true),
+    remainingCount: units.length,
+    buckets,
+    bucketCoords,
+  };
+}
+
+function addPaletteWorkUnitBucketCandidates(
+  index: PaletteWorkUnitSpatialIndex,
+  bucketX: number,
+  bucketY: number,
+  candidateIds: Set<number>,
+): void {
+  const bucket = index.buckets.get(spatialBucketKey(bucketX, bucketY));
+
+  if (!bucket) {
+    return;
+  }
+
+  for (const id of bucket) {
+    if (index.active[id]) {
+      candidateIds.add(id);
+    }
+  }
+}
+
+function collectNearbyPaletteWorkUnitIds(
+  index: PaletteWorkUnitSpatialIndex,
+  current: { x: number; y: number },
+): number[] {
+  const origin = spatialBucketCoord(current);
+  const candidateIds = new Set<number>();
+  const orderedBuckets = index.bucketCoords
+    .map((bucket) => ({
+      bucket,
+      distance: Math.max(Math.abs(bucket.x - origin.x), Math.abs(bucket.y - origin.y)),
+    }))
+    .sort(
+      (left, right) =>
+        left.distance - right.distance ||
+        left.bucket.y - right.bucket.y ||
+        left.bucket.x - right.bucket.x,
+    );
+
+  for (const { bucket } of orderedBuckets) {
+    addPaletteWorkUnitBucketCandidates(index, bucket.x, bucket.y, candidateIds);
+    if (candidateIds.size >= COLOR_BATCH_SPATIAL_MIN_CANDIDATES) {
+      break;
+    }
+  }
+
+  if (candidateIds.size === 0) {
+    const fallbackId = getFirstActivePaletteWorkUnitId(index);
+    return fallbackId === null ? [] : [fallbackId];
+  }
+
+  return Array.from(candidateIds).slice(0, COLOR_BATCH_SPATIAL_MAX_CANDIDATES);
+}
+
+function getFirstActivePaletteWorkUnitId(index: PaletteWorkUnitSpatialIndex): number | null {
+  for (let id = 0; id < index.active.length; id += 1) {
+    if (index.active[id]) {
+      return id;
+    }
+  }
+
+  return null;
+}
+
+function choosePaletteWorkUnitOrder(
+  unit: IndexedPaletteWorkUnit,
+  current: { x: number; y: number },
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): PaletteWorkUnitOrder | null {
+  const variants =
+    pathStrategy === "nearest"
+      ? [getOrderedPixelsForComponent(unit.pixels, current, scoring, pathStrategy)]
+      : unit.variants;
+  let bestPixels: Pixel[] = [];
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (const variant of variants) {
+    if (variant.length === 0) {
+      continue;
+    }
+
+    const distance = estimateTravelCost(current, variant, scoring);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestPixels = variant;
+    }
+  }
+
+  const lastPixel = bestPixels[bestPixels.length - 1];
+
+  if (bestPixels.length === 0 || !lastPixel) {
+    return null;
+  }
+
+  return {
+    orderedPixels: bestPixels,
+    endPosition: toCanvasPosition(lastPixel, scoring.grid),
+  };
+}
+
+function comparePaletteWorkUnitTieBreak(
+  left: IndexedPaletteWorkUnit,
+  right: IndexedPaletteWorkUnit | null,
+): number {
+  if (!right) {
+    return -1;
+  }
+
+  if (left.colorIndex !== right.colorIndex) {
+    return left.colorIndex - right.colorIndex;
+  }
+
+  if (left.batchIndex !== right.batchIndex) {
+    return left.batchIndex - right.batchIndex;
+  }
+
+  return left.id - right.id;
+}
+
+function orderPaletteWorkUnits(
+  workUnits: PlannedPaletteWorkUnit[],
+  current: { x: number; y: number },
+  selectedSlot: number | null,
+  profile: DrawingProfile,
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): OrderedPaletteWorkUnit[] {
+  const index = createPaletteWorkUnitSpatialIndex(workUnits, scoring, pathStrategy);
+  const ordered: OrderedPaletteWorkUnit[] = [];
+  let currentPosition = current;
+  let currentSlot = selectedSlot;
+
+  while (index.remainingCount > 0) {
+    const candidateIds = collectNearbyPaletteWorkUnitIds(index, currentPosition);
+    let bestId: number | null = null;
+    let bestCost = Number.POSITIVE_INFINITY;
+    let bestPixels: Pixel[] = [];
+    let bestEndPosition = currentPosition;
+
+    for (const candidateId of candidateIds) {
+      if (!index.active[candidateId]) {
+        continue;
+      }
+
+      const unit = index.units[candidateId];
+      if (!unit) {
+        continue;
+      }
+
+      const workUnitOrder = choosePaletteWorkUnitOrder(
+        unit,
+        currentPosition,
+        scoring,
+        pathStrategy,
+      );
+
+      if (!workUnitOrder) {
+        continue;
+      }
+
+      const firstPixel = workUnitOrder.orderedPixels[0]!;
+      const switchCost = getPaletteSelectCostMs(currentSlot, unit.slotIndex, profile);
+      const travelCost = transitionCostToPixel(currentPosition, firstPixel, scoring);
+      const cost = switchCost + travelCost;
+      const bestUnit = bestId === null ? null : index.units[bestId] ?? null;
+      const isBetter =
+        cost < bestCost ||
+        (cost === bestCost && comparePaletteWorkUnitTieBreak(unit, bestUnit) < 0);
+
+      if (isBetter) {
+        bestId = candidateId;
+        bestCost = cost;
+        bestPixels = workUnitOrder.orderedPixels;
+        bestEndPosition = workUnitOrder.endPosition;
+      }
+    }
+
+    if (bestId === null) {
+      bestId = getFirstActivePaletteWorkUnitId(index);
+    }
+
+    const selected = bestId === null ? null : index.units[bestId];
+    if (!selected) {
+      break;
+    }
+
+    if (bestPixels.length === 0) {
+      const fallbackOrder = choosePaletteWorkUnitOrder(
+        selected,
+        currentPosition,
+        scoring,
+        pathStrategy,
+      );
+
+      if (fallbackOrder) {
+        bestPixels = fallbackOrder.orderedPixels;
+        bestEndPosition = fallbackOrder.endPosition;
+      }
+    }
+
+    index.active[selected.id] = false;
+    index.remainingCount -= 1;
+
+    if (bestPixels.length === 0) {
+      continue;
+    }
+
+    ordered.push({
+      ...selected,
+      orderedPixels: bestPixels,
+    });
+    currentPosition = bestEndPosition;
+    currentSlot = selected.slotIndex;
+  }
+
+  return ordered;
+}
+
+function orderPaletteColorLevelWorkUnits(
+  batch: PlannedPaletteColor[],
+  pixelsByColor: Map<number, Pixel[]>,
+  current: { x: number; y: number },
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): OrderedPaletteWorkUnit[] {
+  const orderedUnits: OrderedPaletteWorkUnit[] = [];
+  let currentPosition = current;
+
+  for (const [batchIndex, color] of batch.entries()) {
+    const pixels = pixelsByColor.get(color.colorIndex) ?? [];
+    const orderedPixels = getOrderedPixelsForColor(
+      pixelsByColor,
+      color.colorIndex,
+      currentPosition,
+      scoring,
+      pathStrategy,
+    );
+
+    orderedUnits.push({
+      ...color,
+      batchIndex,
+      pixels,
+      orderedPixels,
+    });
+    currentPosition = getEndPositionForOrderedPixels(orderedPixels, currentPosition, scoring.grid);
+  }
+
+  return orderedUnits;
+}
+
+function estimateOrderedPaletteWorkUnitCostMs(
+  units: readonly OrderedPaletteWorkUnit[],
+  current: { x: number; y: number },
+  selectedSlot: number | null,
+  profile: DrawingProfile,
+  scoring: RouteScoringContext,
+): number {
+  let total = 0;
+  let currentPosition = current;
+  let currentSlot = selectedSlot;
+
+  for (const unit of units) {
+    if (unit.orderedPixels.length === 0) {
+      continue;
+    }
+
+    total += getPaletteSelectCostMs(currentSlot, unit.slotIndex, profile);
+    total += estimateTravelCost(currentPosition, unit.orderedPixels, scoring);
+    currentPosition = getEndPositionForOrderedPixels(unit.orderedPixels, currentPosition, scoring.grid);
+    currentSlot = unit.slotIndex;
+  }
+
+  return total;
+}
+
+function shouldUseInterleavedPaletteWorkUnits(
+  interleavedUnits: readonly OrderedPaletteWorkUnit[],
+  colorLevelUnits: readonly OrderedPaletteWorkUnit[],
+  current: { x: number; y: number },
+  selectedSlot: number | null,
+  profile: DrawingProfile,
+  scoring: RouteScoringContext,
+): boolean {
+  return (
+    estimateOrderedPaletteWorkUnitCostMs(
+      interleavedUnits,
+      current,
+      selectedSlot,
+      profile,
+      scoring,
+    ) <
+    estimateOrderedPaletteWorkUnitCostMs(
+      colorLevelUnits,
+      current,
+      selectedSlot,
+      profile,
+      scoring,
+    )
+  );
 }
 
 function canExtendRun(run: Pixel[], pixel: Pixel): boolean {
@@ -981,20 +1763,98 @@ export function generateScanlinePlan(
     }
   } else if (profile.colorMode === "palette") {
     const usedColors = getUsedPaletteColors(pixelMap);
+    const orderedColors = planningOptions.optimizeColorBatches
+      ? orderPaletteColors(
+          usedColors,
+          current,
+          pixelsByColor,
+          scoring,
+          planningOptions.pathStrategy,
+        )
+      : usedColors;
 
-    for (let batchStart = 0; batchStart < usedColors.length; batchStart += PALETTE_SLOT_COUNT) {
-      const batch = usedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT);
-      const batchPrefixCommands = batch.map((color, slotIndex) =>
-        paletteConfigCommand(slotIndex, color.colorHex),
+    for (let batchStart = 0; batchStart < orderedColors.length; batchStart += PALETTE_SLOT_COUNT) {
+      const batch = planPaletteColorBatch(
+        orderedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT),
+        planningOptions.optimizeColorBatches === true,
+        (color, slotIndex) => paletteConfigCommand(slotIndex, color.colorHex),
       );
       let selectedSlot: number | null = null;
 
-      commands.push(...batchPrefixCommands);
+      commands.push(...batch.map((color) => color.configCommand));
 
-      for (const [slotIndex, color] of batch.entries()) {
-        if (selectedSlot !== slotIndex) {
-          commands.push(colorCommand(slotIndex));
-          selectedSlot = slotIndex;
+      const workUnits = createPaletteWorkUnits(batch, pixelsByColor);
+
+      if (
+        planningOptions.optimizeColorBatches === true &&
+        shouldTryPaletteWorkUnitInterleaving(workUnits)
+      ) {
+        const orderedWorkUnits = orderPaletteWorkUnits(
+          workUnits,
+          current,
+          selectedSlot,
+          profile,
+          scoring,
+          planningOptions.pathStrategy,
+        );
+        const colorLevelWorkUnits = orderPaletteColorLevelWorkUnits(
+          batch,
+          pixelsByColor,
+          current,
+          scoring,
+          planningOptions.pathStrategy,
+        );
+
+        if (
+          shouldUseInterleavedPaletteWorkUnits(
+            orderedWorkUnits,
+            colorLevelWorkUnits,
+            current,
+            selectedSlot,
+            profile,
+            scoring,
+          )
+        ) {
+          for (const [unitIndex, unit] of orderedWorkUnits.entries()) {
+            if (selectedSlot !== unit.slotIndex) {
+              commands.push(colorSelectCommand(unit.slotIndex, selectedSlot !== null));
+              selectedSlot = unit.slotIndex;
+            }
+
+            current = appendResumeSegment(
+              commands,
+              resumeSegments,
+              unit.orderedPixels,
+              current,
+              profile,
+              grid,
+              recenterStats,
+              {
+                segmentIndex,
+                colorHex: unit.colorHex,
+                slotIndex: unit.slotIndex,
+                resumePrefixCommands: [
+                  ...getNeededPaletteConfigCommands(batch, orderedWorkUnits, unitIndex),
+                  colorCommand(unit.slotIndex),
+                ],
+              },
+            );
+            segmentIndex += 1;
+          }
+
+          continue;
+        }
+      }
+
+      for (const [batchIndex, color] of batch.entries()) {
+        if (selectedSlot !== color.slotIndex) {
+          commands.push(
+            colorSelectCommand(
+              color.slotIndex,
+              planningOptions.optimizeColorBatches === true && selectedSlot !== null,
+            ),
+          );
+          selectedSlot = color.slotIndex;
         }
 
         const orderedPixels = getOrderedPixelsForColor(
@@ -1015,8 +1875,11 @@ export function generateScanlinePlan(
           {
             segmentIndex,
             colorHex: color.colorHex,
-            slotIndex,
-            resumePrefixCommands: [...batchPrefixCommands.slice(slotIndex), colorCommand(slotIndex)],
+            slotIndex: color.slotIndex,
+            resumePrefixCommands: [
+              ...getRemainingPaletteConfigCommands(batch, batchIndex),
+              colorCommand(color.slotIndex),
+            ],
           },
         );
         segmentIndex += 1;
@@ -1024,14 +1887,26 @@ export function generateScanlinePlan(
     }
   } else {
     const usedColors = getUsedPaletteColors(pixelMap);
+    const orderedColors = planningOptions.optimizeColorBatches
+      ? orderPaletteColors(
+          usedColors,
+          current,
+          pixelsByColor,
+          scoring,
+          planningOptions.pathStrategy,
+        )
+      : usedColors;
     let didResetOfficialPaletteState = false;
 
-    for (let batchStart = 0; batchStart < usedColors.length; batchStart += PALETTE_SLOT_COUNT) {
-      const batch = usedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT);
-      const batchConfigCommands = batch.map((color, slotIndex) => {
-        const cell = officialPaletteCellFromIndex(color.colorIndex);
-        return basicPaletteConfigCommand(slotIndex, cell.row, cell.col);
-      });
+    for (let batchStart = 0; batchStart < orderedColors.length; batchStart += PALETTE_SLOT_COUNT) {
+      const batch = planPaletteColorBatch(
+        orderedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT),
+        planningOptions.optimizeColorBatches === true,
+        (color, slotIndex) => {
+          const cell = officialPaletteCellFromIndex(color.colorIndex);
+          return basicPaletteConfigCommand(slotIndex, cell.row, cell.col);
+        },
+      );
       let selectedSlot: number | null = null;
 
       if (!didResetOfficialPaletteState) {
@@ -1039,12 +1914,81 @@ export function generateScanlinePlan(
         didResetOfficialPaletteState = true;
       }
 
-      commands.push(...batchConfigCommands);
+      commands.push(...batch.map((color) => color.configCommand));
 
-      for (const [slotIndex, color] of batch.entries()) {
-        if (selectedSlot !== slotIndex) {
-          commands.push(colorCommand(slotIndex));
-          selectedSlot = slotIndex;
+      const workUnits = createPaletteWorkUnits(batch, pixelsByColor);
+
+      if (
+        planningOptions.optimizeColorBatches === true &&
+        shouldTryPaletteWorkUnitInterleaving(workUnits)
+      ) {
+        const orderedWorkUnits = orderPaletteWorkUnits(
+          workUnits,
+          current,
+          selectedSlot,
+          profile,
+          scoring,
+          planningOptions.pathStrategy,
+        );
+        const colorLevelWorkUnits = orderPaletteColorLevelWorkUnits(
+          batch,
+          pixelsByColor,
+          current,
+          scoring,
+          planningOptions.pathStrategy,
+        );
+
+        if (
+          shouldUseInterleavedPaletteWorkUnits(
+            orderedWorkUnits,
+            colorLevelWorkUnits,
+            current,
+            selectedSlot,
+            profile,
+            scoring,
+          )
+        ) {
+          for (const [unitIndex, unit] of orderedWorkUnits.entries()) {
+            if (selectedSlot !== unit.slotIndex) {
+              commands.push(colorSelectCommand(unit.slotIndex, selectedSlot !== null));
+              selectedSlot = unit.slotIndex;
+            }
+
+            current = appendResumeSegment(
+              commands,
+              resumeSegments,
+              unit.orderedPixels,
+              current,
+              profile,
+              grid,
+              recenterStats,
+              {
+                segmentIndex,
+                colorHex: unit.colorHex,
+                slotIndex: unit.slotIndex,
+                resumePrefixCommands: [
+                  basicPaletteResetCommand(),
+                  ...getNeededPaletteConfigCommands(batch, orderedWorkUnits, unitIndex),
+                  colorCommand(unit.slotIndex),
+                ],
+              },
+            );
+            segmentIndex += 1;
+          }
+
+          continue;
+        }
+      }
+
+      for (const [batchIndex, color] of batch.entries()) {
+        if (selectedSlot !== color.slotIndex) {
+          commands.push(
+            colorSelectCommand(
+              color.slotIndex,
+              planningOptions.optimizeColorBatches === true && selectedSlot !== null,
+            ),
+          );
+          selectedSlot = color.slotIndex;
         }
 
         const orderedPixels = getOrderedPixelsForColor(
@@ -1065,11 +2009,11 @@ export function generateScanlinePlan(
           {
             segmentIndex,
             colorHex: color.colorHex,
-            slotIndex,
+            slotIndex: color.slotIndex,
             resumePrefixCommands: [
               basicPaletteResetCommand(),
-              ...batchConfigCommands.slice(slotIndex),
-              colorCommand(slotIndex),
+              ...getRemainingPaletteConfigCommands(batch, batchIndex),
+              colorCommand(color.slotIndex),
             ],
           },
         );

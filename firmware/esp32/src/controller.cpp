@@ -105,6 +105,7 @@ SwitchController::SwitchController(ControllerTransport &transport) : transport_(
 void SwitchController::begin() {
   transport_.begin();
   resetBasicPaletteTracking();
+  paletteSlotTrackingReady_ = false;
 }
 
 void SwitchController::configureInputTiming(
@@ -228,14 +229,15 @@ void SwitchController::resetBasicPaletteTracking() {
 bool SwitchController::selectColor(int index) {
   waitUntilReady();
   const int slotIndex = clampPaletteSlotIndex(index);
+  paletteSlotTrackingReady_ = false;
 
   // Drawing page flow:
   // 1. Y opens the palette selector.
   // 2. The selector has extra non-palette entries above the 9 palette slots,
   //    so we normalize by pushing all the way to the bottom palette slot first.
   // 3. Up moves back to the requested palette slot.
-  // 3. A applies the current slot.
-  // 4. B closes the palette selector and returns to drawing.
+  // 4. A applies the current slot.
+  // 5. B closes the palette selector and returns to drawing.
   if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
     return false;
   }
@@ -258,6 +260,42 @@ bool SwitchController::selectColor(int index) {
     return false;
   }
   delay(inputDelayMs_);
+  currentPaletteSlot_ = slotIndex;
+  paletteSlotTrackingReady_ = true;
+  return true;
+}
+
+bool SwitchController::selectColorFast(int index) {
+  waitUntilReady();
+  const int slotIndex = clampPaletteSlotIndex(index);
+
+  if (!paletteSlotTrackingReady_) {
+    return selectColor(slotIndex);
+  }
+
+  const int slotDelta = slotIndex - currentPaletteSlot_;
+  const ControllerButton directionButton =
+      slotDelta < 0 ? ControllerButton::DpadUp : ControllerButton::DpadDown;
+  paletteSlotTrackingReady_ = false;
+
+  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
+  delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
+
+  for (int step = 0; step < abs(slotDelta); step += 1) {
+    if (!pressPaletteMenuButton(transport_, directionButton)) {
+      return false;
+    }
+  }
+
+  if (!pressPaletteMenuButton(transport_, ControllerButton::A) ||
+      !pressPaletteMenuButton(transport_, ControllerButton::B)) {
+    return false;
+  }
+  delay(inputDelayMs_);
+  currentPaletteSlot_ = slotIndex;
+  paletteSlotTrackingReady_ = true;
   return true;
 }
 
@@ -265,6 +303,7 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
   waitUntilReady();
 
   const int slotIndex = clampPaletteSlotIndex(index);
+  paletteSlotTrackingReady_ = false;
   const HsvColor hsv = rgbToHsv(red, green, blue);
   const float hueRatio = hsv.hue <= 0.0f ? 0.0f : ((360.0f - hsv.hue) / 360.0f);
   const uint8_t hueSteps =
@@ -348,6 +387,8 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
     return false;
   }
   delay(inputDelayMs_);
+  currentPaletteSlot_ = slotIndex;
+  paletteSlotTrackingReady_ = true;
   return true;
 }
 
@@ -355,6 +396,7 @@ bool SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t
   waitUntilReady();
 
   const int slotIndex = clampPaletteSlotIndex(index);
+  paletteSlotTrackingReady_ = false;
   const uint8_t targetRow = clampBasicColorRow(row);
   const uint8_t targetCol = clampBasicColorCol(col);
   const uint8_t currentRow = basicPaletteTrackingReady_ ? basicPaletteSlotRows_[slotIndex] : BASIC_COLOR_INITIAL_SLOT_ROWS[slotIndex];
@@ -417,6 +459,8 @@ bool SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t
   basicPaletteSlotRows_[slotIndex] = targetRow;
   basicPaletteSlotCols_[slotIndex] = targetCol;
   basicPaletteTrackingReady_ = true;
+  currentPaletteSlot_ = slotIndex;
+  paletteSlotTrackingReady_ = true;
   delay(inputDelayMs_);
   return true;
 }

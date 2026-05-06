@@ -616,6 +616,21 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     return true;
   }
 
+  if (line.startsWith("CF ")) {
+    int index = 0;
+
+    if (!parseOneInt(line, index)) {
+      error = "invalid fast color";
+      return false;
+    }
+
+    if (!controller.selectColorFast(index)) {
+      return failControllerInput(error);
+    }
+    Serial.printf("INFO action=color-fast slot=%d\n", index);
+    return true;
+  }
+
   if (line.startsWith("C ")) {
     int index = 0;
 

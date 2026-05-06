@@ -101,7 +101,7 @@
           <div class="page-step-row" aria-label="脚本生成步骤">
             <span class="page-step">1. 导入图片</span>
             <span class="page-step">2. 调整缩放和位置</span>
-            <span class="page-step">3. 检查预览后开始绘制</span>
+            <span class="page-step">3. 点击生成/刷新预览后开始绘制</span>
           </div>
         </section>
         <main class="grid">
@@ -163,8 +163,8 @@
               <label>
                 <span>绘制模式</span>
                 <select id="color-mode-select">
-                  <option value="mono" selected>单色绘制</option>
-                  <option value="palette">自定义多色（测试中）</option>
+                  <option value="mono">单色绘制</option>
+                  <option value="palette" selected>自定义多色（测试中）</option>
                   <option value="official">官方色绘制</option>
                 </select>
               </label>
@@ -193,6 +193,12 @@
                   <option value="strong">强力</option>
                 </select>
               </label>
+            </div>
+
+            <p class="field-warning hidden" id="studio-analysis-warning"></p>
+
+            <div class="action-row studio-generate-row">
+              <button id="generate-button" class="primary" type="button">生成/刷新预览</button>
             </div>
 
             <div class="template-picker-card">
@@ -310,7 +316,6 @@
 
             <div class="action-row">
               <button id="quick-start-button" class="primary">一键开始绘制</button>
-              <button id="generate-button" class="ghost">仅生成命令</button>
               <button id="execute-button" class="ghost" disabled>执行现有脚本</button>
             </div>
 
@@ -359,6 +364,14 @@
                 <span class="checkbox-copy">
                   <strong>实验：长距离移动时自动回中</strong>
                   <small>长按到屏幕边缘后用 X/A 回到画布中心。开启前请先到“调试测速”页跑回中校准，确认能回到画布中心后再使用。</small>
+                </span>
+              </label>
+
+              <label class="checkbox-card" for="color-batch-optimization-checkbox">
+                <input id="color-batch-optimization-checkbox" type="checkbox" />
+                <span class="checkbox-copy">
+                  <strong>实验：优化 9 色槽分组和换色</strong>
+                  <small>多色模式下按画布移动距离重排每组 9 个颜色，优先使用底部色槽，并在同批局部组件间快速换色；默认关闭。</small>
                 </span>
               </label>
 

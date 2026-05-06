@@ -9,6 +9,7 @@ export type DrawCommand =
   | { type: "press"; button: ControllerButton }
   | { type: "hold"; button: ControllerButton; ms: number }
   | { type: "color"; index: number }
+  | { type: "colorFast"; index: number }
   | { type: "basicPaletteReset" }
   | { type: "paletteConfig"; slot: number; colorHex: string }
   | { type: "basicPaletteConfig"; slot: number; row: number; col: number }
@@ -51,6 +52,10 @@ export function holdButtonCommand(button: ControllerButton, ms: number): DrawCom
 
 export function colorCommand(index: number): DrawCommand {
   return { type: "color", index };
+}
+
+export function colorFastCommand(index: number): DrawCommand {
+  return { type: "colorFast", index };
 }
 
 export function basicPaletteResetCommand(): DrawCommand {

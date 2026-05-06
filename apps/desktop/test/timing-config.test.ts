@@ -96,7 +96,7 @@ test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
   assert.equal(recoveryPlan.commands[0], "CFG INPUT 65 170 2400");
 });
 
-test("/api/generate echoes timing overrides into commands and estimated runtime", async (t) => {
+test("/api/generate echoes timing and experimental option overrides", async (t) => {
   const server = await startWebServer({ port: 0 });
   t.after(async () => {
     await server.close();
@@ -115,7 +115,32 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
   const defaultPayload = (await defaultResponse.json()) as {
     commands: string[];
     profile: { ackTimeoutMs: number };
-    stats: { estimatedRuntimeMs: number };
+    stats: {
+      colorPixelCounts: Array<{ colorIndex: number; pixelCount: number }>;
+      estimatedRuntimeMs: number;
+      totalPixels: number;
+    };
+  };
+  const analysisResponse = await fetch(`${server.url}/api/analyze-image`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      imageDataUrl,
+      previewScale: 1,
+    }),
+  });
+  assert.equal(analysisResponse.ok, true);
+  const analysisPayload = (await analysisResponse.json()) as {
+    recommendations: {
+      fragmented: boolean;
+      warnBrushSizeOne: boolean;
+      warnColorBatchOptimization: boolean;
+      recommendedMaxColors: number | null;
+      disableBrushSizeOne: boolean;
+      disableColorBatchOptimization: boolean;
+      maxRecommendedColors: number | null;
+    };
+    stats: { totalPixels: number };
   };
 
   const overrideResponse = await fetch(`${server.url}/api/generate`, {
@@ -127,6 +152,7 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
       inputDelay: 30,
       buttonPressDuration: 40,
       recenterHoldMs: 4200,
+      enableColorBatchOptimization: true,
     }),
   });
   assert.equal(overrideResponse.ok, true);
@@ -138,22 +164,51 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
       buttonPressDuration: number;
       homeDuration: number;
       recenterHoldMs: number;
+      enableColorBatchOptimization: boolean;
     };
     stats: { estimatedRuntimeMs: number };
   };
 
   assert.equal(defaultPayload.commands[0], "CFG INPUT 65 45 1800");
   assert.equal(defaultPayload.profile.ackTimeoutMs, DEFAULT_ACK_TIMEOUT_MS);
+  assert.equal(
+    defaultPayload.stats.colorPixelCounts.reduce((total, color) => total + color.pixelCount, 0),
+    defaultPayload.stats.totalPixels,
+  );
+  assert.equal(analysisPayload.stats.totalPixels, defaultPayload.stats.totalPixels);
+  assert.equal(analysisPayload.recommendations.fragmented, false);
+  assert.equal(analysisPayload.recommendations.warnBrushSizeOne, false);
+  assert.equal(analysisPayload.recommendations.warnColorBatchOptimization, false);
+  assert.equal(analysisPayload.recommendations.recommendedMaxColors, null);
+  assert.equal(analysisPayload.recommendations.disableBrushSizeOne, false);
+  assert.equal(analysisPayload.recommendations.disableColorBatchOptimization, false);
+  assert.equal(analysisPayload.recommendations.maxRecommendedColors, null);
   assert.equal(overridePayload.commands[0], "CFG INPUT 40 30 1800");
   assert.equal(overridePayload.profile.ackTimeoutMs, DEFAULT_ACK_TIMEOUT_MS);
   assert.equal(overridePayload.profile.inputDelay, 30);
   assert.equal(overridePayload.profile.buttonPressDuration, 40);
   assert.equal(overridePayload.profile.homeDuration, 1800);
   assert.equal(overridePayload.profile.recenterHoldMs, 4200);
+  assert.equal(overridePayload.profile.enableColorBatchOptimization, true);
   assert.ok(
     overridePayload.stats.estimatedRuntimeMs < defaultPayload.stats.estimatedRuntimeMs,
     "expected faster timing overrides to reduce estimated runtime",
   );
+
+  const resetResponse = await fetch(`${server.url}/api/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      imageDataUrl,
+      previewScale: 1,
+      enableColorBatchOptimization: false,
+    }),
+  });
+  assert.equal(resetResponse.ok, true);
+  const resetPayload = (await resetResponse.json()) as {
+    profile: { enableColorBatchOptimization: boolean };
+  };
+  assert.equal(resetPayload.profile.enableColorBatchOptimization, false);
 });
 
 test("loadProfile clamps legacy ack timeout values to the supported minimum", async (t) => {

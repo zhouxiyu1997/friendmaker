@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   colorCommand,
+  colorFastCommand,
   holdButtonCommand,
   inputConfigCommand,
   moveCommand,
@@ -90,4 +91,23 @@ test("custom palette config runtime uses calibrated color tuning cost", () => {
   assert.ok(green > white, "green should require hue/saturation tuning beyond white");
   assert.equal(breakdown.paletteConfigCount, 1);
   assert.equal(breakdown.paletteConfigMs, green);
+});
+
+test("stateful fast color select avoids defensive slot reset cost", () => {
+  const profile = makeProfile({
+    buttonPressDuration: 65,
+    inputDelay: 45,
+  });
+  const slowBreakdown = calculateCommandRuntimeBreakdown(
+    [inputConfigCommand(65, 45, 1800), colorCommand(8), colorCommand(7)],
+    profile,
+  );
+  const fastBreakdown = calculateCommandRuntimeBreakdown(
+    [inputConfigCommand(65, 45, 1800), colorCommand(8), colorFastCommand(7)],
+    profile,
+  );
+
+  assert.equal(fastBreakdown.colorSelectCount, 2);
+  assert.ok(fastBreakdown.colorSelectMs < slowBreakdown.colorSelectMs);
+  assert.equal(slowBreakdown.colorSelectMs - fastBreakdown.colorSelectMs, 3_240);
 });

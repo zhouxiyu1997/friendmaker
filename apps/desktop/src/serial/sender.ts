@@ -13,7 +13,11 @@ import {
   parseInputConfigCommand,
   type InputTiming,
 } from "../protocol/timing.js";
-import { estimatePaletteConfigDurationMs } from "../protocol/runtimeEstimate.js";
+import {
+  estimateColorSelectDurationMs,
+  estimateFastColorSelectDurationMs,
+  estimatePaletteConfigDurationMs,
+} from "../protocol/runtimeEstimate.js";
 import type { ProgressUpdate, SenderControls } from "../types.js";
 
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
@@ -312,6 +316,18 @@ export function getAckTimeoutForCommand(
 
   if (trimmed === "BC RESET") {
     return Math.max(baseTimeoutMs, 4_000);
+  }
+
+  if (trimmed.startsWith("CF ")) {
+    // Firmware falls back to defensive `C` if its palette-slot state is not
+    // anchored, so the ACK window must cover both paths.
+    return boundedTimeout(
+      1_000 +
+        Math.max(
+          estimateFastColorSelectDurationMs(0, 8, timing),
+          estimateColorSelectDurationMs(0, timing),
+        ),
+    );
   }
 
   if (trimmed.startsWith("C ")) {

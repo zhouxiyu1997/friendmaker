@@ -78,13 +78,19 @@ const state = {
     imageOffsetXPercent: 0,
     imageOffsetYPercent: 0,
     previewGuideMode: "none",
-    colorMode: "mono",
+    colorMode: "palette",
     colorCount: 32,
     noiseCleanupMode: "off",
     enableRecenterShortcut: false,
+    enableColorBatchOptimization: false,
     removeBackground: false,
     usedColorIndexes: [],
+    colorPixelCounts: [],
     generatedPalette: [],
+    imageAnalysis: null,
+    imageAnalysisBusy: false,
+    imageAnalysisStale: true,
+    needsGeneration: false,
     resumePlan: null,
     recoverySessions: [],
     officialPalette: {
@@ -243,7 +249,9 @@ const els = {
   colorModeSelect: document.getElementById("color-mode-select"),
   colorCountSelect: document.getElementById("color-count-select"),
   noiseCleanupSelect: document.getElementById("noise-cleanup-select"),
+  studioAnalysisWarning: document.getElementById("studio-analysis-warning"),
   recenterShortcutCheckbox: document.getElementById("recenter-shortcut-checkbox"),
+  colorBatchOptimizationCheckbox: document.getElementById("color-batch-optimization-checkbox"),
   thresholdLabel: document.getElementById("threshold-label"),
   thresholdRange: document.getElementById("threshold-range"),
   thresholdValue: document.getElementById("threshold-value"),
@@ -400,6 +408,7 @@ let controllerStatusPollInFlight = false;
 let controllerStatusTimeoutRecoveryAttempted = false;
 let studioPreviewRefreshTimer = null;
 let studioGenerateRequestSerial = 0;
+let studioImageAnalysisRequestSerial = 0;
 let studioPreviewBoundsRequestSerial = 0;
 const studioTemplateOverlayCache = new Map();
 const CONTROLLER_STATUS_POLL_INTERVAL_MS = 1_000;
@@ -600,6 +609,12 @@ els.recenterShortcutCheckbox.addEventListener("change", () => {
   scheduleStudioPreviewRefresh();
 });
 
+els.colorBatchOptimizationCheckbox.addEventListener("change", () => {
+  state.studio.enableColorBatchOptimization = els.colorBatchOptimizationCheckbox.checked;
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
 els.previewGuideSelect.addEventListener("change", () => {
   const nextMode = els.previewGuideSelect.value;
   state.studio.previewGuideMode =
@@ -724,8 +739,11 @@ els.imageInput.addEventListener("change", async (event) => {
   state.imageSourceLabel = file.name;
   els.fileLabel.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
   appendLog(els.studioLogOutput, `已载入图片：${file.name}`);
+  state.studio.imageAnalysis = null;
+  state.studio.imageAnalysisStale = true;
+  clearGeneratedStudioPlan("已载入图片。请先检查设置，再点击“生成/刷新预览”。");
   syncStudioUi();
-  scheduleStudioPreviewRefresh({ immediate: true });
+  void analyzeStudioImage({ logPrefix: "正在做图片初步分析..." });
 });
 
 els.quickStartButton.addEventListener("click", async () => {
@@ -994,6 +1012,17 @@ async function generateStudioCommands({ logPrefix }) {
     return false;
   }
 
+  if (state.studio.busy || state.studio.imageAnalysisBusy) {
+    appendLog(els.studioLogOutput, "图片正在分析或生成中，请稍等完成后再试。");
+    return false;
+  }
+
+  const analysisSuperseded = await ensureFreshStudioImageAnalysis();
+  if (analysisSuperseded) {
+    appendLog(els.studioLogOutput, "图片复杂度分析被新的设置刷新，请再次点击生成。");
+    return false;
+  }
+
   cancelStudioPreviewRefresh();
   setStudioBusy(true);
   appendLog(els.studioLogOutput, logPrefix);
@@ -1036,6 +1065,7 @@ function buildStudioGeneratePayload() {
     removeBackground: state.studio.removeBackground,
     noiseCleanupMode: state.studio.noiseCleanupMode,
     enableRecenterShortcut: state.studio.enableRecenterShortcut,
+    enableColorBatchOptimization: state.studio.enableColorBatchOptimization,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
     recenterHoldMs: state.sharedTiming.recenterHoldMs,
@@ -1062,15 +1092,143 @@ async function requestStudioGeneration() {
   return payload;
 }
 
+async function requestStudioImageAnalysis() {
+  const requestSerial = ++studioImageAnalysisRequestSerial;
+  const response = await fetch("/api/analyze-image", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(buildStudioGeneratePayload()),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "图片分析失败");
+  }
+
+  if (requestSerial !== studioImageAnalysisRequestSerial) {
+    return null;
+  }
+
+  return payload;
+}
+
+function getStudioImageAnalysisRecommendations() {
+  return state.studio.imageAnalysis?.recommendations ?? null;
+}
+
+function getStudioImageAnalysisWarning() {
+  const recommendations = getStudioImageAnalysisRecommendations();
+
+  if (!recommendations?.fragmented && !recommendations?.reason) {
+    return "";
+  }
+
+  const selectedRiskSettings = [];
+  let maxRecommendedColors = 32;
+
+  if (typeof recommendations?.recommendedMaxColors === "number") {
+    maxRecommendedColors = recommendations.recommendedMaxColors;
+  } else if (typeof recommendations?.maxRecommendedColors === "number") {
+    maxRecommendedColors = recommendations.maxRecommendedColors;
+  }
+
+  if (state.studio.brushSize === 1) {
+    selectedRiskSettings.push("1 号笔");
+  }
+
+  if (state.studio.colorMode !== "mono" && state.studio.colorCount > maxRecommendedColors) {
+    selectedRiskSettings.push(`${state.studio.colorCount} 色`);
+  }
+
+  if (state.studio.colorMode !== "mono" && state.studio.enableColorBatchOptimization) {
+    selectedRiskSettings.push("9 色槽分组优化");
+  }
+
+  const reason = recommendations?.reason ?? "初步分析发现这张图颜色碎片较多。";
+  const riskText = selectedRiskSettings.length
+    ? `当前选择了 ${selectedRiskSettings.join("、")}，生成计划可能会明显变慢。`
+    : "这类图片生成计划可能会更久。";
+
+  return `${reason}${riskText}`;
+}
+
+function applyStudioImageAnalysis(payload) {
+  state.studio.imageAnalysis = payload;
+  state.studio.imageAnalysisStale = false;
+
+  return false;
+}
+
+async function analyzeStudioImage({ logPrefix = "", silent = false } = {}) {
+  if (!state.imageDataUrl || state.studio.imageAnalysisBusy) {
+    return false;
+  }
+
+  state.studio.imageAnalysisBusy = true;
+  syncStudioUi();
+
+  if (logPrefix && !silent) {
+    appendLog(els.studioLogOutput, logPrefix);
+  }
+
+  try {
+    const payload = await requestStudioImageAnalysis();
+    if (!payload) {
+      return true;
+    }
+
+    const adjusted = applyStudioImageAnalysis(payload);
+    const recommendations = payload.recommendations ?? {};
+
+    if (!silent) {
+      if (recommendations.reason) {
+        appendLog(els.studioLogOutput, `${recommendations.reason} 高风险选项仍可手动选择，但生成计划可能会更久。`);
+      } else {
+        appendLog(els.studioLogOutput, "图片初步分析完成，未发现明显的高碎片风险。");
+      }
+    }
+
+    return adjusted;
+  } catch (error) {
+    state.studio.imageAnalysisStale = true;
+    if (!silent) {
+      appendLog(els.studioLogOutput, `图片分析失败：${getErrorMessage(error)}`);
+    }
+    return false;
+  } finally {
+    state.studio.imageAnalysisBusy = false;
+    syncStudioUi();
+  }
+}
+
+async function ensureFreshStudioImageAnalysis() {
+  if (!state.imageDataUrl) {
+    return false;
+  }
+
+  if (!state.studio.imageAnalysis || state.studio.imageAnalysisStale) {
+    return analyzeStudioImage({
+      logPrefix: "正在刷新图片复杂度分析...",
+      silent: false,
+    });
+  }
+
+  return false;
+}
+
 function applyGeneratedStudioPayload(payload) {
   state.commands = payload.commands;
   state.studio.resumePlan = payload.resumePlan ?? null;
   state.studio.usedColorIndexes = Array.isArray(payload.stats.usedColorIndexes)
     ? payload.stats.usedColorIndexes
     : [];
+  state.studio.colorPixelCounts = Array.isArray(payload.stats.colorPixelCounts)
+    ? payload.stats.colorPixelCounts
+    : [];
   state.studio.generatedPalette = Array.isArray(payload.profile.palette)
     ? payload.profile.palette
     : [];
+  state.studio.needsGeneration = false;
   state.studio.profile = {
     baudRate: payload.profile.baudRate ?? 115200,
     ackTimeoutMs: payload.profile.ackTimeoutMs ?? 5000,
@@ -1103,6 +1261,8 @@ function applyGeneratedStudioPayload(payload) {
       ? payload.profile.noiseCleanupMode
       : "off";
   state.studio.enableRecenterShortcut = payload.profile.enableRecenterShortcut === true;
+  state.studio.enableColorBatchOptimization =
+    payload.profile.enableColorBatchOptimization === true;
   state.studio.removeBackground = payload.profile.removeBackground === true;
 
   els.commandsOutput.value = payload.commands.join("\n");
@@ -1234,18 +1394,52 @@ function cancelStudioPreviewRefresh() {
   }
 }
 
+function invalidateStudioGenerationRequests() {
+  studioGenerateRequestSerial += 1;
+}
+
+function clearGeneratedStudioPlan(
+  message = "设置已变更，请点击“生成/刷新预览”重新生成。",
+  options = {},
+) {
+  invalidateStudioGenerationRequests();
+  studioImageAnalysisRequestSerial += 1;
+  cancelStudioPreviewRefresh();
+  state.commands = [];
+  state.studio.resumePlan = null;
+  state.studio.usedColorIndexes = [];
+  state.studio.colorPixelCounts = [];
+  state.studio.generatedPalette = [];
+  state.studio.needsGeneration = Boolean(state.imageDataUrl);
+
+  if (options.analysisStale !== false) {
+    state.studio.imageAnalysisStale = Boolean(state.imageDataUrl);
+  }
+
+  els.commandsOutput.value = "";
+  els.previewImage.removeAttribute("src");
+  els.previewImage.classList.remove("visible");
+  els.previewEmpty.textContent = message;
+  els.previewEmpty.classList.remove("hidden");
+  els.statColors.textContent = "-";
+  els.statPixels.textContent = "-";
+  els.statCommands.textContent = "-";
+  els.statRuntime.textContent = "-";
+  renderPreviewBounds(null, null);
+  renderOfficialPalettePreview();
+}
+
 function scheduleStudioPreviewRefresh(options = {}) {
   if (!state.imageDataUrl || state.studio.busy || isStudioExecutionActive()) {
     return;
   }
 
-  cancelStudioPreviewRefresh();
-
-  const delayMs = options.immediate === true ? 0 : 180;
-  studioPreviewRefreshTimer = window.setTimeout(() => {
-    studioPreviewRefreshTimer = null;
-    void refreshStudioPreview();
-  }, delayMs);
+  clearGeneratedStudioPlan(
+    options.immediate === true
+      ? "已载入图片。请先检查设置，再点击“生成/刷新预览”。"
+      : "设置已变更，请点击“生成/刷新预览”重新生成。",
+  );
+  syncStudioUi();
 }
 
 async function refreshStudioPreview() {
@@ -2938,6 +3132,29 @@ function renderStudioExecutionStatus() {
   }
 }
 
+function getStudioColorPixelCountMap() {
+  const counts = new Map();
+
+  if (!Array.isArray(state.studio.colorPixelCounts)) {
+    return counts;
+  }
+
+  state.studio.colorPixelCounts.forEach((entry) => {
+    if (typeof entry?.colorIndex === "number" && typeof entry?.pixelCount === "number") {
+      counts.set(entry.colorIndex, entry.pixelCount);
+    }
+  });
+
+  return counts;
+}
+
+function createPalettePixelCountLabel(pixelCount) {
+  const count = document.createElement("span");
+  count.className = "official-palette-count";
+  count.textContent = `${pixelCount.toLocaleString()} px`;
+  return count;
+}
+
 function renderOfficialPalettePreview() {
   const isOfficialMode = state.studio.colorMode === "official";
   const isPaletteMode = state.studio.colorMode === "palette";
@@ -2945,6 +3162,7 @@ function renderOfficialPalettePreview() {
   const generatedPalette = Array.isArray(state.studio.generatedPalette)
     ? state.studio.generatedPalette
     : [];
+  const colorPixelCounts = getStudioColorPixelCountMap();
 
   els.officialPalettePanel.classList.toggle(
     "hidden",
@@ -2986,7 +3204,11 @@ function renderOfficialPalettePreview() {
         hex.className = "official-palette-hex";
         hex.textContent = colorHex;
 
+        const pixelCount = colorPixelCounts.get(flatIndex) ?? 0;
         meta.append(coord, hex);
+        if (pixelCount > 0) {
+          meta.append(createPalettePixelCountLabel(pixelCount));
+        }
         cell.append(swatch, meta);
         els.officialPaletteGrid.appendChild(cell);
       });
@@ -3000,6 +3222,10 @@ function renderOfficialPalettePreview() {
     els.officialPaletteGrid.innerHTML = "";
 
     generatedPalette.forEach((colorHex, index) => {
+      const colorStats = Array.isArray(state.studio.colorPixelCounts)
+        ? state.studio.colorPixelCounts[index]
+        : null;
+      const colorIndex = typeof colorStats?.colorIndex === "number" ? colorStats.colorIndex : index;
       const cell = document.createElement("div");
       cell.className = "official-palette-cell used";
 
@@ -3012,13 +3238,20 @@ function renderOfficialPalettePreview() {
 
       const coord = document.createElement("span");
       coord.className = "official-palette-coord";
-      coord.textContent = `P${index}`;
+      coord.textContent = `P${colorIndex}`;
 
       const hex = document.createElement("span");
       hex.className = "official-palette-hex";
       hex.textContent = colorHex;
 
+      const pixelCount =
+        typeof colorStats?.pixelCount === "number"
+          ? colorStats.pixelCount
+          : colorPixelCounts.get(colorIndex) ?? 0;
       meta.append(coord, hex);
+      if (pixelCount > 0) {
+        meta.append(createPalettePixelCountLabel(pixelCount));
+      }
       cell.append(swatch, meta);
       els.officialPaletteGrid.appendChild(cell);
     });
@@ -3031,7 +3264,9 @@ function renderOfficialPalettePreview() {
 function syncStudioColorCountOptions() {
   const nextOptions = COLOR_COUNT_OPTIONS_BY_MODE[state.studio.colorMode] ?? [32];
   const currentValue = Number(state.studio.colorCount);
-  const fallbackValue = nextOptions.includes(32) ? 32 : nextOptions[0];
+  const fallbackValue = nextOptions.includes(32)
+    ? 32
+    : nextOptions[nextOptions.length - 1] ?? nextOptions[0];
   const normalizedValue = nextOptions.includes(currentValue) ? currentValue : fallbackValue;
 
   state.studio.colorCount = normalizedValue;
@@ -3055,8 +3290,12 @@ function syncStudioUi() {
   const executionRunning = state.studio.execution.status === "running";
   const executionStopping = state.studio.execution.status === "stopping";
   const showExecutionEmergencyReset = shouldShowExecutionEmergencyReset();
+  const analysisWarning = getStudioImageAnalysisWarning();
 
   els.sizeSelect.value = String(state.studio.canvasSize);
+  Array.from(els.brushSizeSelect.options).forEach((option) => {
+    option.disabled = false;
+  });
   els.brushSizeSelect.value = String(state.studio.brushSize);
   syncStudioTemplateOptions();
   els.templateCategorySelect.value = state.studio.templateCategory;
@@ -3074,6 +3313,7 @@ function syncStudioUi() {
   els.colorModeSelect.value = state.studio.colorMode;
   els.noiseCleanupSelect.value = state.studio.noiseCleanupMode;
   els.recenterShortcutCheckbox.checked = state.studio.enableRecenterShortcut;
+  els.colorBatchOptimizationCheckbox.checked = state.studio.enableColorBatchOptimization;
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
   const backgroundHint = state.studio.removeBackground
@@ -3089,15 +3329,24 @@ function syncStudioUi() {
     state.studio.imageOffsetXPercent,
     state.studio.imageOffsetYPercent,
   );
+  const colorBatchHint = state.studio.enableColorBatchOptimization
+    ? "已开启实验性的 9 色槽分组优化，会尝试按移动距离重排颜色批次，优先使用底部色槽，并在同批局部组件之间快速换色。"
+    : "";
+  const analysisHint = state.studio.imageAnalysisBusy
+    ? "正在做图片初步分析，完成前不会自动生成完整预览。"
+    : "";
+  const generationHint = state.studio.needsGeneration
+    ? "设置就绪后请点击“生成/刷新预览”。"
+    : "";
   if (state.studio.colorMode === "mono") {
     els.studioModeHint.textContent =
-      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${templateHint}${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}`;
+      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${templateHint}${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
   } else if (state.studio.colorMode === "official") {
     els.studioModeHint.textContent =
-      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${squareBrushHint}${backgroundHint}`;
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${colorBatchHint}${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
   } else {
     els.studioModeHint.textContent =
-      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}`;
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}${colorBatchHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
   }
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
@@ -3114,6 +3363,8 @@ function syncStudioUi() {
   els.colorModeSelect.disabled = state.studio.busy || executionActive;
   els.noiseCleanupSelect.disabled = state.studio.busy || executionActive;
   els.recenterShortcutCheckbox.disabled = state.studio.busy || executionActive;
+  els.colorBatchOptimizationCheckbox.disabled =
+    state.studio.busy || executionActive || state.studio.colorMode === "mono";
   els.autoRemoveBackgroundCheckbox.disabled = state.studio.busy || executionActive;
   els.previewGuideSelect.disabled = false;
   els.colorCountSelect.disabled =
@@ -3122,20 +3373,34 @@ function syncStudioUi() {
     state.studio.colorMode === "mono" ? "单色阈值" : "当前模式下不使用阈值";
   els.thresholdRange.disabled = state.studio.busy || executionActive;
   els.quickStartButton.textContent = "一键开始绘制";
+  if (state.studio.busy) {
+    els.generateButton.textContent = "生成中...";
+  } else if (state.studio.imageAnalysisBusy) {
+    els.generateButton.textContent = "分析中...";
+  } else {
+    els.generateButton.textContent = state.studio.needsGeneration
+      ? "生成/刷新预览"
+      : "重新生成预览";
+  }
   els.executeButton.textContent = "执行现有脚本";
+  els.studioAnalysisWarning.textContent = analysisWarning;
+  els.studioAnalysisWarning.classList.toggle("hidden", !analysisWarning);
   els.quickStartButton.disabled =
     state.studio.busy ||
     executionActive ||
+    state.studio.imageAnalysisBusy ||
     !hasImage ||
     !hasPort ||
     !controllerReady;
   els.executeButton.disabled =
     state.studio.busy ||
     executionActive ||
+    state.studio.needsGeneration ||
     state.commands.length === 0 ||
     !hasPort ||
     !controllerReady;
-  els.generateButton.disabled = state.studio.busy || executionActive;
+  els.generateButton.disabled =
+    state.studio.busy || executionActive || state.studio.imageAnalysisBusy || !hasImage;
   els.pauseExecutionButton.disabled = !executionRunning;
   els.resumeExecutionButton.disabled = !executionPaused;
   els.stopExecutionButton.disabled = !(executionRunning || executionPaused);

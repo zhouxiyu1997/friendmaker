@@ -12,6 +12,8 @@ import { applyCliOptions, type CliOptions } from "../cli/args.js";
 import { DEFAULT_ACK_TIMEOUT_MS } from "../config/defaultProfile.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
+import { calculatePixelMapComponentStats } from "../image/componentAnalysis.js";
+import { pixelizeImage } from "../image/pixelize.js";
 import {
   getDrawingTemplateDefinition,
   listDrawingTemplates,
@@ -447,6 +449,10 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
+}
+
+function formatPercent(value: number): number {
+  return Math.round(value * 1000) / 10;
 }
 
 async function resolvePlatformIoPath(): Promise<string | null> {
@@ -1092,6 +1098,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     removeBackground?: boolean;
     noiseCleanupMode?: NoiseCleanupMode;
     enableRecenterShortcut?: boolean;
+    enableColorBatchOptimization?: boolean;
     inputDelay?: number;
     buttonPressDuration?: number;
     recenterHoldMs?: number;
@@ -1123,6 +1130,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
   const noiseCleanupMode = normalizeNoiseCleanupMode(body.noiseCleanupMode);
   const enableRecenterShortcut = body.enableRecenterShortcut === true;
+  const enableColorBatchOptimization = body.enableColorBatchOptimization === true;
   const recenterHoldMs = normalizeRecenterHoldMs(body.recenterHoldMs);
   const template = getDrawingTemplateDefinition(body.templateId ?? "none");
 
@@ -1155,6 +1163,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       noiseCleanupMode,
       enableRecenterShortcut,
       recenterHoldMs,
+      enableColorBatchOptimization,
     },
   );
 
@@ -1174,6 +1183,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       removeBackground: body.removeBackground === true,
       noiseCleanupMode,
       enableRecenterShortcut,
+      enableColorBatchOptimization,
       palette: plan.paletteHexes,
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
@@ -1185,6 +1195,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,
+      colorPixelCounts: plan.colorPixelCounts,
       totalPixels: plan.totalPixels,
       commandCount: plan.commands.length,
       estimatedRuntimeMs: plan.estimatedRuntimeMs,
@@ -1199,6 +1210,131 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,
     commands: plan.commands,
     resumePlan: plan.resumePlan,
+  });
+}
+
+async function handleAnalyzeImage(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    imageDataUrl?: string;
+    profile?: string;
+    templateId?: string;
+    size?: number;
+    brushSize?: number;
+    imageScalePercent?: number;
+    imageOffsetXPercent?: number;
+    imageOffsetYPercent?: number;
+    width?: number;
+    height?: number;
+    threshold?: number;
+    mode?: "mono" | "palette" | "official";
+    colors?: number;
+    resizeMode?: "contain" | "cover";
+    palette?: string[];
+    removeBackground?: boolean;
+    noiseCleanupMode?: NoiseCleanupMode;
+  };
+
+  if (!body.imageDataUrl) {
+    json(response, 400, { error: "Missing imageDataUrl." });
+    return;
+  }
+
+  const loadedProfile = await loadProfile(body.profile);
+  const baseProfile = applyCliOptions(
+    loadedProfile,
+    makeCliOverrides(
+      withDefined({
+        size: body.size,
+        width: body.width,
+        height: body.height,
+        colors: body.colors,
+        threshold: body.threshold,
+        resizeMode: body.resizeMode ?? loadedProfile.resizeMode,
+        mode: body.mode,
+        palette: body.palette,
+      }),
+    ),
+  );
+  const imageScalePercent = normalizeImageScalePercent(body.imageScalePercent);
+  const imageOffsetXPercent = normalizeImageOffsetPercent(body.imageOffsetXPercent);
+  const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
+  const noiseCleanupMode = normalizeNoiseCleanupMode(body.noiseCleanupMode);
+  const template = getDrawingTemplateDefinition(body.templateId ?? "none");
+
+  if (!template) {
+    json(response, 400, { error: `Unknown drawing template: ${body.templateId}` });
+    return;
+  }
+
+  const profile = {
+    ...baseProfile,
+    brushSize: normalizeBrushSize(body.brushSize, baseProfile.brushSize),
+  };
+  const drawingMask = await loadDrawingTemplateMask(template.id, profile.canvasWidth, profile.canvasHeight);
+  const { pixelMap, usedColorIndexes, noiseCleanupStats } = await pixelizeImage(
+    decodeDataUrl(body.imageDataUrl),
+    profile,
+    {
+      imageScalePercent,
+      imageOffsetXPercent,
+      imageOffsetYPercent,
+      removeBackground: body.removeBackground === true,
+      drawingMask,
+      noiseCleanupMode,
+    },
+  );
+  const componentStats = calculatePixelMapComponentStats(pixelMap, {
+    thresholdCells: noiseCleanupStats.thresholdCells,
+    includeTransparent: true,
+  });
+  const drawableCells = componentStats.drawableCellCount;
+  const drawableComponents = componentStats.drawableComponentCount;
+  const componentDensity = drawableCells > 0 ? drawableComponents / drawableCells : 0;
+  const fragmented =
+    drawableComponents >= 2_500 ||
+    (drawableComponents >= 700 && componentDensity >= 0.55);
+  const veryFragmented =
+    drawableComponents >= 10_000 ||
+    (drawableComponents >= 2_000 && componentDensity >= 0.35);
+  const recommendedMaxColors = profile.colorMode !== "mono" && fragmented ? 32 : null;
+  const warnBrushSizeOne = veryFragmented;
+  const warnColorBatchOptimization = profile.colorMode !== "mono" && fragmented;
+  const reason = fragmented
+    ? `初步分析发现 ${drawableComponents} 个颜色碎片，约占 ${formatPercent(componentDensity)}% 可绘制格子。`
+    : null;
+
+  json(response, 200, {
+    profile: {
+      canvasWidth: profile.canvasWidth,
+      canvasHeight: profile.canvasHeight,
+      brushSize: profile.brushSize,
+      colorMode: profile.colorMode,
+      colorCount: profile.colorCount,
+      templateId: template.id,
+      templateLabel: template.label,
+      imageScalePercent,
+      imageOffsetXPercent,
+      imageOffsetYPercent,
+      removeBackground: body.removeBackground === true,
+      noiseCleanupMode,
+    },
+    stats: {
+      usedColorIndexes,
+      totalPixels: drawableCells,
+      componentStats,
+      noiseCleanup: noiseCleanupStats,
+      componentDensity,
+    },
+    recommendations: {
+      fragmented,
+      warnBrushSizeOne,
+      warnColorBatchOptimization,
+      recommendedMaxColors,
+      disableBrushSizeOne: false,
+      disableColorBatchOptimization: false,
+      maxRecommendedColors: recommendedMaxColors,
+      reason,
+    },
   });
 }
 
@@ -2089,6 +2225,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
     if (request.method === "POST" && url.pathname === "/api/generate") {
       await handleGenerate(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/analyze-image") {
+      await handleAnalyzeImage(request, response);
       return;
     }
 

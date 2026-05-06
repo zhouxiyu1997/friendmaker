@@ -89,6 +89,7 @@ export function calculateCommandRuntimeBreakdown(
     holdCount: 0,
   };
   const basicPaletteState = createBasicPaletteTrackingState();
+  let selectedPaletteSlot: number | null = null;
 
   for (const command of commands) {
     switch (command.type) {
@@ -131,8 +132,21 @@ export function calculateCommandRuntimeBreakdown(
         break;
       }
       case "color": {
+        selectedPaletteSlot = clampPaletteSlotIndex(command.index);
         breakdown.colorSelectCount += 1;
         addBreakdownTime(breakdown, "colorSelectMs", estimateColorSelectDurationMs(command.index, timing));
+        break;
+      }
+      case "colorFast": {
+        const targetSlot = clampPaletteSlotIndex(command.index);
+        const duration =
+          selectedPaletteSlot === null
+            ? estimateColorSelectDurationMs(command.index, timing)
+            : estimateFastColorSelectDurationMs(selectedPaletteSlot, targetSlot, timing);
+
+        selectedPaletteSlot = targetSlot;
+        breakdown.colorSelectCount += 1;
+        addBreakdownTime(breakdown, "colorSelectMs", duration);
         break;
       }
       case "paletteConfig": {
@@ -143,6 +157,7 @@ export function calculateCommandRuntimeBreakdown(
           "paletteConfigMs",
           estimatePaletteConfigDurationMs(command.slot, rgb.r, rgb.g, rgb.b, timing),
         );
+        selectedPaletteSlot = clampPaletteSlotIndex(command.slot);
         break;
       }
       case "basicPaletteReset": {
@@ -163,6 +178,7 @@ export function calculateCommandRuntimeBreakdown(
             basicPaletteState,
           ),
         );
+        selectedPaletteSlot = clampPaletteSlotIndex(command.slot);
         break;
       }
       case "wait": {
@@ -194,6 +210,24 @@ export function estimateColorSelectDurationMs(index: number, timing: InputTiming
     COLOR_PALETTE_MENU_OPEN_SETTLE_MS +
     COLOR_PALETTE_RESET_TO_BOTTOM_STEPS * menuPressMs +
     (COLOR_PALETTE_SLOT_COUNT - 1 - normalizedSlot) * menuPressMs +
+    2 * menuPressMs +
+    timing.inputDelayMs
+  );
+}
+
+export function estimateFastColorSelectDurationMs(
+  fromIndex: number,
+  toIndex: number,
+  timing: InputTiming,
+): number {
+  const fromSlot = clampPaletteSlotIndex(fromIndex);
+  const toSlot = clampPaletteSlotIndex(toIndex);
+  const menuPressMs = paletteMenuPressMs();
+
+  return (
+    generalPressMs(timing) +
+    COLOR_PALETTE_MENU_OPEN_SETTLE_MS +
+    Math.abs(toSlot - fromSlot) * menuPressMs +
     2 * menuPressMs +
     timing.inputDelayMs
   );

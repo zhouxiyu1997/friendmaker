@@ -18,6 +18,8 @@ export function serializeCommand(command: DrawCommand): string {
       return `HOLD ${command.button} ${command.ms}`;
     case "color":
       return `C ${command.index}`;
+    case "colorFast":
+      return `CF ${command.index}`;
     case "basicPaletteReset":
       return "BC RESET";
     case "paletteConfig":

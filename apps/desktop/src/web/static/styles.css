@@ -458,6 +458,14 @@ body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.studio-generate-row {
+  margin-top: 14px;
+}
+
+.studio-generate-row button {
+  min-width: 176px;
+}
+
 .template-picker-card {
   margin-top: 18px;
   padding: 18px;
@@ -1606,6 +1614,12 @@ input[type="range"]:focus-visible,
   font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
   font-size: 11px;
   color: var(--ink);
+}
+
+.official-palette-count {
+  font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
 }
 
 .hidden {

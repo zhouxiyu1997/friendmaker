@@ -122,10 +122,12 @@
 - 会量化到游戏内置的 `7 x 12` 官方色盘
 - 当前支持 `8 / 16 / 32 / 64 / 84` 色量化档位
 - 当前按游戏原始 `9` 个色盘槽位的默认颜色起步
+- 可选开启实验性的 `9` 色槽分组优化；默认关闭，会尝试按移动距离重排颜色批次，优先使用更快选择的底部色槽，并在同一批内按局部连通组件使用状态跟踪的快速换色
 
 #### 自定义多色（测试中）
 
 - 会先把图片自动量化成多种颜色，再按批次写入右侧 `9` 个自定义色槽
+- 可选复用实验性的 `9` 色槽分组优化，但这不改变自定义颜色自动调色仍属测试能力的结论
 - 当前更适合颜色数量较少、结构较简单的图片
 - 这是仍在继续打磨的实验路线，稳定性与容错性暂时弱于 `单色绘制` 和 `官方色绘制`
 - 首次试用时，更推荐先用 `单色绘制` 或 `官方色绘制` 验证整体链路
@@ -309,7 +311,8 @@ http://127.0.0.1:4307
 - 选择单色、官方色或自定义多色（测试中）
 - 选择模板、缩放和位置，并检查预览
 - 可选开启实验性的长距离移动自动回中；默认关闭，开启前先在“调试测速”页校准 4000ms 左按测试，只在预估节省时间时插入 `HOLD DLEFT` + `X/A`
-- 生成预览与命令
+- 可选开启实验性的 `9` 色槽分组和换色优化；默认关闭，只影响官方色和自定义多色模式；正式执行每批首个颜色仍用安全换色，后续会在同批局部组件之间使用快速换色
+- 设置变更后点击生成/刷新预览与命令
 - 查看官方色盘预览、统计信息与执行状态
 - 一键开始绘制
 - 暂停、中断或异常后会在本地保留恢复任务；如果应用在暂停期间被关闭，下次启动后该任务也会自动转成可恢复状态
@@ -377,6 +380,7 @@ docs/media/          README 展示图片与视频
 - Switch 连接和绘图流程仍然依赖固定场景假设
 - `自定义多色` 仍在测试阶段，当前整体稳定性明显弱于 `单色绘制` 和 `官方色绘制`
 - 自定义颜色自动调色和长流程容错还不稳定，当前更推荐 `官方色绘制`
+- `9` 色槽分组优化只是实验性的路径、槽位排序和同批局部组件快速换色，不解决自定义颜色精确自动调色问题
 - 第一优先级仍然是输入稳定性，而不是绘制速度
 
 ### 当前状态
@@ -511,10 +515,12 @@ The practical actions are:
 - Quantizes colors into the built-in `7 x 12` official palette
 - Currently supports `8 / 16 / 32 / 64 / 84` quantization levels
 - Starts from the game's default colors for the `9` palette slots
+- Optionally enables the experimental `9`-slot color batch optimizer; it is off by default, reorders color batches by travel distance, prefers faster bottom slots, and uses tracked fast color switching across spatially indexed local connected components when that beats the normal color-level batch estimate
 
 #### Custom Multicolor (Testing)
 
 - Automatically quantizes the image into multiple colors, then writes them into the right-side `9` custom palette slots in batches
+- Can reuse the experimental `9`-slot color batch optimizer, but that does not change the fact that custom color tuning is still a testing path
 - Currently works best on images with fewer colors and simpler structure
 - This path is still experimental, and its stability and tolerance are weaker than `mono drawing` and `official palette drawing`
 - For a first successful run, `mono drawing` or `official palette drawing` is still the safer recommendation
@@ -696,7 +702,8 @@ Notes:
 - Choose mono drawing, official palette drawing, or custom multicolor (testing)
 - Choose template, scale, and position, then review the preview
 - Optionally enable experimental long-move recentering; it is off by default, should be calibrated from the Timing page's 4000ms left-hold test first, and only inserts `HOLD DLEFT` + `X/A` when estimated to save time
-- Generate previews and command scripts
+- Optionally enable experimental `9`-slot color batch and color-switch optimization; it is off by default and only affects official palette and custom multicolor modes; each batch still anchors its first color safely, then uses fast switches across local components only when the planner estimates a net win
+- Click generate/refresh to create previews and command scripts after settings changes
 - Review official palette previews, statistics, and execution status
 - Start drawing with one click
 - Preserve local recovery jobs after pause, stop, or failure; if the app closes while paused, the next launch will still surface that job as recoverable
@@ -763,6 +770,7 @@ docs/media/          README images and videos
 - The Switch connection and drawing workflow still depend on fixed scenario assumptions
 - `Custom multicolor` is still in the testing stage, and its overall stability is clearly weaker than `mono drawing` and `official palette drawing`
 - Automatic custom-color tuning and long-run fault tolerance are not stable yet, so `official palette drawing` is still the recommended color path
+- The `9`-slot color batch optimizer is only an experimental path ordering, slot ordering, and in-batch local component fast-switching change; it uses a spatial index and cost guard for fragmented images, but it does not solve precise custom-color tuning
 - The highest priority is still input stability, not drawing speed
 
 ### Development Status

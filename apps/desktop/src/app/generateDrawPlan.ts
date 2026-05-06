@@ -35,11 +35,18 @@ export interface DrawPlanPathStats {
   longMoveOver200: number;
 }
 
+export interface DrawPlanColorPixelCount {
+  colorIndex: number;
+  colorHex: string;
+  pixelCount: number;
+}
+
 export interface DrawPlan {
   commands: string[];
   resumePlan: ResumePlan;
   pixelMap: PixelMap;
   usedColorIndexes: number[];
+  colorPixelCounts: DrawPlanColorPixelCount[];
   paletteHexes: string[];
   totalPixels: number;
   estimatedRuntimeMs: number;
@@ -66,6 +73,7 @@ export async function generateDrawPlan(
     noiseCleanupMode?: NoiseCleanupMode;
     enableRecenterShortcut?: boolean;
     recenterHoldMs?: number;
+    enableColorBatchOptimization?: boolean;
   },
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes, noiseCleanupStats } = await pixelizeImage(imageSource, profile, options);
@@ -74,6 +82,7 @@ export async function generateDrawPlan(
     ...(options?.pathStrategy ? { pathStrategy: options.pathStrategy } : {}),
     recenterMode: options?.enableRecenterShortcut === true ? "left-hold" : "off",
     ...(typeof options?.recenterHoldMs === "number" ? { recenterHoldMs: options.recenterHoldMs } : {}),
+    optimizeColorBatches: options?.enableColorBatchOptimization === true,
   };
   const scanlinePlan = generateScanlinePlan(pixelMap, profile, scanlineOptions);
   const drawCommands = scanlinePlan.commands;
@@ -84,24 +93,15 @@ export async function generateDrawPlan(
     includeTransparent: true,
   });
   const runtimeBreakdown = calculateRuntimeBreakdown(drawCommands, profile);
-  const paletteHexes = Array.from(
-    pixelMap
-      .flatMap((row) =>
-        row
-          .filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0)
-          .map((pixel) => [pixel.colorIndex, pixel.colorHex] as const),
-      )
-      .reduce((map, [colorIndex, colorHex]) => map.set(colorIndex, colorHex), new Map<number, string>())
-      .entries(),
-  )
-    .sort((a, b) => a[0] - b[0])
-    .map(([, colorHex]) => colorHex);
+  const colorPixelCounts = countDrawablePixelsByColor(pixelMap);
+  const paletteHexes = colorPixelCounts.map((color) => color.colorHex);
 
   return {
     commands: serializeCommands(drawCommands),
     resumePlan: scanlinePlan.resumePlan,
     pixelMap,
     usedColorIndexes,
+    colorPixelCounts,
     paletteHexes,
     totalPixels: countDrawablePixels(pixelMap),
     estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),
@@ -120,6 +120,37 @@ function countDrawablePixels(pixelMap: PixelMap): number {
     (total, row) => total + row.filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).length,
     0,
   );
+}
+
+function countDrawablePixelsByColor(pixelMap: PixelMap): DrawPlanColorPixelCount[] {
+  const colorStats = new Map<number, { colorHex: string; pixelCount: number }>();
+
+  for (const row of pixelMap) {
+    for (const pixel of row) {
+      if (pixel.alpha <= 0 || pixel.colorIndex < 0) {
+        continue;
+      }
+
+      const existing = colorStats.get(pixel.colorIndex);
+
+      if (existing) {
+        existing.pixelCount += 1;
+      } else {
+        colorStats.set(pixel.colorIndex, {
+          colorHex: pixel.colorHex,
+          pixelCount: 1,
+        });
+      }
+    }
+  }
+
+  return Array.from(colorStats.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([colorIndex, stats]) => ({
+      colorIndex,
+      colorHex: stats.colorHex,
+      pixelCount: stats.pixelCount,
+    }));
 }
 
 export function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfile): CanvasBounds | null {

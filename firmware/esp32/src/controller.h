@@ -21,6 +21,7 @@ class SwitchController {
   bool tapButton(ControllerButton button, uint16_t count);
   bool pressButtons(uint32_t buttonsMask);
   bool selectColor(int index);
+  bool selectColorFast(int index);
   void resetBasicPaletteTracking();
   bool configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue);
   bool configureBasicPaletteSlot(int index, uint8_t row, uint8_t col);
@@ -39,6 +40,8 @@ class SwitchController {
   uint8_t basicPaletteSlotRows_[9] = {};
   uint8_t basicPaletteSlotCols_[9] = {};
   bool basicPaletteTrackingReady_ = false;
+  int currentPaletteSlot_ = 0;
+  bool paletteSlotTrackingReady_ = false;
   uint16_t buttonPressMs_ = BUTTON_PRESS_DURATION_MS;
   uint16_t inputDelayMs_ = INPUT_DELAY_MS;
   uint16_t homeMs_ = HOME_DURATION_MS;

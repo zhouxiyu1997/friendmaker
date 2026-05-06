@@ -301,6 +301,19 @@ export class SimulatedDevice {
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
+    if (trimmed.startsWith("CF ")) {
+      const colorIndex = parseOneInt(trimmed);
+
+      if (colorIndex === null) {
+        await delay(options.ackDelayMs);
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid fast color"), lines);
+      }
+
+      this.state.colorIndex = colorIndex;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
     if (trimmed.startsWith("C ")) {
       const colorIndex = parseOneInt(trimmed);
 
