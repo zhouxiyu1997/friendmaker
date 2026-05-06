@@ -1,4 +1,4 @@
-# Friend Maker
+# Friend Maker test
 
 [中文说明](#中文说明) | [English](#english)
 
