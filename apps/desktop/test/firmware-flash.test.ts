@@ -57,11 +57,11 @@ test("firmware flash reports port-specific upload failures without switching to 
       "COM7",
       "could not open port 'COM7': Permission denied",
     ),
-    "Upload failed on the selected port COM7. could not open port 'COM7': Permission denied Reconnect the board, make sure no other app is using the port, or choose a different port and retry.",
+    "Firmware flash failed on the selected port COM7. could not open port 'COM7': Permission denied Reconnect the board, make sure no other app is using the port, or choose a different port and retry.",
   );
 });
 
-test("firmware flash refreshes the writable firmware root before compiling", async (t) => {
+test("firmware flash refreshes the writable firmware root before flashing", async (t) => {
   const initialRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-initial-"));
   const refreshedRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-refreshed-"));
   const server = await startWebServer({
@@ -77,6 +77,20 @@ test("firmware flash refreshes the writable firmware root before compiling", asy
   });
 
   assert.equal(await refreshFirmwareRootForFlash(), refreshedRoot);
+});
+
+test("firmware flash erases board state before uploading firmware", async () => {
+  const serverSource = await readFile(new URL("../src/web/server.ts", import.meta.url), "utf8");
+
+  assert.match(
+    serverSource,
+    /runPlatformIoErase\(environment\.id, selectedPortPath\)[\s\S]*firmware erase completed; starting upload[\s\S]*runPlatformIoUpload\(environment\.id, selectedPortPath\)/u,
+  );
+  assert.match(
+    serverSource,
+    /runPlatformIoTarget\([\s\S]*target: "erase" \| "upload"[\s\S]*"-t",[\s\S]*target/u,
+  );
+  assert.match(serverSource, /flash mode=erase-then-upload/u);
 });
 
 test("esp32 wireless firmware keeps a 2MB-compatible upload header for generic boards", async () => {
@@ -103,6 +117,10 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.doesNotMatch(
     firmwareSource,
+    /generateRotatedBaseMac|bt_id_gen/u,
+  );
+  assert.doesNotMatch(
+    firmwareSource,
     /ESP_BT_GAP_AUTH_CMPL_EVT[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "auth-complete"\)/u,
   );
   assert.match(
@@ -116,5 +134,69 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   assert.doesNotMatch(
     firmwareSource,
     /else if \(hasPeerAddress_\)[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+  );
+  assert.doesNotMatch(
+    firmwareSource,
+    /kSafeJoyConLProfile|kControllerTypeJoyConL|Joy-Con \(L\)|useSingleJoyConButtonMap/u,
+  );
+  assert.match(
+    firmwareSource,
+    /kProBalancedProfile[\s\S]*"Pro Controller"[\s\S]*kControllerTypeProCon/u,
+  );
+  assert.match(
+    firmwareSource,
+    /postOpenQuietRemainingMs\(\)[\s\S]*sendTaskTrampoline[\s\S]*!transport->isPostOpenQuietActive\(\)[\s\S]*allowSetupReport/u,
+  );
+  assert.match(
+    firmwareSource,
+    /applyActiveBluetoothProfile[\s\S]*kHidAppParam\.name[\s\S]*profile\.deviceName/u,
+  );
+  assert.match(
+    firmwareSource,
+    /saveLastGoodBluetoothProfile[\s\S]*kLastGoodProfileNvsKey/u,
+  );
+  assert.match(
+    firmwareSource,
+    /clearBluetoothPairing[\s\S]*removeBondedDevices[\s\S]*shutdownClassicBluetooth\(true\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /shutdownClassicBluetooth\(bool unplugVirtualCable\)[\s\S]*if \(unplugVirtualCable\)[\s\S]*virtual_cable_unplug[\s\S]*shutdown keeping virtual cable/u,
+  );
+  assert.match(
+    firmwareSource,
+    /esp_bt_gap_get_bond_device_list[\s\S]*esp_bt_gap_remove_bond_device/u,
+  );
+  assert.match(
+    firmwareSource,
+    /sessionFailureRecorded_[\s\S]*recordConnectionFailure[\s\S]*connectionFailureCount_/u,
+  );
+  assert.match(
+    firmwareSource,
+    /suppressConnectionFailure_[\s\S]*shutdownClassicBluetooth[\s\S]*if \(!suppressConnectionFailure_\)[\s\S]*recordConnectionFailure/u,
+  );
+  assert.match(
+    firmwareSource,
+    /maybeInferBondedReconnectReady[\s\S]*lastGoodProfileId_[\s\S]*esp_bt_gap_get_bond_device_num[\s\S]*markControllerPaired/u,
+  );
+});
+
+test("controller firmware exposes bluetooth profile and diagnostics commands", async () => {
+  const protocolSource = await readFile(
+    new URL("../../../firmware/esp32/src/protocol.cpp", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    protocolSource,
+    /line == "BT DIAG"[\s\S]*bt_diag_begin=true[\s\S]*bt_diag_end=true/u,
+  );
+  assert.match(
+    protocolSource,
+    /line\.startsWith\("BT PROFILE "\)[\s\S]*configureBluetoothProfile\(profileName\)/u,
+  );
+  assert.match(
+    protocolSource,
+    /line == "BT UNPAIR"[\s\S]*clearBluetoothPairing\(\)/u,
   );
 });

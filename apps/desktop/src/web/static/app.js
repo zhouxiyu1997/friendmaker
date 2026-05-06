@@ -1,5 +1,6 @@
 import {
   deriveControllerStatus,
+  readInfoLineMap,
   shouldReuseExistingControllerConnection,
 } from "./controllerStatus.js";
 
@@ -136,7 +137,7 @@ const state = {
     result: {
       status: "idle",
       title: "等待刷入固件",
-      detail: "点击“编译并刷入固件”后，这里会显示成功或失败。",
+      detail: "点击“擦除并刷入固件”后，这里会显示成功或失败。",
       environmentLabel: "-",
       portPath: "-",
       updatedAt: null,
@@ -153,10 +154,28 @@ const state = {
       detail: "点击“连接手柄”后，这里会显示当前蓝牙发现、认证、连接和报告发送状态。",
       transport: "-",
       profile: "-",
+      profileMode: "-",
+      activeProfile: "-",
+      deviceName: "-",
+      baseMac: "-",
+      controllerType: null,
+      bondedDevices: null,
+      lastGoodProfile: "-",
+      lastConnectionEvent: "-",
+      connectionFailureCount: 0,
+      failuresBeforeStable: 0,
+      lastStableDurationMs: 0,
+      postOpenQuietMs: 0,
+      postOpenQuietRemainingMs: 0,
+      pairingSetupTimeoutMs: 0,
+      connectedUnpairedMs: 0,
+      idlePrePairingReportMs: 0,
+      idleConnectedReportMs: 0,
       discoverable: "未知",
       auth: "未知",
       connected: "未知",
       paired: "未知",
+      pairedInferred: "常规配对",
       ready: "未知",
       peer: "-",
       initStep: "-",
@@ -165,6 +184,7 @@ const state = {
       authValue: null,
       connectedValue: null,
       pairedValue: null,
+      pairedInferredValue: null,
       readyValue: null,
       rawReadyValue: null,
       readyInferredValue: false,
@@ -291,9 +311,13 @@ const els = {
   controllerPortSelect: document.getElementById("controller-port-select"),
   controllerTimingHint: document.getElementById("controller-timing-hint"),
   controllerStepSelect: document.getElementById("controller-step-select"),
+  controllerProfileSelect: document.getElementById("controller-profile-select"),
   controllerRefreshButton: document.getElementById("controller-refresh-button"),
   controllerInfoButton: document.getElementById("controller-info-button"),
   controllerResetButton: document.getElementById("controller-reset-button"),
+  controllerClearPairingButton: document.getElementById("controller-clear-pairing-button"),
+  controllerApplyProfileButton: document.getElementById("controller-apply-profile-button"),
+  controllerExportDiagButton: document.getElementById("controller-export-diag-button"),
   controllerDisconnectButton: document.getElementById("controller-disconnect-button"),
   controllerSerialSessionStatus: document.getElementById("controller-serial-session-status"),
   controllerActionButtons: [...document.querySelectorAll("[data-controller-action]")],
@@ -311,6 +335,10 @@ const els = {
   controllerStatusTransport: document.getElementById("controller-status-transport"),
   controllerStatusProfile: document.getElementById("controller-status-profile"),
   controllerStatusPeer: document.getElementById("controller-status-peer"),
+  controllerStatusDeviceName: document.getElementById("controller-status-device-name"),
+  controllerStatusLastGood: document.getElementById("controller-status-last-good"),
+  controllerStatusFailures: document.getElementById("controller-status-failures"),
+  controllerStatusWarmup: document.getElementById("controller-status-warmup"),
   controllerStatusInitStep: document.getElementById("controller-status-init-step"),
   controllerStatusInitError: document.getElementById("controller-status-init-error"),
   controllerStatusTime: document.getElementById("controller-status-time"),
@@ -1408,8 +1436,8 @@ function updateFirmwareResultFromFlashSnapshot(flash) {
     const detail = flash.fallbackToAutoDetect
       ? "固定端口刷入失败，正在改用 PlatformIO 自动探测可用端口重试。"
       : flash.uploadPortPath
-        ? "PlatformIO 正在按当前选中的串口编译并上传固件，请稍等片刻。"
-        : "PlatformIO 正在准备按当前选中的串口上传固件，请稍等片刻。";
+        ? "PlatformIO 正在按当前串口擦除开发板 NVS 并上传固件，请稍等片刻。"
+        : "PlatformIO 正在准备擦除开发板 NVS 并上传固件，请稍等片刻。";
     setFirmwareResult({
       status: "running",
       title: "正在刷入固件",
@@ -1422,8 +1450,8 @@ function updateFirmwareResultFromFlashSnapshot(flash) {
 
   if (flash?.status === "completed") {
     const detail = flash.fallbackToAutoDetect
-      ? "固定端口失败后已自动改用 PlatformIO 串口探测并刷入成功，可以继续去手柄测试页读取设备信息。"
-      : "设备已经写入完成，可以继续去手柄测试页读取设备信息。";
+      ? "固定端口失败后已自动改用 PlatformIO 串口探测并完成擦除/刷入，可以继续去手柄测试页读取设备信息。"
+      : "设备已经擦除并重新写入完成，可以继续去手柄测试页读取设备信息。";
     setFirmwareResult({
       status: "success",
       title: "固件刷入成功",
@@ -1788,6 +1816,48 @@ function stopWindowsSerialDriverPolling() {
   windowsSerialDriverPollTimer = null;
 }
 
+function buildControllerProfileCommand() {
+  const profile = els.controllerProfileSelect.value || "AUTO";
+  return `BT PROFILE ${profile}`;
+}
+
+function controllerProfileSelectValueFromMode(mode) {
+  if (mode === "pro_balanced") {
+    return "PRO";
+  }
+  return "AUTO";
+}
+
+function buildControllerDiagnostics(lines = []) {
+  const info = readInfoLineMap(lines);
+  const logText = els.controllerLogOutput.textContent ?? "";
+
+  return {
+    generatedAt: new Date().toISOString(),
+    selectedProfile: els.controllerProfileSelect.value || "AUTO",
+    status: {
+      ...state.controller.status,
+      updatedAt: state.controller.status.updatedAt?.toISOString?.() ?? null,
+    },
+    deviceInfo: info,
+    recentLog: logText.split("\n").slice(-200),
+  };
+}
+
+function exportControllerDiagnostics(diagnostics) {
+  const json = JSON.stringify(diagnostics, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `friendmaker-bt-diagnostics-${Date.now()}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  appendLog(els.controllerLogOutput, "已导出蓝牙诊断 JSON。");
+}
+
 els.controllerInfoButton.addEventListener("click", async () => {
   state.controller.autoReconnectAttempted = false;
   controllerStatusTimeoutRecoveryAttempted = false;
@@ -1818,7 +1888,7 @@ els.controllerInfoButton.addEventListener("click", async () => {
     detail: "正在重置蓝牙并重新进入可发现状态，请保持 Switch 停在“更改握法/顺序”页面。",
   });
 
-  const payload = await runControllerCommands(["BT RESET", "I"], "连接手柄");
+  const payload = await runControllerCommands([buildControllerProfileCommand(), "I"], "连接手柄");
 
   if (payload) {
     startControllerStatusPolling();
@@ -1833,7 +1903,22 @@ els.controllerResetButton.addEventListener("click", async () => {
     detail: "正在重启蓝牙协议栈并读取最新状态，请稍等片刻。",
   });
 
-  const payload = await runControllerCommands(["BT RESET", "I"], "重置手柄蓝牙");
+  const payload = await runControllerCommands([buildControllerProfileCommand(), "I"], "重置手柄蓝牙");
+
+  if (payload) {
+    startControllerStatusPolling();
+  }
+});
+
+els.controllerClearPairingButton.addEventListener("click", async () => {
+  state.controller.autoReconnectAttempted = false;
+  controllerStatusTimeoutRecoveryAttempted = false;
+  setControllerPendingStatus({
+    title: "正在清除开发板配对",
+    detail: "正在清除开发板保存的蓝牙配对记录，并用同一个手柄身份重新广播。",
+  });
+
+  const payload = await runControllerCommands(["BT UNPAIR", buildControllerProfileCommand(), "I"], "清除开发板配对");
 
   if (payload) {
     startControllerStatusPolling();
@@ -1864,6 +1949,26 @@ els.controllerDisconnectButton.addEventListener("click", async () => {
   } finally {
     setControllerBusy(false);
   }
+});
+
+els.controllerApplyProfileButton.addEventListener("click", async () => {
+  state.controller.autoReconnectAttempted = false;
+  controllerStatusTimeoutRecoveryAttempted = false;
+  setControllerPendingStatus({
+    title: "正在应用蓝牙兼容模式",
+    detail: "正在保存当前蓝牙 profile，并重启开发板蓝牙协议栈。",
+  });
+
+  const payload = await runControllerCommands([buildControllerProfileCommand(), "I"], "应用蓝牙兼容模式");
+
+  if (payload) {
+    startControllerStatusPolling();
+  }
+});
+
+els.controllerExportDiagButton.addEventListener("click", async () => {
+  const payload = await runControllerCommands(["BT DIAG"], "导出蓝牙诊断");
+  exportControllerDiagnostics(payload?.lines ?? []);
 });
 
 els.controllerActionButtons.forEach((button) => {
@@ -2356,7 +2461,11 @@ function setControllerBusy(isBusy) {
   els.controllerRefreshButton.disabled = isBusy;
   els.controllerInfoButton.disabled = isBusy;
   els.controllerResetButton.disabled = isBusy;
+  els.controllerClearPairingButton.disabled = isBusy;
   els.controllerStepSelect.disabled = isBusy;
+  els.controllerProfileSelect.disabled = isBusy;
+  els.controllerApplyProfileButton.disabled = isBusy;
+  els.controllerExportDiagButton.disabled = isBusy;
   els.controllerActionButtons.forEach((button) => {
     button.disabled = isBusy;
   });
@@ -2449,11 +2558,13 @@ function setControllerPendingStatus({ title, detail }) {
     auth: "未知",
     connected: "未知",
     paired: "未知",
+    pairedInferred: "常规配对",
     ready: "未就绪",
     discoverableValue: null,
     authValue: null,
     connectedValue: null,
     pairedValue: null,
+    pairedInferredValue: null,
     readyValue: false,
     rawReadyValue: null,
     readyInferredValue: false,
@@ -2463,6 +2574,23 @@ function setControllerPendingStatus({ title, detail }) {
     lastSendReportStatus: null,
     lastSendReportReason: null,
     lastAclDisconnectReason: null,
+    profileMode: "-",
+    activeProfile: "-",
+    deviceName: "-",
+    baseMac: "-",
+    controllerType: null,
+    bondedDevices: null,
+    lastGoodProfile: "-",
+    lastConnectionEvent: "-",
+    connectionFailureCount: 0,
+    failuresBeforeStable: 0,
+    lastStableDurationMs: 0,
+    postOpenQuietMs: 0,
+    postOpenQuietRemainingMs: 0,
+    pairingSetupTimeoutMs: 0,
+    connectedUnpairedMs: 0,
+    idlePrePairingReportMs: 0,
+    idleConnectedReportMs: 0,
     lastDropReason: "-",
     initStep: "-",
     initError: "-",
@@ -2474,6 +2602,9 @@ function updateControllerStatusFromLines(lines) {
 
   if (!status) {
     return;
+  }
+  if (els.controllerProfileSelect && status.profileMode && status.profileMode !== "-") {
+    els.controllerProfileSelect.value = controllerProfileSelectValueFromMode(status.profileMode);
   }
   setControllerStatus(status);
 }
@@ -2519,7 +2650,7 @@ async function handleControllerStatusPollTimeout() {
     });
 
     const payload = await runControllerCommands(
-      ["BT RESET LAST-PEER", "I"],
+      [buildControllerProfileCommand(), "I"],
       "自动恢复手柄连接",
     );
 
@@ -3206,10 +3337,14 @@ function syncControllerUi() {
   const canSendTestCommands = !state.controller.busy && !state.serialSession.busy && hasPort && ready;
 
   els.controllerPortSelect.disabled = state.controller.busy || state.serialSession.busy;
+  els.controllerProfileSelect.disabled = state.controller.busy || state.serialSession.busy;
 
   const shouldDisable = state.controller.busy || state.serialSession.busy || !hasPort;
   els.controllerInfoButton.disabled = shouldDisable;
   els.controllerResetButton.disabled = shouldDisable;
+  els.controllerClearPairingButton.disabled = shouldDisable;
+  els.controllerApplyProfileButton.disabled = shouldDisable;
+  els.controllerExportDiagButton.disabled = shouldDisable;
   els.controllerSendCustomButton.disabled = !canSendTestCommands;
   els.controllerCustomCommands.disabled = !canSendTestCommands;
   els.controllerDisconnectButton.disabled = state.controller.busy || !state.serialSession.connected;
@@ -3814,6 +3949,16 @@ function renderControllerStatus() {
   els.controllerStatusTransport.textContent = result.transport;
   els.controllerStatusProfile.textContent = result.profile;
   els.controllerStatusPeer.textContent = result.peer;
+  els.controllerStatusDeviceName.textContent =
+    result.deviceName && result.controllerType !== null
+      ? `${result.deviceName} / type ${result.controllerType} / ${result.baseMac ?? "-"}`
+      : result.deviceName ?? "-";
+  els.controllerStatusLastGood.textContent =
+    `${result.lastGoodProfile ?? "-"} / stable ${Math.round((result.lastStableDurationMs ?? 0) / 1000)}s / bonds ${result.bondedDevices ?? "-"}`;
+  els.controllerStatusFailures.textContent =
+    `current ${result.connectionFailureCount ?? 0} / before stable ${result.failuresBeforeStable ?? 0} / ${result.lastConnectionEvent ?? "-"}`;
+  els.controllerStatusWarmup.textContent =
+    `${result.postOpenQuietRemainingMs ?? 0}ms quiet / ${result.connectedUnpairedMs ?? 0}ms pairing`;
   els.controllerStatusInitStep.textContent = result.initStep;
   els.controllerStatusInitError.textContent = result.initError;
   els.controllerStatusTime.textContent = metaTime;

@@ -37,7 +37,7 @@
 
 ### 基本原理
 
-朋友制作器的自动绘画原理，是通过数据线连接电脑与 `ESP32` 开发板，先把固定固件刷入开发板，再由电脑发送绘图指令，开发板按规律模拟 Switch 手柄输入，从而完成自动绘画。
+朋友制作器的自动绘画原理，是通过数据线连接电脑与 `ESP32` 开发板，先把固定固件刷入开发板，再由电脑发送绘图指令，开发板按规律模拟 Switch Pro 手柄输入，从而完成自动绘画。
 
 可以把它理解成一条固定链路：
 
@@ -264,7 +264,7 @@ http://127.0.0.1:4307
 2. 选择串口设备
 3. 如果提示没有 `PlatformIO`，先点击 `准备 PlatformIO`
 4. 保持联网，等待安装完成
-5. 点击 `编译并刷入固件`
+5. 点击 `擦除并刷入固件`
 6. 等待右侧状态卡显示成功
 
 补充说明：
@@ -299,14 +299,11 @@ cd /path/to/friendmaker/firmware/esp32
 刷入推荐环境：
 
 ```bash
-~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload
-```
-
-如果你知道自己的串口，也可以明确指定：
-
-```bash
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t erase --upload-port <your-serial-port>
 ~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload --upload-port <your-serial-port>
 ```
+
+这里建议明确指定串口，避免擦除或上传时选错设备。
 
 刷入成功后，可以用下面这条看启动日志：
 
@@ -321,6 +318,7 @@ Windows 示例：
 
 ```powershell
 cd C:\path\to\friendmaker\firmware\esp32
+$env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t erase --upload-port COM3
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 
@@ -473,7 +471,7 @@ npm run ui:dev
 
 - 选择环境：`ESP32-WROOM-32 / ESP-32S`
 - 选择串口设备
-- 点击 `编译并刷入固件`
+- 点击 `擦除并刷入固件`
 
 右侧状态卡显示成功后再进入下一步。
 
@@ -492,9 +490,12 @@ npm run ui:dev
 
 如果一开始就连不上：
 
+- 先确认蓝牙兼容模式是 `Auto` 或 `Pro Controller`
 - 先点 `重置手柄蓝牙`
 - 等待完成
 - 再点 `连接手柄`
+- 如果 Switch 上已经积累了很多旧手柄记录，到 `System Settings → Controllers and Sensors → Disconnect Controllers` 清除 Switch 侧记录，再回页面点 `清除开发板配对`
+- `刷入固件` 页现在默认会清空开发板 NVS/配对状态后再刷入；如果你走命令行兜底，也按上面的 `erase` + `upload` 两步执行
 - 如果还是连不上，可以按一下实体板上的 `EN` 键重启开发板，再重新点击 `连接手柄`
 - 如果还是连不上，回到 `刷入固件` 页重新刷一次固件，再回来重试
 

@@ -426,6 +426,16 @@ bool SwitchController::resetBluetooth(bool reconnectLastPeer) {
   return transport_.resetConnection(reconnectLastPeer);
 }
 
+bool SwitchController::configureBluetoothProfile(const String &profileName) {
+  waitUntilReady();
+  return transport_.configureBluetoothProfile(profileName);
+}
+
+bool SwitchController::clearBluetoothPairing() {
+  waitUntilReady();
+  return transport_.clearBluetoothPairing();
+}
+
 void SwitchController::pause() { paused_ = true; }
 
 void SwitchController::resume() { paused_ = false; }

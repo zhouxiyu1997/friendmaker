@@ -22,7 +22,7 @@
 ## 中文说明
 
 `朋友制作器` 是一个面向 `macOS / Windows + ESP32-WROOM-32 / ESP-32S` 的自动绘制工具。  
-它会将图片转换成像素网格和手柄动作脚本，再通过 ESP32 模拟 Switch Pro Controller 输入，在游戏画板中自动完成绘制。当前版本主要面向《朋友收集：梦想生活》与 `Tomodachi Life` 的绘图场景。
+它会将图片转换成像素网格和手柄动作脚本，再通过 ESP32 模拟 Bluetooth Classic Switch Pro Controller 输入，在游戏画板中自动完成绘制。当前版本主要面向《朋友收集：梦想生活》与 `Tomodachi Life` 的绘图场景。
 
 这个项目已经历过多轮迭代，当前 README 以最新的 `桌面端四页工作流` 为准：
 
@@ -34,7 +34,7 @@
 当前最推荐的体验路线仍然是 `单色绘制` 和 `官方色绘制`。  
 `自定义多色` 已经开放测试入口，但稳定性仍弱于前两条主线，当前仍属于 `测试阶段 / 实验能力`。
 
-关键词：`Friend Maker`、`朋友制作器`、`Tomodachi Life`、`朋友收集：梦想生活`、`Nintendo Switch auto draw`、`ESP32 Pro Controller emulator`、`pixel art drawing automation`、`Bluetooth Classic HID`。
+关键词：`Friend Maker`、`朋友制作器`、`Tomodachi Life`、`朋友收集：梦想生活`、`Nintendo Switch auto draw`、`ESP32 Bluetooth Classic Pro Controller emulator`、`pixel art drawing automation`、`Bluetooth Classic HID`。
 
 ### 平台支持
 
@@ -95,7 +95,7 @@
 对应的实际动作是：
 
 1. 在 `刷入固件` 页更新推荐固件并确认串口正常
-2. 在 `手柄测试` 页完成蓝牙连接、按钮和方向测试
+2. 在 `手柄测试` 页完成蓝牙连接、按钮和方向测试；蓝牙不稳定时先用 `Auto` 或 `Pro Controller`
 3. 在 `调试测速` 页优先调 `inputDelay`，再微调 `buttonPressDuration`，先把稳定性跑出来
 4. 回到 `脚本生成` 页导入图片、检查预览并正式开始绘制
 
@@ -104,6 +104,8 @@
 - 当前主线已经从早期的“手工脚本 + 命令行试验”迭代到“桌面端闭环工作流”
 - README 默认描述 `桌面端安装包 / 桌面端页面` 的最新行为
 - 与绘图质量和成功率直接相关的能力，会优先以 `输入稳定性` 和 `恢复能力` 为准
+- 蓝牙兼容模式默认走 `Auto`；首次没有稳定记录时会用保守时序的 `Pro Controller`，稳定 60 秒后会把成功 profile 写入开发板 NVS
+- 固件保留 `Pro Controller` 作为唯一手柄身份。`Left Joy-Con` 配对更宽容，但缺少完整方向键/ABXY/R/ZR 输入面；把绘图方向键映射到左摇杆会引入额外校准误差，长期绘图质量不如 Pro Controller 路线稳定
 - `inputDelay` 更像稳定性旋钮，`buttonPressDuration` 更像力度旋钮；建议先调稳定，再看速度
 - `自定义多色` 虽然可见、可测试，但暂时不建议作为首次试用路线
 
@@ -241,13 +243,15 @@ npm run check
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
-~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t erase --upload-port <your-serial-port>
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload --upload-port <your-serial-port>
 ```
 
 Windows 示例：
 
 ```powershell
 cd C:\path\to\friendmaker\firmware\esp32
+$env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t erase --upload-port COM3
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 
@@ -316,7 +320,7 @@ http://127.0.0.1:4307
 - 枚举串口
 - 当前主线支持的固件目标环境为：`ESP32-WROOM-32 / ESP-32S` 与 `NodeMCU-32S`
 - 调用本机 PlatformIO
-- 编译并刷入 ESP32 固件
+- 先擦除 ESP32 NVS/配对状态，再编译并刷入固件
 - Windows 下可在页面内直接安装 `CP210x` 或 `CH340/CH341` 串口驱动
 - 返回刷写结果与滚动日志
 
@@ -324,9 +328,13 @@ http://127.0.0.1:4307
 
 - 连接手柄
 - 重置手柄蓝牙
-- 如果连接手柄连不上，先点击 `重置手柄蓝牙`，再点击 `连接手柄`
+- 选择蓝牙兼容模式：`Auto` 或 `Pro Controller`
+- 如果连接手柄连不上，先应用 `Pro Controller`，再点击 `连接手柄`
+- 如果 Switch 之前保存过同一块板子的异常手柄记录，先到 Switch 的 `System Settings → Controllers and Sensors → Disconnect Controllers` 清除旧 controller，再在页面点 `清除开发板配对`
+- `刷入固件` 页现在默认先擦除开发板 NVS/配对状态，再重新刷入固件；如果改用命令行兜底，也请先运行 `erase` 再运行 `upload`
 - 如果还是连不上，可以按一下实体板上的 `EN` 键重启开发板，再重新点击 `连接手柄`
 - 如果还是连不上，回到 `刷入固件` 页重新刷一次固件后再试
+- 提交连接问题时，可以导出蓝牙诊断 JSON
 - 单步测试按钮、方向键与摇杆，并可选择摇杆步数
 - 支持 `Home`、`Capture`、`LS`、`RS` 和 `L+R 配对` 等单独动作测试
 - 查看 HID 连接状态
@@ -402,7 +410,7 @@ docs/media/          README 展示图片与视频
 ## English
 
 `Friend Maker` is an automatic drawing toolkit for `macOS / Windows + ESP32-WROOM-32 / ESP-32S`.  
-It converts images into pixel grids and controller action scripts, then uses an ESP32 to emulate Switch Pro Controller input and draw automatically on the in-game canvas. The current version is primarily tailored for drawing workflows in `Tomodachi Life` and 《朋友收集：梦想生活》.
+It converts images into pixel grids and controller action scripts, then uses an ESP32 to emulate Bluetooth Classic Switch Pro Controller input and draw automatically on the in-game canvas. The current version is primarily tailored for drawing workflows in `Tomodachi Life` and 《朋友收集：梦想生活》.
 
 The project has already gone through many iterations, and this README now follows the latest `desktop four-page workflow`:
 
@@ -414,7 +422,7 @@ The project has already gone through many iterations, and this README now follow
 The recommended paths are still `mono drawing` and `official palette drawing`.  
 `Custom multicolor` is now exposed for testing, but it is still less stable than those two main paths and should be treated as an `experimental / testing-stage` feature.
 
-Keywords: `Friend Maker`, `Tomodachi Life`, `Nintendo Switch auto draw`, `ESP32 Pro Controller emulator`, `pixel art drawing automation`, `Bluetooth Classic HID`.
+Keywords: `Friend Maker`, `Tomodachi Life`, `Nintendo Switch auto draw`, `ESP32 Bluetooth Classic Pro Controller emulator`, `pixel art drawing automation`, `Bluetooth Classic HID`.
 
 ### Compatibility
 
@@ -475,7 +483,7 @@ The most stable workflow, and the one used by the documentation by default, is:
 The practical actions are:
 
 1. Update the recommended firmware in the `Firmware Flash` page and confirm the serial port works
-2. Complete Bluetooth connection, button tests, and direction tests in the `Controller Test` page
+2. Complete Bluetooth connection, button tests, and direction tests in the `Controller Test` page; if Bluetooth is unstable, start with `Auto` or `Pro Controller`
 3. In the `Timing Tune / Benchmark` page, increase `inputDelay` first, then fine-tune `buttonPressDuration` until the link feels stable
 4. Return to the `Script Studio` page, import an image, review the preview, and start drawing
 
@@ -484,6 +492,8 @@ The practical actions are:
 - The main path has evolved from early command-line experiments into a desktop-app-centered closed loop
 - This README describes the latest packaged desktop app and page flow by default
 - Features that affect success rate are prioritized around `input stability` and `recovery`
+- Bluetooth compatibility defaults to `Auto`; without a previous stable record it starts with conservative `Pro Controller` timing, then persists a profile to board NVS after a 60-second stable connection
+- Firmware keeps `Pro Controller` as the only active controller identity. `Left Joy-Con` was easier to pair in testing, but it does not expose the full D-pad/ABXY/R/ZR surface needed by the drawing flow; remapping D-pad movement to the analog stick adds calibration error and can reduce drawing accuracy
 - `inputDelay` behaves more like a stability knob, while `buttonPressDuration` behaves more like a press-strength knob; tune for stability first, speed second
 - `Custom multicolor` is available for testing, but it is still not the recommended first-run path
 
@@ -621,13 +631,15 @@ npm run check
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
-~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t erase --upload-port <your-serial-port>
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload --upload-port <your-serial-port>
 ```
 
 Windows example:
 
 ```powershell
 cd C:\path\to\friendmaker\firmware\esp32
+$env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t erase --upload-port COM3
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
 ```
 
@@ -694,7 +706,7 @@ Notes:
 - Enumerate serial ports
 - The current main supported firmware targets are `ESP32-WROOM-32 / ESP-32S` and `NodeMCU-32S`
 - Call the local PlatformIO installation
-- Build and flash the ESP32 firmware
+- Erase ESP32 NVS/pairing state, then build and flash the firmware
 - Install `CP210x` or `CH340/CH341` serial drivers directly from the page on Windows
 - Return flash results and scrollable logs
 
@@ -702,8 +714,12 @@ Notes:
 
 - Connect the controller
 - Reset Controller Bluetooth
-- If the controller does not connect, click `Reset Controller Bluetooth` first and then `Connect the controller`
+- Choose a Bluetooth compatibility mode: `Auto` or `Pro Controller`
+- If the controller does not connect, apply `Pro Controller`, then click `Connect the controller`
+- If the Switch has stale records for this board, use `System Settings → Controllers and Sensors → Disconnect Controllers` on the Switch, then click `Clear local pairing` in Friend Maker
+- The `Firmware Flash` page now erases ESP32 NVS/pairing state before uploading firmware; if you use the command line fallback, run `erase` before `upload`
 - If it still does not connect, reflash the firmware and try again
+- Export Bluetooth diagnostics JSON when filing connection issues
 - Test buttons, D-pad, and stick movement step by step, with selectable stick step sizes
 - Test standalone actions such as `Home`, `Capture`, `LS`, `RS`, and `L+R` pairing
 - Inspect HID connection status
@@ -759,7 +775,7 @@ Flash firmware in the web UI
   -> generate command script
   -> serial ACK sender
   -> ESP32 protocol parser
-  -> Bluetooth Classic Switch controller output
+  -> Bluetooth Classic Switch Pro Controller output
   -> in-game drawing
 ```
 

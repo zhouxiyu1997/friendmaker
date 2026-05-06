@@ -25,6 +25,8 @@ class SwitchController {
   bool configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue);
   bool configureBasicPaletteSlot(int index, uint8_t row, uint8_t col);
   bool resetBluetooth(bool reconnectLastPeer = false);
+  bool configureBluetoothProfile(const String &profileName);
+  bool clearBluetoothPairing();
   void pause();
   void resume();
   void end();

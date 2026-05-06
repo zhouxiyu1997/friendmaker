@@ -22,7 +22,8 @@ https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers
 Try the generic environment first:
 
 ```bash
-pio run -e esp32dev_wireless -t upload
+pio run -e esp32dev_wireless -t erase --upload-port <your-serial-port>
+pio run -e esp32dev_wireless -t upload --upload-port <your-serial-port>
 pio device monitor -b 115200
 ```
 
@@ -34,7 +35,8 @@ Note:
 If your specific clone behaves more like a NodeMCU-32S during upload, switch to:
 
 ```bash
-pio run -e nodemcu_32s_wireless -t upload
+pio run -e nodemcu_32s_wireless -t erase --upload-port <your-serial-port>
+pio run -e nodemcu_32s_wireless -t upload --upload-port <your-serial-port>
 pio device monitor -b 115200
 ```
 
@@ -62,6 +64,7 @@ Expected result:
 - the board returns sequenced ACK lines such as `OK a1b2c3d4 1` for each command
 - the serial monitor prints `INFO transport=classic-bt-hid` when the `I` command runs
 - the `I` command also prints Bluetooth readiness fields such as `bt_hid_ready`, `bt_app_registered`, and `bt_discoverable`
+- the `I` command also prints Bluetooth profile fields such as `bt_profile_mode`, `bt_active_profile`, and `bt_last_good_profile`; use `BT DIAG` from Controller Test to export the same data for issue reports
 
 ## 5. Move to image-driven tests
 
