@@ -1,0 +1,142 @@
+name: Electron Manual Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-26
+            script: npm run dist:mac -- --arm64 --publish never
+            artifact: friend-maker-macos-arm64
+          - name: macOS x64
+            os: macos-26-intel
+            script: npm run dist:mac -- --x64 --publish never
+            artifact: friend-maker-macos-x64
+          - name: Windows x64
+            os: windows-latest
+            script: npm run dist:win:x64 -- --publish never
+            artifact: friend-maker-windows-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set beta package version
+        id: version
+        shell: bash
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+
+          base_version="$(node -p "require('./package.json').version")"
+          package_version="${base_version}-beta.${RUN_NUMBER}"
+          display_version="v${package_version}"
+
+          npm version "$package_version" --no-git-tag-version --allow-same-version
+
+          updated_version="$(node -p "require('./package.json').version")"
+          if [[ "$updated_version" != "$package_version" ]]; then
+            echo "::error::package.json version is ${updated_version}, expected ${package_version}"
+            exit 1
+          fi
+
+          {
+            echo "PACKAGE_VERSION=${package_version}"
+            echo "DISPLAY_VERSION=${display_version}"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo "package_version=${package_version}"
+            echo "display_version=${display_version}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Type check
+        run: npm run check
+
+      - name: Prepare Apple notarization key
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+        run: |
+          set -euo pipefail
+
+          for name in APPLE_API_ISSUER APPLE_API_KEY_BASE64 APPLE_API_KEY_ID CSC_KEY_PASSWORD CSC_LINK; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required GitHub Actions secret: ${name}"
+              exit 1
+            fi
+          done
+
+          key_path="$RUNNER_TEMP/apple/AuthKey_${APPLE_API_KEY_ID}.p8"
+          mkdir -p "$(dirname "$key_path")"
+          printf '%s' "$APPLE_API_KEY_BASE64" | /usr/bin/base64 -D > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+
+      - name: Build signed macOS installer
+        if: runner.os == 'macOS'
+        run: ${{ matrix.script }}
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+
+      - name: Verify macOS signature and notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_path="$(find release -maxdepth 3 -name 'Friend Maker.app' -type d | head -n 1)"
+          if [[ -z "$app_path" ]]; then
+            echo "::error::Cannot find packaged Friend Maker.app under release/"
+            find release -maxdepth 3 -print || true
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          xcrun stapler validate "$app_path"
+          spctl -a -vvv -t exec "$app_path"
+
+      - name: Build unsigned Windows installer
+        if: runner.os == 'Windows'
+        run: ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ steps.version.outputs.display_version }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.blockmap
+          if-no-files-found: error
