@@ -1082,6 +1082,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     previewScale?: number;
     removeBackground?: boolean;
     noiseCleanupMode?: NoiseCleanupMode;
+    enableRecenterShortcut?: boolean;
     inputDelay?: number;
     buttonPressDuration?: number;
   };
@@ -1111,6 +1112,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const imageOffsetXPercent = normalizeImageOffsetPercent(body.imageOffsetXPercent);
   const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
   const noiseCleanupMode = normalizeNoiseCleanupMode(body.noiseCleanupMode);
+  const enableRecenterShortcut = body.enableRecenterShortcut === true;
   const template = getDrawingTemplateDefinition(body.templateId ?? "none");
 
   if (!template) {
@@ -1140,6 +1142,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       removeBackground: body.removeBackground === true,
       drawingMask,
       noiseCleanupMode,
+      enableRecenterShortcut,
     },
   );
 
@@ -1158,6 +1161,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       colorCount: profile.colorCount,
       removeBackground: body.removeBackground === true,
       noiseCleanupMode,
+      enableRecenterShortcut,
       palette: plan.paletteHexes,
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
@@ -1172,8 +1176,11 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       commandCount: plan.commands.length,
       estimatedRuntimeMs: plan.estimatedRuntimeMs,
       estimatedRuntimeLabel: formatDuration(plan.estimatedRuntimeMs),
+      runtimeBreakdown: plan.runtimeBreakdown,
       imageBounds: plan.imageBounds,
       pathStats: plan.pathStats,
+      componentStats: plan.componentStats,
+      recenter: plan.recenterStats,
       noiseCleanup: plan.noiseCleanupStats,
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,

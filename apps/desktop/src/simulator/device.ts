@@ -29,6 +29,25 @@ function parseOneInt(line: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function parseHold(line: string): { button: string; ms: number } | null {
+  const parts = line.trim().split(/\s+/u);
+
+  if (parts.length !== 3 || parts[0] !== "HOLD") {
+    return null;
+  }
+
+  const ms = Number.parseInt(parts[2] ?? "", 10);
+
+  if (!Number.isFinite(ms) || ms < 0) {
+    return null;
+  }
+
+  return {
+    button: parts[1] ?? "",
+    ms,
+  };
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -307,7 +326,28 @@ export class SimulatedDevice {
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
-    if (trimmed === "A" || trimmed === "B" || trimmed === "X" || trimmed === "Y") {
+    if (trimmed.startsWith("HOLD ")) {
+      const hold = parseHold(trimmed);
+
+      if (!hold) {
+        await delay(options.ackDelayMs);
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid hold"), lines);
+      }
+
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
+    if (
+      trimmed === "A" ||
+      trimmed === "B" ||
+      trimmed === "X" ||
+      trimmed === "Y" ||
+      trimmed === "DUP" ||
+      trimmed === "DDOWN" ||
+      trimmed === "DLEFT" ||
+      trimmed === "DRIGHT"
+    ) {
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }

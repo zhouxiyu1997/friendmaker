@@ -80,6 +80,7 @@ const state = {
     colorMode: "mono",
     colorCount: 32,
     noiseCleanupMode: "off",
+    enableRecenterShortcut: false,
     removeBackground: false,
     usedColorIndexes: [],
     generatedPalette: [],
@@ -239,6 +240,7 @@ const els = {
   colorModeSelect: document.getElementById("color-mode-select"),
   colorCountSelect: document.getElementById("color-count-select"),
   noiseCleanupSelect: document.getElementById("noise-cleanup-select"),
+  recenterShortcutCheckbox: document.getElementById("recenter-shortcut-checkbox"),
   thresholdLabel: document.getElementById("threshold-label"),
   thresholdRange: document.getElementById("threshold-range"),
   thresholdValue: document.getElementById("threshold-value"),
@@ -576,6 +578,12 @@ els.noiseCleanupSelect.addEventListener("change", () => {
 
 els.autoRemoveBackgroundCheckbox.addEventListener("change", () => {
   state.studio.removeBackground = els.autoRemoveBackgroundCheckbox.checked;
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
+els.recenterShortcutCheckbox.addEventListener("change", () => {
+  state.studio.enableRecenterShortcut = els.recenterShortcutCheckbox.checked;
   syncStudioUi();
   scheduleStudioPreviewRefresh();
 });
@@ -1003,6 +1011,7 @@ function buildStudioGeneratePayload() {
     previewScale: 12,
     removeBackground: state.studio.removeBackground,
     noiseCleanupMode: state.studio.noiseCleanupMode,
+    enableRecenterShortcut: state.studio.enableRecenterShortcut,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
   };
@@ -1067,6 +1076,7 @@ function applyGeneratedStudioPayload(payload) {
     payload.profile.noiseCleanupMode === "strong"
       ? payload.profile.noiseCleanupMode
       : "off";
+  state.studio.enableRecenterShortcut = payload.profile.enableRecenterShortcut === true;
   state.studio.removeBackground = payload.profile.removeBackground === true;
 
   els.commandsOutput.value = payload.commands.join("\n");
@@ -1083,10 +1093,12 @@ function applyGeneratedStudioPayload(payload) {
   }
   els.statPixels.textContent = String(payload.stats.totalPixels);
   const cleanupChangedCells = payload.stats.noiseCleanup?.changedCellCount ?? 0;
+  const recenterUses = payload.stats.recenter?.shortcutCount ?? 0;
+  const componentCount = payload.stats.componentStats?.drawableComponentCount ?? 0;
   els.statCommands.textContent = payload.stats.pathStats
-    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}${
+    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount} · C ${componentCount}${
         cleanupChangedCells > 0 ? ` · Δ ${cleanupChangedCells}` : ""
-      }`
+      }${recenterUses > 0 ? ` · 回中 ${recenterUses}` : ""}`
     : String(payload.stats.commandCount);
   els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
   void updatePreviewBounds(payload);
@@ -3023,6 +3035,7 @@ function syncStudioUi() {
   els.previewCanvas.dataset.guide = state.studio.previewGuideMode;
   els.colorModeSelect.value = state.studio.colorMode;
   els.noiseCleanupSelect.value = state.studio.noiseCleanupMode;
+  els.recenterShortcutCheckbox.checked = state.studio.enableRecenterShortcut;
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
   const backgroundHint = state.studio.removeBackground
@@ -3062,6 +3075,7 @@ function syncStudioUi() {
   els.offsetYInput.disabled = state.studio.busy || executionActive;
   els.colorModeSelect.disabled = state.studio.busy || executionActive;
   els.noiseCleanupSelect.disabled = state.studio.busy || executionActive;
+  els.recenterShortcutCheckbox.disabled = state.studio.busy || executionActive;
   els.autoRemoveBackgroundCheckbox.disabled = state.studio.busy || executionActive;
   els.previewGuideSelect.disabled = false;
   els.colorCountSelect.disabled =

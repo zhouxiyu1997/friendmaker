@@ -1,6 +1,24 @@
 export type ResizeMode = "contain" | "cover";
 export type ColorMode = "mono" | "palette" | "official";
-export type ControllerButton = "A" | "B" | "X" | "Y";
+export type ControllerButton =
+  | "A"
+  | "B"
+  | "X"
+  | "Y"
+  | "L"
+  | "R"
+  | "ZL"
+  | "ZR"
+  | "PLUS"
+  | "MINUS"
+  | "HOME"
+  | "CAPTURE"
+  | "LSTICK"
+  | "RSTICK"
+  | "DUP"
+  | "DDOWN"
+  | "DLEFT"
+  | "DRIGHT";
 export type StartCursor = "center" | "top-left";
 export type DrawingTool = "pen" | "eraser" | "fill" | "stamp" | "text" | "shape";
 export type BrushSize = 1 | 3 | 7 | 13 | 19 | 27;

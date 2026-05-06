@@ -1,8 +1,20 @@
 import type { ImageSource } from "../image/loadImage.js";
 import { createBrushGrid, gridCellBounds, isGridCellInBounds } from "../brushGrid.js";
+import {
+  calculatePixelMapComponentStats,
+  type PixelMapComponentStats,
+} from "../image/componentAnalysis.js";
 import { pixelizeImage } from "../image/pixelize.js";
 import { renderPreviewToBuffer } from "../image/renderPreview.js";
-import { estimateRuntimeMs, generateScanlinePlan, type PathStrategy } from "../path/scanline.js";
+import {
+  calculateRuntimeBreakdown,
+  estimateRuntimeMs,
+  generateScanlinePlan,
+  type PathStrategy,
+  type RecenterStats,
+  type ScanlinePlanningOptions,
+} from "../path/scanline.js";
+import type { CommandRuntimeBreakdown } from "../protocol/runtimeEstimate.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
 import type {
@@ -31,9 +43,12 @@ export interface DrawPlan {
   paletteHexes: string[];
   totalPixels: number;
   estimatedRuntimeMs: number;
+  runtimeBreakdown: CommandRuntimeBreakdown;
   previewPng: Buffer;
   imageBounds: CanvasBounds | null;
   pathStats: DrawPlanPathStats;
+  componentStats: PixelMapComponentStats;
+  recenterStats: RecenterStats;
   noiseCleanupStats: NoiseCleanupStats;
 }
 
@@ -49,14 +64,24 @@ export async function generateDrawPlan(
     drawingMask?: DrawingMask | null;
     pathStrategy?: PathStrategy;
     noiseCleanupMode?: NoiseCleanupMode;
+    enableRecenterShortcut?: boolean;
   },
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes, noiseCleanupStats } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
-  const scanlinePlan = generateScanlinePlan(pixelMap, profile, options?.pathStrategy);
+  const scanlineOptions: ScanlinePlanningOptions = {
+    ...(options?.pathStrategy ? { pathStrategy: options.pathStrategy } : {}),
+    recenterMode: options?.enableRecenterShortcut === true ? "left-hold" : "off",
+  };
+  const scanlinePlan = generateScanlinePlan(pixelMap, profile, scanlineOptions);
   const drawCommands = scanlinePlan.commands;
   const imageBounds = calculateCanvasBounds(pixelMap, profile);
   const pathStats = calculatePathStats(drawCommands);
+  const componentStats = calculatePixelMapComponentStats(pixelMap, {
+    thresholdCells: noiseCleanupStats.thresholdCells,
+    includeTransparent: true,
+  });
+  const runtimeBreakdown = calculateRuntimeBreakdown(drawCommands, profile);
   const paletteHexes = Array.from(
     pixelMap
       .flatMap((row) =>
@@ -78,9 +103,12 @@ export async function generateDrawPlan(
     paletteHexes,
     totalPixels: countDrawablePixels(pixelMap),
     estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),
+    runtimeBreakdown,
     previewPng,
     imageBounds,
     pathStats,
+    componentStats,
+    recenterStats: scanlinePlan.recenterStats,
     noiseCleanupStats,
   };
 }
