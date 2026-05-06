@@ -12,7 +12,7 @@ import { loadProfile } from "../src/config/loadProfile.js";
 import { generateScanlinePlan } from "../src/path/scanline.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import type { DrawingProfile, Pixel, PixelMap } from "../src/types.js";
-import { startWebServer } from "../src/web/server.js";
+import { resolveAckTimeoutMs, startWebServer } from "../src/web/server.js";
 
 function makeProfile(overrides: Partial<DrawingProfile> = {}): DrawingProfile {
   return {
@@ -173,4 +173,11 @@ test("loadProfile clamps legacy ack timeout values to the supported minimum", as
   const profile = await loadProfile(profilePath);
 
   assert.equal(profile.ackTimeoutMs, DEFAULT_ACK_TIMEOUT_MS);
+});
+
+test("resolveAckTimeoutMs keeps the global floor by default but allows controller compatibility overrides", () => {
+  assert.equal(resolveAckTimeoutMs(2_000), DEFAULT_ACK_TIMEOUT_MS);
+  assert.equal(resolveAckTimeoutMs(undefined), DEFAULT_ACK_TIMEOUT_MS);
+  assert.equal(resolveAckTimeoutMs(2_000, { enforceMinimum: false }), 2_000);
+  assert.equal(resolveAckTimeoutMs(undefined, { enforceMinimum: false }), DEFAULT_ACK_TIMEOUT_MS);
 });

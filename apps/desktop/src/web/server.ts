@@ -80,8 +80,14 @@ const MAX_FIRMWARE_FLASH_LOG_LINES = 800;
 const FIRMWARE_FLASH_TIMEOUT_MS = 15 * 60 * 1_000;
 const FIRMWARE_FLASH_CANCEL_GRACE_MS = 5_000;
 
-function normalizeAckTimeoutMs(value?: number): number {
-  return Math.max(value ?? DEFAULT_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
+export function resolveAckTimeoutMs(
+  value?: number,
+  options: { enforceMinimum?: boolean } = {},
+): number {
+  const normalized = value ?? DEFAULT_ACK_TIMEOUT_MS;
+  return options.enforceMinimum === false
+    ? normalized
+    : Math.max(normalized, DEFAULT_ACK_TIMEOUT_MS);
 }
 const serialSessionManager = new SerialSessionManager();
 
@@ -1163,6 +1169,7 @@ async function executeCommands(body: {
   portPath?: string;
   baudRate?: number;
   ackTimeoutMs?: number;
+  enforceMinimumAckTimeout?: boolean;
   retries?: number;
   ackDelayMs?: number;
   errorAtCommand?: number;
@@ -1178,9 +1185,16 @@ async function executeCommands(body: {
   }
 
   const target = body.target === "serial" ? "serial" : "simulate";
-  const ackTimeoutMs = normalizeAckTimeoutMs(body.ackTimeoutMs);
+  const enforceMinimumAckTimeout = body.enforceMinimumAckTimeout !== false;
+  const ackTimeoutMs = resolveAckTimeoutMs(body.ackTimeoutMs, {
+    enforceMinimum: enforceMinimumAckTimeout,
+  });
   const retries = body.retries ?? 1;
-  const lines: string[] = [`INFO target=${target} commands=${body.commands.length}`];
+  const lines: string[] = [
+    `INFO target=${target} commands=${body.commands.length}`,
+    `INFO ack_timeout_ms=${ackTimeoutMs}`,
+    `INFO ack_timeout_floor_enforced=${enforceMinimumAckTimeout ? "true" : "false"}`,
+  ];
 
   try {
     if (target === "serial") {
@@ -1246,7 +1260,7 @@ async function runManagedExecution(
     errorAtCommand?: number;
   },
 ): Promise<void> {
-  const ackTimeoutMs = normalizeAckTimeoutMs(body.ackTimeoutMs);
+  const ackTimeoutMs = resolveAckTimeoutMs(body.ackTimeoutMs);
   const retries = body.retries ?? 1;
 
   appendManagedExecutionLine(
@@ -1588,6 +1602,7 @@ async function handleExecute(request: IncomingMessage, response: ServerResponse)
     portPath?: string;
     baudRate?: number;
     ackTimeoutMs?: number;
+    enforceMinimumAckTimeout?: boolean;
     retries?: number;
     ackDelayMs?: number;
     errorAtCommand?: number;
@@ -1652,7 +1667,7 @@ async function handleExecutionStart(
             profileSummary: normalizeRecoveryProfileSummary(body.profileSummary),
             serialOptions: {
               baudRate: body.baudRate ?? 115200,
-              ackTimeoutMs: normalizeAckTimeoutMs(body.ackTimeoutMs),
+              ackTimeoutMs: resolveAckTimeoutMs(body.ackTimeoutMs),
               retries: body.retries ?? 1,
             },
           })

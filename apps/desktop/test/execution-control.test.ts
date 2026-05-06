@@ -79,3 +79,40 @@ test("SerialCommandSession waits for the port to stabilize before sending comman
     /waitForDeviceBoot\(this\.parser, port[\s\S]*serial_session=boot_ready[\s\S]*serial_session=boot_wait_skipped/u,
   );
 });
+
+test("controller page keeps the legacy 2000ms ACK compatibility path without changing studio defaults", async () => {
+  const appSource = await readFile(
+    new URL("../src/web/static/app.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(appSource, /const CONTROLLER_COMPAT_ACK_TIMEOUT_MS = 2_000;/u);
+  assert.match(
+    appSource,
+    /commands:\s*\["I"\],[\s\S]*ackTimeoutMs:\s*CONTROLLER_COMPAT_ACK_TIMEOUT_MS,[\s\S]*enforceMinimumAckTimeout:\s*false/u,
+  );
+  assert.match(
+    appSource,
+    /runControllerCommands\([\s\S]*ackTimeoutMs:\s*CONTROLLER_COMPAT_ACK_TIMEOUT_MS,[\s\S]*enforceMinimumAckTimeout:\s*false/u,
+  );
+  assert.match(
+    appSource,
+    /async function runTimedSerialCommands\([\s\S]*ackTimeoutMs = state\.studio\.profile\.ackTimeoutMs,[\s\S]*enforceMinimumAckTimeout = true/u,
+  );
+});
+
+test("/api/execute keeps ACK timeout diagnostics and allows the controller compatibility override", async () => {
+  const serverSource = await readFile(
+    new URL("../src/web/server.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(serverSource, /export function resolveAckTimeoutMs\(/u);
+  assert.match(serverSource, /enforceMinimumAckTimeout\?: boolean/u);
+  assert.match(serverSource, /INFO ack_timeout_ms=\$\{ackTimeoutMs\}/u);
+  assert.match(serverSource, /INFO ack_timeout_floor_enforced=\$\{enforceMinimumAckTimeout \? "true" : "false"\}/u);
+  assert.match(
+    serverSource,
+    /const enforceMinimumAckTimeout = body\.enforceMinimumAckTimeout !== false;[\s\S]*resolveAckTimeoutMs\(body\.ackTimeoutMs, \{\s*enforceMinimum: enforceMinimumAckTimeout,/u,
+  );
+});

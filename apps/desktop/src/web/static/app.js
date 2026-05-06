@@ -369,6 +369,7 @@ let studioPreviewBoundsRequestSerial = 0;
 const studioTemplateOverlayCache = new Map();
 const CONTROLLER_STATUS_POLL_INTERVAL_MS = 1_000;
 const CONTROLLER_STATUS_POLL_WINDOW_MS = 45_000;
+const CONTROLLER_COMPAT_ACK_TIMEOUT_MS = 2_000;
 
 const COLOR_COUNT_OPTIONS_BY_MODE = {
   mono: [2],
@@ -2554,7 +2555,8 @@ async function requestControllerStatus({ logErrors = false } = {}) {
         commands: ["I"],
         portPath: state.selectedPortPath,
         baudRate: state.studio.profile.baudRate,
-        ackTimeoutMs: state.studio.profile.ackTimeoutMs,
+        ackTimeoutMs: CONTROLLER_COMPAT_ACK_TIMEOUT_MS,
+        enforceMinimumAckTimeout: false,
         retries: state.studio.profile.commandRetryCount,
         ackDelayMs: 0,
       }),
@@ -3228,6 +3230,7 @@ async function runExecution({
   portPath,
   baudRate,
   ackTimeoutMs,
+  enforceMinimumAckTimeout = true,
   retries,
   setBusy,
   logTarget,
@@ -3245,6 +3248,7 @@ async function runExecution({
         portPath: target === "serial" ? portPath : undefined,
         baudRate,
         ackTimeoutMs,
+        enforceMinimumAckTimeout,
         retries,
         ackDelayMs: 0,
       }),
@@ -3278,6 +3282,8 @@ async function runTimedSerialCommands({
   logTarget,
   setBusy,
   successLabel,
+  ackTimeoutMs = state.studio.profile.ackTimeoutMs,
+  enforceMinimumAckTimeout = true,
 }) {
   if (!state.selectedPortPath) {
     appendLog(logTarget, "请先选择一个串口设备。");
@@ -3293,7 +3299,8 @@ async function runTimedSerialCommands({
     target: "serial",
     portPath: state.selectedPortPath,
     baudRate: state.studio.profile.baudRate,
-    ackTimeoutMs: state.studio.profile.ackTimeoutMs,
+    ackTimeoutMs,
+    enforceMinimumAckTimeout,
     retries: state.studio.profile.commandRetryCount,
     setBusy,
     logTarget,
@@ -3318,6 +3325,8 @@ async function runControllerCommands(commands, label) {
     logTarget: els.controllerLogOutput,
     setBusy: setControllerBusy,
     successLabel: label,
+    ackTimeoutMs: CONTROLLER_COMPAT_ACK_TIMEOUT_MS,
+    enforceMinimumAckTimeout: false,
   });
   const payload = result?.payload ?? null;
 
