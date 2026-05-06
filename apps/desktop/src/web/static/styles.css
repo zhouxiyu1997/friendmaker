@@ -536,6 +536,18 @@ label span {
   color: var(--ink-soft);
 }
 
+.field-warning {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid rgba(213, 69, 36, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 90, 54, 0.08);
+  color: var(--accent-deep);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 select,
 textarea,
 button,
