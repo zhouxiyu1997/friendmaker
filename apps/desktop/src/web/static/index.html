@@ -358,7 +358,7 @@
                 <input id="recenter-shortcut-checkbox" type="checkbox" />
                 <span class="checkbox-copy">
                   <strong>实验：长距离移动时自动回中</strong>
-                  <small>长按到屏幕边缘后用 X/A 回到画布中心，只在预计能节省时间的远距离跳转前使用。</small>
+                  <small>长按到屏幕边缘后用 X/A 回到画布中心。开启前请先到“调试测速”页跑回中校准，确认能回到画布中心后再使用。</small>
                 </span>
               </label>
 
@@ -786,11 +786,11 @@
           <div class="page-intro-copy">
             <p class="page-kicker">调试测速</p>
             <h2>按现象调参数，不用背英文名</h2>
-            <p>这页把两个 timing 翻译成更好理解的“稳定等待”和“按键保持”。先做小动作，再跑快速检查，最后用以中心为基准的 6 行 x 240 点阵做长程复现。</p>
+            <p>这页把 timing 翻译成更好理解的“稳定等待”和“按键保持”，也提供自动回中的左按时长校准。先做小动作，再跑快速检查；开启自动回中前，先跑回中测试。</p>
           </div>
           <div class="page-step-row" aria-label="调试测速步骤">
             <span class="page-step">1. 先试 1 格</span>
-            <span class="page-step">2. 再调两个旋钮</span>
+            <span class="page-step">2. 再调参数</span>
             <span class="page-step">3. 最后跑长测</span>
           </div>
         </section>
@@ -807,7 +807,7 @@
                   <span class="timing-guide-badge">推荐流程</span>
                   <strong>先稳，再快，最后复现</strong>
                 </div>
-                <p id="timing-current-summary" class="timing-current-summary">当前会同时用于手柄测试、测速和正式绘制：稳定等待 45ms · 按键保持 65ms。</p>
+                <p id="timing-current-summary" class="timing-current-summary">当前会同时用于手柄测试、测速和正式绘制：稳定等待 45ms · 按键保持 65ms · 回中左按 4000ms。</p>
 
                 <div class="timing-flow-grid">
                   <article class="timing-flow-item">
@@ -869,8 +869,8 @@
 
           <section class="panel">
             <div class="panel-head">
-              <h2>先调这两个旋钮</h2>
-              <p>这里调好的值会同时影响手柄测试、测速和正式绘制。先调“稳定等待”，再微调“按键保持”。</p>
+              <h2>先调稳定和力度，再校准回中</h2>
+              <p>这里调好的稳定等待和按键保持会同时影响手柄测试、测速和正式绘制。回中左按时长只影响实验性的自动回中宏。</p>
             </div>
 
             <div class="field-grid">
@@ -961,10 +961,45 @@
 
                 <p id="timing-button-press-tip" class="timing-control-tip">如果 A 有时没画出来或少点，先加 1 到 3ms 再测。</p>
               </article>
+
+              <article class="timing-control-card">
+                <div class="timing-control-head">
+                  <div>
+                    <p class="timing-control-kicker">开启回中前校准</p>
+                    <h3>回中左按时长</h3>
+                    <p class="timing-control-subtitle">技术名：recenterHoldMs</p>
+                  </div>
+                  <span id="timing-recenter-hold-badge" class="timing-control-badge">推荐起点</span>
+                </div>
+
+                <p class="timing-control-copy">决定自动回中宏里 DLEFT 会按住多久。开启脚本生成页的自动回中前，先在下面跑“回中测试”，确认光标会回到画布中心。</p>
+
+                <label class="range-row timing-control-range">
+                  <span class="timing-range-label">
+                    <strong>当前值</strong>
+                    <small>建议从 4000ms 起步</small>
+                  </span>
+                  <input id="timing-recenter-hold-range" type="range" min="2500" max="6500" step="100" value="4000" />
+                  <span class="range-number-group">
+                    <input
+                      id="timing-recenter-hold-input"
+                      class="range-number-input"
+                      type="number"
+                      min="2500"
+                      max="6500"
+                      step="100"
+                      value="4000"
+                    />
+                    <span class="range-unit">ms</span>
+                  </span>
+                </label>
+
+                <p id="timing-recenter-hold-tip" class="timing-control-tip">如果 X/A 后没有回到画布中心，把它加 500 到 1000ms 后再测。</p>
+              </article>
             </div>
 
             <div class="action-row">
-              <button id="timing-reset-button" class="ghost" type="button">恢复推荐默认值 45 / 65</button>
+              <button id="timing-reset-button" class="ghost" type="button">恢复推荐默认值 45 / 65 / 4000</button>
             </div>
 
             <div class="panel-head compact">
@@ -999,10 +1034,20 @@
           <section class="panel">
             <div class="panel-head">
               <h2>再选一个测试</h2>
-              <p>从左到右越来越严格。先跑快速检查，再看累计漂移，最后再用以中心为基准的 6 行 x 240 点阵复现真实长程问题。</p>
+              <p>开启自动回中前先跑回中测试。其他基准从左到右越来越严格：先跑快速检查，再看累计漂移，最后用以中心为基准的 6 行 x 240 点阵复现真实长程问题。</p>
             </div>
 
             <div class="timing-benchmark-grid">
+              <article class="timing-benchmark-option">
+                <div class="timing-benchmark-option-head">
+                  <span class="timing-guide-badge">回中校准</span>
+                  <h3>回中测试</h3>
+                </div>
+                <p>发送一次 DLEFT 长按，再发送 X/A。确认光标能回到画布中心后，再到脚本生成页开启自动回中。</p>
+                <p id="timing-recenter-test-summary" class="timing-benchmark-summary">约 4.2 秒 · 3 动作</p>
+                <button id="timing-recenter-test-button" class="ghost" type="button">运行回中测试</button>
+              </article>
+
               <article class="timing-benchmark-option timing-benchmark-option-primary">
                 <div class="timing-benchmark-option-head">
                   <span class="timing-guide-badge">推荐先跑</span>
@@ -1049,7 +1094,7 @@
               <dl class="firmware-meta-list">
                 <div class="firmware-meta-row">
                   <dt>这次参数</dt>
-                  <dd id="timing-benchmark-timing">按键保持 65ms · 稳定等待 45ms</dd>
+                  <dd id="timing-benchmark-timing">按键保持 65ms · 稳定等待 45ms · 回中左按 4000ms</dd>
                 </div>
                 <div class="firmware-meta-row">
                   <dt>实测总耗时</dt>

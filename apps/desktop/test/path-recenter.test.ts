@@ -199,6 +199,10 @@ test("generateDrawPlan keeps recenter default-off and updates stats when enabled
   const recenterPlan = await generateDrawPlan(source, profile, 1, {
     enableRecenterShortcut: true,
   });
+  const calibratedPlan = await generateDrawPlan(source, profile, 1, {
+    enableRecenterShortcut: true,
+    recenterHoldMs: 4_500,
+  });
 
   assert.equal(defaultPlan.recenterStats.enabled, false);
   assert.equal(defaultPlan.recenterStats.shortcutCount, 0);
@@ -208,6 +212,8 @@ test("generateDrawPlan keeps recenter default-off and updates stats when enabled
   assert.ok(recenterPlan.recenterStats.shortcutCount > 0);
   assert.ok(recenterPlan.commands.includes("HOLD DLEFT 4000"));
   assert.ok(recenterPlan.estimatedRuntimeMs < defaultPlan.estimatedRuntimeMs);
+  assert.equal(calibratedPlan.recenterStats.holdMs, 4_500);
+  assert.ok(calibratedPlan.commands.includes("HOLD DLEFT 4500"));
 });
 
 test("serialized recenter commands execute through simulator sender", async () => {

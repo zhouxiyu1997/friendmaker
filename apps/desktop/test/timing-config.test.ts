@@ -126,6 +126,7 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
       previewScale: 1,
       inputDelay: 30,
       buttonPressDuration: 40,
+      recenterHoldMs: 4200,
     }),
   });
   assert.equal(overrideResponse.ok, true);
@@ -136,6 +137,7 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
       inputDelay: number;
       buttonPressDuration: number;
       homeDuration: number;
+      recenterHoldMs: number;
     };
     stats: { estimatedRuntimeMs: number };
   };
@@ -147,6 +149,7 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
   assert.equal(overridePayload.profile.inputDelay, 30);
   assert.equal(overridePayload.profile.buttonPressDuration, 40);
   assert.equal(overridePayload.profile.homeDuration, 1800);
+  assert.equal(overridePayload.profile.recenterHoldMs, 4200);
   assert.ok(
     overridePayload.stats.estimatedRuntimeMs < defaultPayload.stats.estimatedRuntimeMs,
     "expected faster timing overrides to reduce estimated runtime",

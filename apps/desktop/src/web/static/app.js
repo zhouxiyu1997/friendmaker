@@ -63,6 +63,7 @@ const state = {
     inputDelay: 45,
     buttonPressDuration: 65,
     homeDuration: 1800,
+    recenterHoldMs: 4000,
   },
   studio: {
     busy: false,
@@ -98,6 +99,7 @@ const state = {
       inputDelay: 45,
       buttonPressDuration: 65,
       homeDuration: 1800,
+      recenterHoldMs: 4000,
       templateId: "none",
       templateLabel: "无模板（正方形）",
     },
@@ -210,6 +212,7 @@ const state = {
       buttonPressDuration: 65,
       inputDelay: 45,
       homeDuration: 1800,
+      recenterHoldMs: 4000,
       commandCount: 0,
       measuredMs: null,
       theoreticalMs: null,
@@ -352,17 +355,23 @@ const els = {
   timingInputDelayInput: document.getElementById("timing-input-delay-input"),
   timingButtonPressRange: document.getElementById("timing-button-press-range"),
   timingButtonPressInput: document.getElementById("timing-button-press-input"),
+  timingRecenterHoldRange: document.getElementById("timing-recenter-hold-range"),
+  timingRecenterHoldInput: document.getElementById("timing-recenter-hold-input"),
   timingResetButton: document.getElementById("timing-reset-button"),
   timingCurrentSummary: document.getElementById("timing-current-summary"),
   timingInputDelayBadge: document.getElementById("timing-input-delay-badge"),
   timingInputDelayTip: document.getElementById("timing-input-delay-tip"),
   timingButtonPressBadge: document.getElementById("timing-button-press-badge"),
   timingButtonPressTip: document.getElementById("timing-button-press-tip"),
+  timingRecenterHoldBadge: document.getElementById("timing-recenter-hold-badge"),
+  timingRecenterHoldTip: document.getElementById("timing-recenter-hold-tip"),
   timingStatusHint: document.getElementById("timing-status-hint"),
   timingActionButtons: [...document.querySelectorAll("[data-timing-action]")],
+  timingRecenterTestButton: document.getElementById("timing-recenter-test-button"),
   timingBenchmarkButton: document.getElementById("timing-benchmark-button"),
   timingLongBenchmarkButton: document.getElementById("timing-long-benchmark-button"),
   timingReproBenchmarkButton: document.getElementById("timing-repro-benchmark-button"),
+  timingRecenterTestSummary: document.getElementById("timing-recenter-test-summary"),
   timingBenchmarkStandardSummary: document.getElementById("timing-benchmark-standard-summary"),
   timingBenchmarkLongSummary: document.getElementById("timing-benchmark-long-summary"),
   timingBenchmarkReproSummary: document.getElementById("timing-benchmark-repro-summary"),
@@ -417,11 +426,14 @@ const DEFAULT_SHARED_TIMING = {
   inputDelay: 45,
   buttonPressDuration: 65,
   homeDuration: 1800,
+  recenterHoldMs: 4000,
 };
 const SHARED_TIMING_LIMITS = {
   inputDelay: { min: 16, max: 100, step: 1 },
   buttonPressDuration: { min: 16, max: 100, step: 1 },
+  recenterHoldMs: { min: 2500, max: 6500, step: 100 },
 };
+const RECENTER_CALIBRATION_ACTION_COUNT = 3;
 const TIMING_BENCHMARK_DIRECTIONS = [
   { dx: 1, dy: 0 },
   { dx: 0, dy: 1 },
@@ -639,6 +651,18 @@ els.timingButtonPressInput.addEventListener("change", () => {
 });
 
 els.timingButtonPressInput.addEventListener("blur", () => {
+  syncTimingLabUi();
+});
+
+els.timingRecenterHoldRange.addEventListener("input", () => {
+  setSharedRecenterHoldMs(els.timingRecenterHoldRange.value);
+});
+
+els.timingRecenterHoldInput.addEventListener("change", () => {
+  setSharedRecenterHoldMs(els.timingRecenterHoldInput.value);
+});
+
+els.timingRecenterHoldInput.addEventListener("blur", () => {
   syncTimingLabUi();
 });
 
@@ -1014,6 +1038,7 @@ function buildStudioGeneratePayload() {
     enableRecenterShortcut: state.studio.enableRecenterShortcut,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
+    recenterHoldMs: state.sharedTiming.recenterHoldMs,
   };
 }
 
@@ -1054,6 +1079,7 @@ function applyGeneratedStudioPayload(payload) {
     buttonPressDuration:
       payload.profile.buttonPressDuration ?? state.sharedTiming.buttonPressDuration,
     homeDuration: payload.profile.homeDuration ?? state.sharedTiming.homeDuration,
+    recenterHoldMs: payload.profile.recenterHoldMs ?? state.sharedTiming.recenterHoldMs,
     templateId: payload.profile.templateId ?? state.studio.templateId,
     templateLabel: payload.profile.templateLabel ?? state.studio.templateLabel,
   };
@@ -2009,6 +2035,18 @@ els.timingActionButtons.forEach((button) => {
 
     await runTimingLabCommands(commands, `调试动作 ${action}`);
   });
+});
+
+els.timingRecenterTestButton.addEventListener("click", async () => {
+  const shouldRun = window.confirm(
+    "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、画布上能看到光标，并且从现在开始不要再碰手柄或屏幕。本测试会先长按左方向，再发送 X/A。现在开始运行回中测试吗？",
+  );
+
+  if (!shouldRun) {
+    return;
+  }
+
+  await runRecenterCalibrationTest();
 });
 
 els.controllerSendCustomButton.addEventListener("click", async () => {
@@ -3265,6 +3303,7 @@ function renderTimingBenchmarkResult() {
     buttonPressDuration: benchmark.buttonPressDuration,
     inputDelay: benchmark.inputDelay,
     homeDuration: benchmark.homeDuration,
+    recenterHoldMs: benchmark.recenterHoldMs,
   });
   els.timingBenchmarkMeasured.textContent =
     typeof benchmark.measuredMs === "number" ? `${benchmark.measuredMs} ms` : "-";
@@ -3296,20 +3335,28 @@ function syncTimingLabUi() {
   els.timingInputDelayInput.disabled = disabled;
   els.timingButtonPressRange.disabled = disabled;
   els.timingButtonPressInput.disabled = disabled;
+  els.timingRecenterHoldRange.disabled = disabled;
+  els.timingRecenterHoldInput.disabled = disabled;
   els.timingResetButton.disabled = disabled;
   els.timingInputDelayRange.value = String(inputTiming.inputDelay);
   els.timingInputDelayInput.value = String(inputTiming.inputDelay);
   els.timingButtonPressRange.value = String(inputTiming.buttonPressDuration);
   els.timingButtonPressInput.value = String(inputTiming.buttonPressDuration);
+  els.timingRecenterHoldRange.value = String(inputTiming.recenterHoldMs);
+  els.timingRecenterHoldInput.value = String(inputTiming.recenterHoldMs);
   els.timingCurrentSummary.textContent =
-    `当前会同时用于手柄测试、测速和正式绘制：稳定等待 ${inputTiming.inputDelay}ms · 按键保持 ${inputTiming.buttonPressDuration}ms。`;
+    `当前会同时用于手柄测试、测速和正式绘制：稳定等待 ${inputTiming.inputDelay}ms · 按键保持 ${inputTiming.buttonPressDuration}ms · 回中左按 ${inputTiming.recenterHoldMs}ms。`;
 
   const inputDelayGuide = describeInputDelaySetting(inputTiming.inputDelay);
   const buttonPressGuide = describeButtonPressSetting(inputTiming.buttonPressDuration);
+  const recenterHoldGuide = describeRecenterHoldSetting(inputTiming.recenterHoldMs);
   els.timingInputDelayBadge.textContent = inputDelayGuide.badge;
   els.timingInputDelayTip.textContent = inputDelayGuide.tip;
   els.timingButtonPressBadge.textContent = buttonPressGuide.badge;
   els.timingButtonPressTip.textContent = buttonPressGuide.tip;
+  els.timingRecenterHoldBadge.textContent = recenterHoldGuide.badge;
+  els.timingRecenterHoldTip.textContent = recenterHoldGuide.tip;
+  els.timingRecenterTestSummary.textContent = formatRecenterTestSummary(inputTiming);
   els.timingBenchmarkStandardSummary.textContent = formatTimingBenchmarkSummary(
     TIMING_BENCHMARK_MODES.standard,
     inputTiming,
@@ -3328,6 +3375,7 @@ function syncTimingLabUi() {
   els.timingActionButtons.forEach((button) => {
     button.disabled = !canSendTimingCommands;
   });
+  els.timingRecenterTestButton.disabled = !canSendTimingCommands;
   els.timingBenchmarkButton.disabled = !canSendTimingCommands;
   els.timingLongBenchmarkButton.disabled = !canSendTimingCommands;
   els.timingReproBenchmarkButton.disabled = !canSendTimingCommands;
@@ -3339,7 +3387,7 @@ function syncTimingLabUi() {
       "串口已经选好。下一步去“手柄测试”页把手柄连到“已就绪”，再回来调参数。";
   } else {
     els.timingStatusHint.textContent =
-      "现在发出的每个测试都会先套用当前参数。建议先试 1 格，再跑“快速检查”，最后再决定要不要跑长测。";
+      "现在发出的每个测试都会先套用当前参数。建议先试 1 格，开启自动回中前先跑“回中测试”，再决定要不要跑长测。";
   }
 
   renderTimingBenchmarkResult();
@@ -3595,6 +3643,7 @@ async function runTimingBenchmark(modeKey = "standard") {
     buttonPressDuration: benchmarkTiming.buttonPressDuration,
     inputDelay: benchmarkTiming.inputDelay,
     homeDuration: benchmarkTiming.homeDuration,
+    recenterHoldMs: benchmarkTiming.recenterHoldMs,
     commandCount,
     measuredMs: null,
     theoreticalMs: null,
@@ -3628,6 +3677,59 @@ async function runTimingBenchmark(modeKey = "standard") {
     ...state.timingLab.benchmark,
     status: "success",
     detail: mode.successDetail,
+    measuredMs: result.elapsedMs,
+    theoreticalMs,
+    averageMs:
+      result.actionCommandCount > 0 ? Math.round(result.elapsedMs / result.actionCommandCount) : null,
+    deviceSummary: summarizeTimingDeviceLines(result.payload.lines),
+    updatedAt: new Date(),
+  };
+  syncTimingLabUi();
+}
+
+async function runRecenterCalibrationTest() {
+  const calibrationTiming = { ...state.sharedTiming };
+  const calibrationCommands = buildRecenterCalibrationCommands(calibrationTiming);
+  const theoreticalMs = getRecenterCalibrationDurationMs(calibrationTiming);
+  state.timingLab.benchmark = {
+    ...state.timingLab.benchmark,
+    status: "running",
+    label: "回中测试",
+    detail:
+      "正在运行回中测试。请观察长按左方向后，X/A 是否能把光标稳定带回画布中心。",
+    buttonPressDuration: calibrationTiming.buttonPressDuration,
+    inputDelay: calibrationTiming.inputDelay,
+    homeDuration: calibrationTiming.homeDuration,
+    recenterHoldMs: calibrationTiming.recenterHoldMs,
+    commandCount: calibrationCommands.length,
+    measuredMs: null,
+    theoreticalMs,
+    averageMs: null,
+    deviceSummary: "等待设备返回...",
+    updatedAt: new Date(),
+  };
+  syncTimingLabUi();
+
+  const result = await runTimingLabCommands(calibrationCommands, "回中测试");
+
+  if (!result) {
+    state.timingLab.benchmark = {
+      ...state.timingLab.benchmark,
+      status: "error",
+      detail:
+        "回中测试没有完成。请查看下方日志，确认手柄连接是否仍处于“已就绪”，或把 timing 再调慢一点后重试。",
+      deviceSummary: "回中测试失败，请查看日志。",
+      updatedAt: new Date(),
+    };
+    syncTimingLabUi();
+    return;
+  }
+
+  state.timingLab.benchmark = {
+    ...state.timingLab.benchmark,
+    status: "success",
+    detail:
+      "回中测试已经跑完。如果 X/A 后光标稳定回到画布中心，再到脚本生成页开启自动回中；如果没有回到中心，把回中左按时长加 500 到 1000ms 后重测。",
     measuredMs: result.elapsedMs,
     theoreticalMs,
     averageMs:
@@ -4099,7 +4201,8 @@ function normalizeTimingValue(value, fallback, limits) {
 }
 
 function formatTimingSummary(timing) {
-  return `按键保持 ${timing.buttonPressDuration}ms · 稳定等待 ${timing.inputDelay}ms`;
+  const recenterHoldMs = timing.recenterHoldMs ?? DEFAULT_SHARED_TIMING.recenterHoldMs;
+  return `按键保持 ${timing.buttonPressDuration}ms · 稳定等待 ${timing.inputDelay}ms · 回中左按 ${recenterHoldMs}ms`;
 }
 
 function describeInputDelaySetting(value) {
@@ -4141,6 +4244,27 @@ function describeButtonPressSetting(value) {
   return {
     badge: "偏稳，会更慢",
     tip: "如果已经不漏点，只是想更快，可以慢慢往下减，避免一下子减太多。",
+  };
+}
+
+function describeRecenterHoldSetting(value) {
+  if (value < 3500) {
+    return {
+      badge: "偏短，务必实测",
+      tip: "如果 X/A 后没有回到画布中心，先加 500 到 1000ms，再重新跑回中测试。",
+    };
+  }
+
+  if (value <= 5000) {
+    return {
+      badge: "常用区间",
+      tip: "这段适合作为自动回中的起点。开启脚本生成页开关前，先确认回中测试能稳定回到中心。",
+    };
+  }
+
+  return {
+    badge: "偏稳，会更慢",
+    tip: "如果已经能稳定回中，可以每次往下减 200 到 500ms，再重新测试。",
   };
 }
 
@@ -4186,6 +4310,22 @@ function formatTimingBenchmarkSummary(mode, timing) {
   return `${formatApproxDuration(totalMs)} · ${actionCount} 动作`;
 }
 
+function getRecenterCalibrationDurationMs(timing) {
+  return (
+    timing.recenterHoldMs +
+    timing.inputDelay +
+    2 * (timing.buttonPressDuration + timing.inputDelay)
+  );
+}
+
+function formatRecenterTestSummary(timing) {
+  return `${formatApproxDuration(getRecenterCalibrationDurationMs(timing))} · ${RECENTER_CALIBRATION_ACTION_COUNT} 动作`;
+}
+
+function buildRecenterCalibrationCommands(timing = state.sharedTiming) {
+  return [`HOLD DLEFT ${timing.recenterHoldMs}`, "X", "A"];
+}
+
 function buildSharedTimingConfigCommand() {
   return `CFG INPUT ${state.sharedTiming.buttonPressDuration} ${state.sharedTiming.inputDelay} ${state.sharedTiming.homeDuration}`;
 }
@@ -4196,6 +4336,7 @@ function syncSharedTimingIntoStudioProfile() {
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
     homeDuration: state.sharedTiming.homeDuration,
+    recenterHoldMs: state.sharedTiming.recenterHoldMs,
   };
 }
 
@@ -4220,6 +4361,11 @@ function applySharedTiming(nextTiming, { persist = true } = {}) {
       SHARED_TIMING_LIMITS.buttonPressDuration,
     ),
     homeDuration: DEFAULT_SHARED_TIMING.homeDuration,
+    recenterHoldMs: normalizeTimingValue(
+      nextTiming?.recenterHoldMs,
+      DEFAULT_SHARED_TIMING.recenterHoldMs,
+      SHARED_TIMING_LIMITS.recenterHoldMs,
+    ),
   };
   syncSharedTimingIntoStudioProfile();
 
@@ -4247,16 +4393,19 @@ function loadSharedTiming() {
 function updateSharedTiming(nextTiming) {
   const previousInputDelay = state.sharedTiming.inputDelay;
   const previousButtonPressDuration = state.sharedTiming.buttonPressDuration;
+  const previousRecenterHoldMs = state.sharedTiming.recenterHoldMs;
   applySharedTiming(
     {
       inputDelay: nextTiming.inputDelay ?? state.sharedTiming.inputDelay,
       buttonPressDuration: nextTiming.buttonPressDuration ?? state.sharedTiming.buttonPressDuration,
+      recenterHoldMs: nextTiming.recenterHoldMs ?? state.sharedTiming.recenterHoldMs,
     },
     { persist: true },
   );
   const changed =
     previousInputDelay !== state.sharedTiming.inputDelay ||
-    previousButtonPressDuration !== state.sharedTiming.buttonPressDuration;
+    previousButtonPressDuration !== state.sharedTiming.buttonPressDuration ||
+    previousRecenterHoldMs !== state.sharedTiming.recenterHoldMs;
 
   syncStudioUi();
   syncControllerUi();
@@ -4273,6 +4422,10 @@ function setSharedInputDelay(value) {
 
 function setSharedButtonPressDuration(value) {
   updateSharedTiming({ buttonPressDuration: value });
+}
+
+function setSharedRecenterHoldMs(value) {
+  updateSharedTiming({ recenterHoldMs: value });
 }
 
 function resetSharedTiming() {

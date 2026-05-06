@@ -65,6 +65,7 @@ export async function generateDrawPlan(
     pathStrategy?: PathStrategy;
     noiseCleanupMode?: NoiseCleanupMode;
     enableRecenterShortcut?: boolean;
+    recenterHoldMs?: number;
   },
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes, noiseCleanupStats } = await pixelizeImage(imageSource, profile, options);
@@ -72,6 +73,7 @@ export async function generateDrawPlan(
   const scanlineOptions: ScanlinePlanningOptions = {
     ...(options?.pathStrategy ? { pathStrategy: options.pathStrategy } : {}),
     recenterMode: options?.enableRecenterShortcut === true ? "left-hold" : "off",
+    ...(typeof options?.recenterHoldMs === "number" ? { recenterHoldMs: options.recenterHoldMs } : {}),
   };
   const scanlinePlan = generateScanlinePlan(pixelMap, profile, scanlineOptions);
   const drawCommands = scanlinePlan.commands;

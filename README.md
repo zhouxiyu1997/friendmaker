@@ -308,7 +308,7 @@ http://127.0.0.1:4307
 - 选择画笔大小
 - 选择单色、官方色或自定义多色（测试中）
 - 选择模板、缩放和位置，并检查预览
-- 可选开启实验性的长距离移动自动回中；默认关闭，只在预估节省时间时插入 `HOLD DLEFT` + `X/A`
+- 可选开启实验性的长距离移动自动回中；默认关闭，开启前先在“调试测速”页校准 4000ms 左按测试，只在预估节省时间时插入 `HOLD DLEFT` + `X/A`
 - 生成预览与命令
 - 查看官方色盘预览、统计信息与执行状态
 - 一键开始绘制
@@ -695,7 +695,7 @@ Notes:
 - Choose brush size
 - Choose mono drawing, official palette drawing, or custom multicolor (testing)
 - Choose template, scale, and position, then review the preview
-- Optionally enable experimental long-move recentering; it is off by default and only inserts `HOLD DLEFT` + `X/A` when estimated to save time
+- Optionally enable experimental long-move recentering; it is off by default, should be calibrated from the Timing page's 4000ms left-hold test first, and only inserts `HOLD DLEFT` + `X/A` when estimated to save time
 - Generate previews and command scripts
 - Review official palette previews, statistics, and execution status
 - Start drawing with one click

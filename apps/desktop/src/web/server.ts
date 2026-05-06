@@ -26,6 +26,7 @@ import {
   type WindowsSerialDriverId,
 } from "./windowsSerialDrivers.js";
 import { listPortInfos, preferSerialPath } from "../serial/listPorts.js";
+import { DEFAULT_RECENTER_HOLD_MS } from "../path/scanline.js";
 import {
   SerialSessionManager,
   type SerialSessionSnapshot,
@@ -951,6 +952,14 @@ function normalizeTimingDuration(value: unknown, fallback: number): number {
   return Math.max(16, Math.min(100, Math.round(value)));
 }
 
+function normalizeRecenterHoldMs(value: unknown, fallback = DEFAULT_RECENTER_HOLD_MS): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(2_500, Math.min(6_500, Math.round(value / 100) * 100));
+}
+
 function normalizeRecoveryProfileSummary(value: unknown): ExecutionStartProfileSummary {
   const summary = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
@@ -1085,6 +1094,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     enableRecenterShortcut?: boolean;
     inputDelay?: number;
     buttonPressDuration?: number;
+    recenterHoldMs?: number;
   };
 
   if (!body.imageDataUrl) {
@@ -1113,6 +1123,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
   const noiseCleanupMode = normalizeNoiseCleanupMode(body.noiseCleanupMode);
   const enableRecenterShortcut = body.enableRecenterShortcut === true;
+  const recenterHoldMs = normalizeRecenterHoldMs(body.recenterHoldMs);
   const template = getDrawingTemplateDefinition(body.templateId ?? "none");
 
   if (!template) {
@@ -1143,6 +1154,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       drawingMask,
       noiseCleanupMode,
       enableRecenterShortcut,
+      recenterHoldMs,
     },
   );
 
@@ -1169,6 +1181,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       inputDelay: profile.inputDelay,
       buttonPressDuration: profile.buttonPressDuration,
       homeDuration: profile.homeDuration,
+      recenterHoldMs,
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,
