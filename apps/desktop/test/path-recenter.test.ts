@@ -204,8 +204,9 @@ test("generateDrawPlan keeps recenter default-off and updates stats when enabled
   assert.equal(defaultPlan.recenterStats.shortcutCount, 0);
   assert.equal(defaultPlan.commands.some((command) => command.startsWith("HOLD ")), false);
   assert.equal(recenterPlan.recenterStats.enabled, true);
+  assert.equal(recenterPlan.recenterStats.holdMs, 4_000);
   assert.ok(recenterPlan.recenterStats.shortcutCount > 0);
-  assert.ok(recenterPlan.commands.some((command) => command.startsWith("HOLD DLEFT ")));
+  assert.ok(recenterPlan.commands.includes("HOLD DLEFT 4000"));
   assert.ok(recenterPlan.estimatedRuntimeMs < defaultPlan.estimatedRuntimeMs);
 });
 
