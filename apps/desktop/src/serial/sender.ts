@@ -16,6 +16,7 @@ import {
 import {
   estimateColorSelectDurationMs,
   estimateFastColorSelectDurationMs,
+  estimateToolSelectDurationMs,
   estimatePaletteConfigDurationMs,
 } from "../protocol/runtimeEstimate.js";
 import type { ProgressUpdate, SenderControls } from "../types.js";
@@ -327,6 +328,12 @@ export function getAckTimeoutForCommand(
           estimateFastColorSelectDurationMs(0, 8, timing),
           estimateColorSelectDurationMs(0, timing),
         ),
+    );
+  }
+
+  if (trimmed.startsWith("TF ")) {
+    return boundedTimeout(
+      1_000 + estimateToolSelectDurationMs("brush", "fill", timing),
     );
   }
 

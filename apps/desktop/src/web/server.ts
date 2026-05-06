@@ -28,7 +28,10 @@ import {
   type WindowsSerialDriverId,
 } from "./windowsSerialDrivers.js";
 import { listPortInfos, preferSerialPath } from "../serial/listPorts.js";
-import { DEFAULT_RECENTER_HOLD_MS } from "../path/scanline.js";
+import {
+  DEFAULT_FILL_MIN_RETURN_RATIO,
+  DEFAULT_RECENTER_HOLD_MS,
+} from "../path/scanline.js";
 import {
   SerialSessionManager,
   type SerialSessionSnapshot,
@@ -966,6 +969,17 @@ function normalizeRecenterHoldMs(value: unknown, fallback = DEFAULT_RECENTER_HOL
   return Math.max(2_500, Math.min(6_500, Math.round(value / 100) * 100));
 }
 
+function normalizeFillMinReturnRatio(
+  value: unknown,
+  fallback = DEFAULT_FILL_MIN_RETURN_RATIO,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.min(20, Math.round(value * 10) / 10));
+}
+
 function normalizeRecoveryProfileSummary(value: unknown): ExecutionStartProfileSummary {
   const summary = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
@@ -1099,6 +1113,8 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     noiseCleanupMode?: NoiseCleanupMode;
     enableRecenterShortcut?: boolean;
     enableColorBatchOptimization?: boolean;
+    enableFillOptimization?: boolean;
+    fillMinReturnRatio?: number;
     inputDelay?: number;
     buttonPressDuration?: number;
     recenterHoldMs?: number;
@@ -1131,6 +1147,8 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const noiseCleanupMode = normalizeNoiseCleanupMode(body.noiseCleanupMode);
   const enableRecenterShortcut = body.enableRecenterShortcut === true;
   const enableColorBatchOptimization = body.enableColorBatchOptimization === true;
+  const enableFillOptimization = body.enableFillOptimization === true;
+  const fillMinReturnRatio = normalizeFillMinReturnRatio(body.fillMinReturnRatio);
   const recenterHoldMs = normalizeRecenterHoldMs(body.recenterHoldMs);
   const template = getDrawingTemplateDefinition(body.templateId ?? "none");
 
@@ -1164,6 +1182,8 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       enableRecenterShortcut,
       recenterHoldMs,
       enableColorBatchOptimization,
+      enableFillOptimization,
+      fillMinReturnRatio,
     },
   );
 
@@ -1184,6 +1204,8 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       noiseCleanupMode,
       enableRecenterShortcut,
       enableColorBatchOptimization,
+      enableFillOptimization,
+      fillMinReturnRatio,
       palette: plan.paletteHexes,
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
@@ -1205,6 +1227,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       pathStats: plan.pathStats,
       componentStats: plan.componentStats,
       recenter: plan.recenterStats,
+      fill: plan.fillStats,
       noiseCleanup: plan.noiseCleanupStats,
     },
     previewDataUrl: `data:image/png;base64,${plan.previewPng.toString("base64")}`,

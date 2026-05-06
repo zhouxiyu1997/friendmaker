@@ -83,6 +83,8 @@ const state = {
     noiseCleanupMode: "off",
     enableRecenterShortcut: false,
     enableColorBatchOptimization: false,
+    enableFillOptimization: false,
+    fillMinReturnRatio: 4,
     removeBackground: false,
     usedColorIndexes: [],
     colorPixelCounts: [],
@@ -252,6 +254,9 @@ const els = {
   studioAnalysisWarning: document.getElementById("studio-analysis-warning"),
   recenterShortcutCheckbox: document.getElementById("recenter-shortcut-checkbox"),
   colorBatchOptimizationCheckbox: document.getElementById("color-batch-optimization-checkbox"),
+  fillOptimizationCheckbox: document.getElementById("fill-optimization-checkbox"),
+  fillReturnRatioRange: document.getElementById("fill-return-ratio-range"),
+  fillReturnRatioInput: document.getElementById("fill-return-ratio-input"),
   thresholdLabel: document.getElementById("threshold-label"),
   thresholdRange: document.getElementById("threshold-range"),
   thresholdValue: document.getElementById("threshold-value"),
@@ -428,6 +433,12 @@ const STUDIO_IMAGE_SCALE_LIMITS = {
 const STUDIO_IMAGE_OFFSET_LIMITS = {
   min: -100,
   max: 100,
+};
+
+const FILL_RETURN_RATIO_LIMITS = {
+  min: 2,
+  max: 8,
+  step: 0.5,
 };
 
 const SHARED_TIMING_STORAGE_KEY = "friend-maker.shared-timing";
@@ -613,6 +624,24 @@ els.colorBatchOptimizationCheckbox.addEventListener("change", () => {
   state.studio.enableColorBatchOptimization = els.colorBatchOptimizationCheckbox.checked;
   syncStudioUi();
   scheduleStudioPreviewRefresh();
+});
+
+els.fillOptimizationCheckbox.addEventListener("change", () => {
+  state.studio.enableFillOptimization = els.fillOptimizationCheckbox.checked;
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+});
+
+els.fillReturnRatioRange.addEventListener("input", () => {
+  setStudioFillMinReturnRatio(els.fillReturnRatioRange.value);
+});
+
+els.fillReturnRatioInput.addEventListener("change", () => {
+  setStudioFillMinReturnRatio(els.fillReturnRatioInput.value);
+});
+
+els.fillReturnRatioInput.addEventListener("blur", () => {
+  syncStudioUi();
 });
 
 els.previewGuideSelect.addEventListener("change", () => {
@@ -1066,6 +1095,8 @@ function buildStudioGeneratePayload() {
     noiseCleanupMode: state.studio.noiseCleanupMode,
     enableRecenterShortcut: state.studio.enableRecenterShortcut,
     enableColorBatchOptimization: state.studio.enableColorBatchOptimization,
+    enableFillOptimization: state.studio.enableFillOptimization,
+    fillMinReturnRatio: state.studio.fillMinReturnRatio,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
     recenterHoldMs: state.sharedTiming.recenterHoldMs,
@@ -1263,6 +1294,11 @@ function applyGeneratedStudioPayload(payload) {
   state.studio.enableRecenterShortcut = payload.profile.enableRecenterShortcut === true;
   state.studio.enableColorBatchOptimization =
     payload.profile.enableColorBatchOptimization === true;
+  state.studio.enableFillOptimization = payload.profile.enableFillOptimization === true;
+  state.studio.fillMinReturnRatio =
+    typeof payload.profile.fillMinReturnRatio === "number"
+      ? payload.profile.fillMinReturnRatio
+      : state.studio.fillMinReturnRatio;
   state.studio.removeBackground = payload.profile.removeBackground === true;
 
   els.commandsOutput.value = payload.commands.join("\n");
@@ -1280,11 +1316,12 @@ function applyGeneratedStudioPayload(payload) {
   els.statPixels.textContent = String(payload.stats.totalPixels);
   const cleanupChangedCells = payload.stats.noiseCleanup?.changedCellCount ?? 0;
   const recenterUses = payload.stats.recenter?.shortcutCount ?? 0;
+  const fillUses = payload.stats.fill?.appliedRegionCount ?? 0;
   const componentCount = payload.stats.componentStats?.drawableComponentCount ?? 0;
   els.statCommands.textContent = payload.stats.pathStats
     ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount} · C ${componentCount}${
         cleanupChangedCells > 0 ? ` · Δ ${cleanupChangedCells}` : ""
-      }${recenterUses > 0 ? ` · 回中 ${recenterUses}` : ""}`
+      }${recenterUses > 0 ? ` · 回中 ${recenterUses}` : ""}${fillUses > 0 ? ` · 填充 ${fillUses}` : ""}`
     : String(payload.stats.commandCount);
   els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
   void updatePreviewBounds(payload);
@@ -3314,6 +3351,9 @@ function syncStudioUi() {
   els.noiseCleanupSelect.value = state.studio.noiseCleanupMode;
   els.recenterShortcutCheckbox.checked = state.studio.enableRecenterShortcut;
   els.colorBatchOptimizationCheckbox.checked = state.studio.enableColorBatchOptimization;
+  els.fillOptimizationCheckbox.checked = state.studio.enableFillOptimization;
+  els.fillReturnRatioRange.value = String(state.studio.fillMinReturnRatio);
+  els.fillReturnRatioInput.value = String(state.studio.fillMinReturnRatio);
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
   const backgroundHint = state.studio.removeBackground
@@ -3332,6 +3372,9 @@ function syncStudioUi() {
   const colorBatchHint = state.studio.enableColorBatchOptimization
     ? "已开启实验性的 9 色槽分组优化，会尝试按移动距离重排颜色批次，优先使用底部色槽，并在同批局部组件之间快速换色。"
     : "";
+  const fillOptimizationHint = state.studio.enableFillOptimization
+    ? `已开启高风险填充优化，只有估算收益达到 ${state.studio.fillMinReturnRatio}x 的封闭区域才会切换填充工具。`
+    : "";
   const analysisHint = state.studio.imageAnalysisBusy
     ? "正在做图片初步分析，完成前不会自动生成完整预览。"
     : "";
@@ -3340,13 +3383,13 @@ function syncStudioUi() {
     : "";
   if (state.studio.colorMode === "mono") {
     els.studioModeHint.textContent =
-      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${templateHint}${scaleHint}${positionHint}${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
+      `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${state.studio.brushSize} 号笔和画布中心起步生成。${templateHint}${scaleHint}${positionHint}${fillOptimizationHint}${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
   } else if (state.studio.colorMode === "official") {
     els.studioModeHint.textContent =
-      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${colorBatchHint}${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${state.studio.brushSize} 号笔生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${colorBatchHint}${fillOptimizationHint}${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
   } else {
     els.studioModeHint.textContent =
-      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}${colorBatchHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
+      `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}${colorBatchHint}${fillOptimizationHint}这条路线仍属于实验能力，当前优先目标是输入稳定性，不保证所有图片都稳定。${squareBrushHint}${backgroundHint}${analysisHint}${generationHint}`;
   }
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
@@ -3365,6 +3408,11 @@ function syncStudioUi() {
   els.recenterShortcutCheckbox.disabled = state.studio.busy || executionActive;
   els.colorBatchOptimizationCheckbox.disabled =
     state.studio.busy || executionActive || state.studio.colorMode === "mono";
+  els.fillOptimizationCheckbox.disabled = state.studio.busy || executionActive;
+  els.fillReturnRatioRange.disabled =
+    state.studio.busy || executionActive || !state.studio.enableFillOptimization;
+  els.fillReturnRatioInput.disabled =
+    state.studio.busy || executionActive || !state.studio.enableFillOptimization;
   els.autoRemoveBackgroundCheckbox.disabled = state.studio.busy || executionActive;
   els.previewGuideSelect.disabled = false;
   els.colorCountSelect.disabled =
@@ -4465,6 +4513,18 @@ function normalizeTimingValue(value, fallback, limits) {
   return clampNumber(snapped, limits.min, limits.max);
 }
 
+function normalizeStudioDecimalValue(value, fallback, limits) {
+  const parsed = Number.parseFloat(String(value ?? "").trim());
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const clamped = clampNumber(parsed, limits.min, limits.max);
+  const snapped = snapNumberToStep(clamped, limits.min, limits.step);
+  return clampNumber(snapped, limits.min, limits.max);
+}
+
 function formatTimingSummary(timing) {
   const recenterHoldMs = timing.recenterHoldMs ?? DEFAULT_SHARED_TIMING.recenterHoldMs;
   return `按键保持 ${timing.buttonPressDuration}ms · 稳定等待 ${timing.inputDelay}ms · 回中左按 ${recenterHoldMs}ms`;
@@ -4738,6 +4798,21 @@ function setStudioImageOffsetYPercent(value) {
   syncStudioUi();
 
   if (changed) {
+    scheduleStudioPreviewRefresh();
+  }
+}
+
+function setStudioFillMinReturnRatio(value) {
+  const nextValue = normalizeStudioDecimalValue(
+    value,
+    state.studio.fillMinReturnRatio,
+    FILL_RETURN_RATIO_LIMITS,
+  );
+  const changed = nextValue !== state.studio.fillMinReturnRatio;
+  state.studio.fillMinReturnRatio = nextValue;
+  syncStudioUi();
+
+  if (changed && state.studio.enableFillOptimization) {
     scheduleStudioPreviewRefresh();
   }
 }

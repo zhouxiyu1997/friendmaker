@@ -1,4 +1,4 @@
-import type { DrawCommand } from "./commands.js";
+import type { DrawCommand, DrawingActionTool } from "./commands.js";
 import type { DrawingProfile } from "../types.js";
 import type { InputTiming } from "./timing.js";
 
@@ -20,6 +20,9 @@ export const BASIC_COLOR_GRID_COLS = 12;
 export const BASIC_COLOR_TAB_SETTLE_MS = 140;
 export const BASIC_COLOR_INITIAL_SLOT_ROWS = [6, 0, 3, 3, 3, 3, 3, 3, 3] as const;
 export const BASIC_COLOR_INITIAL_SLOT_COLS = [0, 0, 10, 9, 8, 6, 5, 2, 1] as const;
+export const TOOL_MENU_OPEN_SETTLE_MS = 180;
+export const TOOL_MENU_PRESS_DURATION_MS = 90;
+export const TOOL_MENU_INPUT_DELAY_MS = 90;
 export const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
 
 export interface CommandRuntimeBreakdown {
@@ -29,6 +32,7 @@ export interface CommandRuntimeBreakdown {
   canvasMoveMs: number;
   drawMs: number;
   colorSelectMs: number;
+  toolSelectMs: number;
   paletteConfigMs: number;
   basicPaletteConfigMs: number;
   menuUtilityMs: number;
@@ -40,6 +44,7 @@ export interface CommandRuntimeBreakdown {
   lineStepCount: number;
   drawPressCount: number;
   colorSelectCount: number;
+  toolSelectCount: number;
   paletteConfigCount: number;
   basicPaletteConfigCount: number;
   holdCount: number;
@@ -73,6 +78,7 @@ export function calculateCommandRuntimeBreakdown(
     canvasMoveMs: 0,
     drawMs: 0,
     colorSelectMs: 0,
+    toolSelectMs: 0,
     paletteConfigMs: 0,
     basicPaletteConfigMs: 0,
     menuUtilityMs: 0,
@@ -84,12 +90,14 @@ export function calculateCommandRuntimeBreakdown(
     lineStepCount: 0,
     drawPressCount: 0,
     colorSelectCount: 0,
+    toolSelectCount: 0,
     paletteConfigCount: 0,
     basicPaletteConfigCount: 0,
     holdCount: 0,
   };
   const basicPaletteState = createBasicPaletteTrackingState();
   let selectedPaletteSlot: number | null = null;
+  let selectedTool: DrawingActionTool | null = "brush";
 
   for (const command of commands) {
     switch (command.type) {
@@ -147,6 +155,17 @@ export function calculateCommandRuntimeBreakdown(
         selectedPaletteSlot = targetSlot;
         breakdown.colorSelectCount += 1;
         addBreakdownTime(breakdown, "colorSelectMs", duration);
+        break;
+      }
+      case "toolFast": {
+        const duration =
+          selectedTool === null
+            ? estimateToolSelectDurationMs("brush", command.tool, timing)
+            : estimateToolSelectDurationMs(selectedTool, command.tool, timing);
+
+        selectedTool = command.tool;
+        breakdown.toolSelectCount += 1;
+        addBreakdownTime(breakdown, "toolSelectMs", duration);
         break;
       }
       case "paletteConfig": {
@@ -229,6 +248,24 @@ export function estimateFastColorSelectDurationMs(
     COLOR_PALETTE_MENU_OPEN_SETTLE_MS +
     Math.abs(toSlot - fromSlot) * menuPressMs +
     2 * menuPressMs +
+    timing.inputDelayMs
+  );
+}
+
+export function estimateToolSelectDurationMs(
+  fromTool: DrawingActionTool,
+  toTool: DrawingActionTool,
+  timing: InputTiming,
+): number {
+  if (fromTool === toTool) {
+    return 0;
+  }
+
+  return (
+    generalPressMs(timing) +
+    TOOL_MENU_OPEN_SETTLE_MS +
+    toolMenuPressMs() +
+    toolMenuPressMs() +
     timing.inputDelayMs
   );
 }
@@ -327,6 +364,7 @@ function addBreakdownTime(
     | "canvasMoveMs"
     | "drawMs"
     | "colorSelectMs"
+    | "toolSelectMs"
     | "paletteConfigMs"
     | "basicPaletteConfigMs"
     | "menuUtilityMs"
@@ -399,6 +437,10 @@ function generalPressMs(timing: InputTiming): number {
 
 function paletteMenuPressMs(): number {
   return COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
+}
+
+function toolMenuPressMs(): number {
+  return TOOL_MENU_PRESS_DURATION_MS + TOOL_MENU_INPUT_DELAY_MS;
 }
 
 function clampPaletteSlotIndex(index: number): number {

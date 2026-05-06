@@ -10,6 +10,7 @@ import {
   basicPaletteResetCommand,
   colorCommand,
   colorFastCommand,
+  toolFastCommand,
   drawCommand,
   endCommand,
   holdButtonCommand,
@@ -26,6 +27,7 @@ import {
   estimateColorSelectDurationMs,
   estimateCommandRuntimeMs,
   estimateFastColorSelectDurationMs,
+  estimateToolSelectDurationMs,
   type CommandRuntimeBreakdown,
 } from "../protocol/runtimeEstimate.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
@@ -44,6 +46,18 @@ export interface RecenterStats {
   safetyMarginSteps: number;
 }
 
+export interface FillOptimizationStats {
+  enabled: boolean;
+  minReturnRatio: number;
+  candidateRegionCount: number;
+  appliedRegionCount: number;
+  filledPixelCount: number;
+  outlinePixelCount: number;
+  fillSeedCount: number;
+  estimatedRuntimeSavedMs: number;
+  maxReturnRatio: number;
+}
+
 export interface ScanlinePlanningOptions {
   pathStrategy?: PathStrategy;
   recenterMode?: RecenterMode;
@@ -51,12 +65,15 @@ export interface ScanlinePlanningOptions {
   recenterSafetyMarginSteps?: number;
   recenterAwareRouting?: boolean;
   optimizeColorBatches?: boolean;
+  optimizeFillRegions?: boolean;
+  fillMinReturnRatio?: number;
 }
 
 export interface GeneratedScanlinePlan {
   commands: DrawCommand[];
   resumePlan: ResumePlan;
   recenterStats: RecenterStats;
+  fillStats: FillOptimizationStats;
 }
 
 const PALETTE_SLOT_COUNT = 9;
@@ -73,6 +90,10 @@ const COLOR_BATCH_SPATIAL_MIN_CANDIDATES = 24;
 const COLOR_BATCH_SPATIAL_MAX_CANDIDATES = 48;
 export const DEFAULT_RECENTER_HOLD_MS = 4_000;
 const DEFAULT_RECENTER_SAFETY_MARGIN_STEPS = 30;
+export const DEFAULT_FILL_MIN_RETURN_RATIO = 4;
+const FILL_MIN_COMPONENT_PIXELS = 64;
+const FILL_MIN_INTERIOR_PIXELS = 32;
+const FILL_MAX_SEEDS_PER_REGION = 8;
 const NEIGHBOR_OFFSETS = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
@@ -97,6 +118,23 @@ interface PlannedPaletteWorkUnit extends PlannedPaletteColor {
 
 interface OrderedPaletteWorkUnit extends PlannedPaletteWorkUnit {
   orderedPixels: Pixel[];
+}
+
+interface FillRegionCandidate {
+  colorIndex: number;
+  colorHex: string;
+  componentPixels: Pixel[];
+  outlinePixels: Pixel[];
+  fillSeeds: Pixel[];
+  filledPixelCount: number;
+  returnRatio: number;
+  estimatedRuntimeSavedMs: number;
+}
+
+interface FillPlanForColor {
+  candidates: FillRegionCandidate[];
+  residualPixels: Pixel[];
+  estimatedRuntimeSavedMs: number;
 }
 
 interface IndexedPaletteWorkUnit extends PlannedPaletteWorkUnit {
@@ -377,6 +415,173 @@ function collectConnectedComponents(pixels: Pixel[]): Pixel[][] {
   return collectConnectedPixelComponents(pixels);
 }
 
+function isComponentAtGridEdge(component: Pixel[], profile: DrawingProfile): boolean {
+  const grid = createBrushGrid(profile);
+
+  return component.some(
+    (pixel) =>
+      pixel.x <= 0 ||
+      pixel.y <= 0 ||
+      pixel.x >= grid.gridWidth - 1 ||
+      pixel.y >= grid.gridHeight - 1,
+  );
+}
+
+function splitOutlineAndInterior(component: Pixel[]): {
+  outlinePixels: Pixel[];
+  interiorPixels: Pixel[];
+} {
+  const componentKeys = new Set(component.map(pixelKey));
+  const outlinePixels: Pixel[] = [];
+  const interiorPixels: Pixel[] = [];
+
+  for (const pixel of component) {
+    const isOutline = NEIGHBOR_OFFSETS.some(
+      (offset) => !componentKeys.has(`${pixel.x + offset.dx},${pixel.y + offset.dy}`),
+    );
+
+    if (isOutline) {
+      outlinePixels.push(pixel);
+    } else {
+      interiorPixels.push(pixel);
+    }
+  }
+
+  return { outlinePixels, interiorPixels };
+}
+
+function createFillRegionCandidate(
+  component: Pixel[],
+  profile: DrawingProfile,
+  minReturnRatio: number,
+): FillRegionCandidate | null {
+  const firstPixel = component[0];
+
+  if (!firstPixel || component.length < FILL_MIN_COMPONENT_PIXELS || isComponentAtGridEdge(component, profile)) {
+    return null;
+  }
+
+  const { outlinePixels, interiorPixels } = splitOutlineAndInterior(component);
+
+  if (outlinePixels.length === 0 || interiorPixels.length < FILL_MIN_INTERIOR_PIXELS) {
+    return null;
+  }
+
+  const interiorComponents = collectConnectedComponents(interiorPixels);
+
+  if (interiorComponents.length === 0 || interiorComponents.length > FILL_MAX_SEEDS_PER_REGION) {
+    return null;
+  }
+
+  const fillSeeds = interiorComponents
+    .map((interiorComponent) => interiorComponent[0])
+    .filter((pixel): pixel is Pixel => Boolean(pixel));
+  const timing = {
+    buttonPressMs: profile.buttonPressDuration,
+    inputDelayMs: profile.inputDelay,
+    homeMs: profile.homeDuration,
+  };
+  const drawPressMs = getStepMs(profile);
+  const baselineMs = component.length * drawPressMs;
+  const fillMs =
+    (outlinePixels.length + fillSeeds.length) * drawPressMs +
+    estimateToolSelectDurationMs("brush", "fill", timing) +
+    estimateToolSelectDurationMs("fill", "brush", timing);
+  const returnRatio = fillMs > 0 ? baselineMs / fillMs : 0;
+
+  if (returnRatio < minReturnRatio) {
+    return null;
+  }
+
+  return {
+    colorIndex: firstPixel.colorIndex,
+    colorHex: firstPixel.colorHex,
+    componentPixels: component,
+    outlinePixels,
+    fillSeeds,
+    filledPixelCount: interiorPixels.length,
+    returnRatio,
+    estimatedRuntimeSavedMs: Math.max(0, baselineMs - fillMs),
+  };
+}
+
+function createFillPlanForColor(
+  pixels: Pixel[],
+  profile: DrawingProfile,
+  minReturnRatio: number,
+  stats: FillOptimizationStats,
+): FillPlanForColor | null {
+  const candidates: FillRegionCandidate[] = [];
+  const coveredKeys = new Set<string>();
+
+  for (const component of collectConnectedComponents(pixels)) {
+    const potential = createFillRegionCandidate(component, profile, minReturnRatio);
+
+    if (!potential) {
+      continue;
+    }
+
+    stats.candidateRegionCount += 1;
+    stats.maxReturnRatio = Math.max(stats.maxReturnRatio, potential.returnRatio);
+    candidates.push(potential);
+
+    for (const pixel of potential.componentPixels) {
+      coveredKeys.add(pixelKey(pixel));
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (left, right) =>
+      right.estimatedRuntimeSavedMs - left.estimatedRuntimeSavedMs ||
+      right.returnRatio - left.returnRatio ||
+      left.colorIndex - right.colorIndex,
+  );
+
+  const residualPixels = pixels.filter((pixel) => !coveredKeys.has(pixelKey(pixel)));
+  const estimatedRuntimeSavedMs = candidates.reduce(
+    (total, candidate) => total + candidate.estimatedRuntimeSavedMs,
+    0,
+  );
+
+  stats.appliedRegionCount += candidates.length;
+  stats.filledPixelCount += candidates.reduce((total, candidate) => total + candidate.filledPixelCount, 0);
+  stats.outlinePixelCount += candidates.reduce((total, candidate) => total + candidate.outlinePixels.length, 0);
+  stats.fillSeedCount += candidates.reduce((total, candidate) => total + candidate.fillSeeds.length, 0);
+  stats.estimatedRuntimeSavedMs += estimatedRuntimeSavedMs;
+
+  return {
+    candidates,
+    residualPixels,
+    estimatedRuntimeSavedMs,
+  };
+}
+
+function createFillPlansByColor(
+  pixelsByColor: Map<number, Pixel[]>,
+  profile: DrawingProfile,
+  stats: FillOptimizationStats,
+): Map<number, FillPlanForColor> {
+  if (!stats.enabled) {
+    return new Map();
+  }
+
+  const plans = new Map<number, FillPlanForColor>();
+
+  for (const [colorIndex, pixels] of pixelsByColor) {
+    const plan = createFillPlanForColor(pixels, profile, stats.minReturnRatio, stats);
+
+    if (plan) {
+      plans.set(colorIndex, plan);
+    }
+  }
+
+  return plans;
+}
+
 function getNearestNeighborPixels(
   pixels: Pixel[],
   current: { x: number; y: number },
@@ -491,6 +696,17 @@ function getOrderedPixelsForColor(
 ): Pixel[] {
   const pixels = pixelsByColor.get(colorIndex);
   if (!pixels || pixels.length === 0) return [];
+
+  return getOrderedPixelsForPixelList(pixels, current, scoring, pathStrategy);
+}
+
+function getOrderedPixelsForPixelList(
+  pixels: Pixel[],
+  current: { x: number; y: number },
+  scoring: RouteScoringContext,
+  pathStrategy: PathStrategy,
+): Pixel[] {
+  if (pixels.length === 0) return [];
 
   if (pathStrategy === "nearest") {
     return getNearestNeighborPixelsByComponents(pixels, current, scoring);
@@ -691,6 +907,28 @@ function createRecenterStats(options: ScanlinePlanningOptions): RecenterStats {
   };
 }
 
+function normalizeFillMinReturnRatio(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_FILL_MIN_RETURN_RATIO;
+  }
+
+  return Math.max(1, Math.min(20, value ?? DEFAULT_FILL_MIN_RETURN_RATIO));
+}
+
+function createFillOptimizationStats(options: ScanlinePlanningOptions): FillOptimizationStats {
+  return {
+    enabled: options.optimizeFillRegions === true,
+    minReturnRatio: normalizeFillMinReturnRatio(options.fillMinReturnRatio),
+    candidateRegionCount: 0,
+    appliedRegionCount: 0,
+    filledPixelCount: 0,
+    outlinePixelCount: 0,
+    fillSeedCount: 0,
+    estimatedRuntimeSavedMs: 0,
+    maxReturnRatio: 0,
+  };
+}
+
 function recenterOptionsFromStats(recenterStats: RecenterStats): RecenterTransitionOptions {
   return {
     mode: recenterStats.mode,
@@ -727,6 +965,8 @@ function normalizePlanningOptions(
       recenterSafetyMarginSteps: DEFAULT_RECENTER_SAFETY_MARGIN_STEPS,
       recenterAwareRouting: false,
       optimizeColorBatches: false,
+      optimizeFillRegions: false,
+      fillMinReturnRatio: DEFAULT_FILL_MIN_RETURN_RATIO,
     };
   }
 
@@ -738,6 +978,8 @@ function normalizePlanningOptions(
       options?.recenterSafetyMarginSteps ?? DEFAULT_RECENTER_SAFETY_MARGIN_STEPS,
     recenterAwareRouting: options?.recenterAwareRouting ?? true,
     optimizeColorBatches: options?.optimizeColorBatches ?? false,
+    optimizeFillRegions: options?.optimizeFillRegions ?? false,
+    fillMinReturnRatio: normalizeFillMinReturnRatio(options?.fillMinReturnRatio),
   };
 }
 
@@ -1005,6 +1247,26 @@ function orderPaletteColors(
   }
 
   return orderColorsByAnchorCost(colors, current, pixelsByColor, scoring);
+}
+
+function prioritizeFillOptimizedColors(
+  colors: UsedPaletteColor[],
+  fillPlansByColor: Map<number, FillPlanForColor>,
+): UsedPaletteColor[] {
+  if (fillPlansByColor.size === 0) {
+    return colors;
+  }
+
+  return [...colors].sort((left, right) => {
+    const leftSaved = fillPlansByColor.get(left.colorIndex)?.estimatedRuntimeSavedMs ?? 0;
+    const rightSaved = fillPlansByColor.get(right.colorIndex)?.estimatedRuntimeSavedMs ?? 0;
+
+    if (leftSaved !== rightSaved) {
+      return rightSaved - leftSaved;
+    }
+
+    return left.colorIndex - right.colorIndex;
+  });
 }
 
 function getColorBatchSlotOrder(colorCount: number, optimizeColorBatches: boolean): number[] {
@@ -1683,6 +1945,171 @@ function appendResumeSegment(
   return nextPosition;
 }
 
+function appendFillSeedCommands(
+  commands: DrawCommand[],
+  seeds: Pixel[],
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+  grid: BrushGrid,
+  recenterStats: RecenterStats,
+  scoring: RouteScoringContext,
+): { x: number; y: number } {
+  let currentPosition = current;
+  const orderedSeeds = getNearestNeighborPixels(seeds, currentPosition, scoring);
+
+  for (const seed of orderedSeeds) {
+    appendMoveTo(commands, currentPosition, seed, profile, grid, recenterStats);
+    commands.push(drawCommand(profile.drawButton));
+    currentPosition = toCanvasPosition(seed, grid);
+  }
+
+  return currentPosition;
+}
+
+function withBrushToolResumePrefix(
+  commands: DrawCommand[],
+  includeBrushToolResumePrefix: boolean,
+): DrawCommand[] {
+  return includeBrushToolResumePrefix ? [...commands, toolFastCommand("brush")] : commands;
+}
+
+function appendFillRegionSegment(
+  commands: DrawCommand[],
+  resumeSegments: ResumeSegment[],
+  candidate: FillRegionCandidate,
+  current: { x: number; y: number },
+  profile: DrawingProfile,
+  grid: BrushGrid,
+  scoring: RouteScoringContext,
+  recenterStats: RecenterStats,
+  meta: {
+    segmentIndex: number;
+    slotIndex: number | null;
+    resumePrefixCommands: DrawCommand[];
+  },
+): { x: number; y: number } {
+  const orderedOutlinePixels = getOrderedPixelsForPixelList(
+    candidate.outlinePixels,
+    current,
+    scoring,
+    "nearest",
+  );
+  const firstPixel = orderedOutlinePixels[0];
+
+  if (!firstPixel) {
+    return current;
+  }
+
+  const firstCanvasPosition = toCanvasPosition(firstPixel, grid);
+  const segmentStartCommandIndex = commands.length;
+  let nextPosition = appendOrderedPixels(
+    commands,
+    orderedOutlinePixels,
+    current,
+    profile,
+    grid,
+    recenterStats,
+  );
+  commands.push(toolFastCommand("fill"));
+  nextPosition = appendFillSeedCommands(
+    commands,
+    candidate.fillSeeds,
+    nextPosition,
+    profile,
+    grid,
+    recenterStats,
+    scoring,
+  );
+  commands.push(toolFastCommand("brush"));
+  const bodyStartCommandIndex = findFirstDrawCommandIndex(commands, segmentStartCommandIndex);
+  const baseLabel = buildResumeLabel(profile, meta.segmentIndex, candidate.colorHex, meta.slotIndex);
+
+  resumeSegments.push({
+    segmentIndex: meta.segmentIndex,
+    label: `${baseLabel} · 填充`,
+    colorHex: candidate.colorHex,
+    slotIndex: meta.slotIndex,
+    resumePrefixCommands: serializeCommands(withBrushToolResumePrefix(meta.resumePrefixCommands, true)),
+    firstCanvasPosition,
+    bodyStartCommandIndex,
+    commandEndExclusive: commands.length,
+  });
+
+  return nextPosition;
+}
+
+function appendPlannedColorSegments(input: {
+  commands: DrawCommand[];
+  resumeSegments: ResumeSegment[];
+  pixels: Pixel[];
+  fillPlan: FillPlanForColor | null;
+  current: { x: number; y: number };
+  profile: DrawingProfile;
+  grid: BrushGrid;
+  scoring: RouteScoringContext;
+  pathStrategy: PathStrategy;
+  recenterStats: RecenterStats;
+  segmentIndex: number;
+  colorHex: string | null;
+  slotIndex: number | null;
+  resumePrefixCommands: DrawCommand[];
+  includeBrushToolResumePrefix: boolean;
+}): { current: { x: number; y: number }; segmentIndex: number } {
+  let current = input.current;
+  let segmentIndex = input.segmentIndex;
+
+  for (const candidate of input.fillPlan?.candidates ?? []) {
+    current = appendFillRegionSegment(
+      input.commands,
+      input.resumeSegments,
+      candidate,
+      current,
+      input.profile,
+      input.grid,
+      input.scoring,
+      input.recenterStats,
+      {
+        segmentIndex,
+        slotIndex: input.slotIndex,
+        resumePrefixCommands: input.resumePrefixCommands,
+      },
+    );
+    segmentIndex += 1;
+  }
+
+  const residualPixels = input.fillPlan ? input.fillPlan.residualPixels : input.pixels;
+  const orderedPixels = getOrderedPixelsForPixelList(
+    residualPixels,
+    current,
+    input.scoring,
+    input.pathStrategy,
+  );
+
+  if (orderedPixels.length > 0) {
+    current = appendResumeSegment(
+      input.commands,
+      input.resumeSegments,
+      orderedPixels,
+      current,
+      input.profile,
+      input.grid,
+      input.recenterStats,
+      {
+        segmentIndex,
+        colorHex: input.colorHex ?? orderedPixels[0]?.colorHex ?? null,
+        slotIndex: input.slotIndex,
+        resumePrefixCommands: withBrushToolResumePrefix(
+          input.resumePrefixCommands,
+          input.includeBrushToolResumePrefix,
+        ),
+      },
+    );
+    segmentIndex += 1;
+  }
+
+  return { current, segmentIndex };
+}
+
 export function generateScanlinePlan(
   pixelMap: PixelMap,
   profile: DrawingProfile,
@@ -1726,6 +2153,9 @@ export function generateScanlinePlan(
 
   // Pre-group pixels by color to avoid repeated full-map scans
   const pixelsByColor = groupPixelsByColor(pixelMap);
+  const fillStats = createFillOptimizationStats(planningOptions);
+  const fillPlansByColor = createFillPlansByColor(pixelsByColor, profile, fillStats);
+  const includeBrushToolResumePrefix = fillPlansByColor.size > 0;
 
   if (profile.colorMode === "mono") {
     const usedColorIndexes = [profile.startColorIndex];
@@ -1737,33 +2167,30 @@ export function generateScanlinePlan(
         selectedColor = colorIndex;
       }
 
-      const orderedPixels = getOrderedPixelsForColor(
-        pixelsByColor,
-        colorIndex,
-        current,
-        scoring,
-        planningOptions.pathStrategy,
-      );
-      current = appendResumeSegment(
+      const colorPixels = pixelsByColor.get(colorIndex) ?? [];
+      const result = appendPlannedColorSegments({
         commands,
         resumeSegments,
-        orderedPixels,
+        pixels: colorPixels,
+        fillPlan: fillPlansByColor.get(colorIndex) ?? null,
         current,
         profile,
         grid,
+        scoring,
+        pathStrategy: planningOptions.pathStrategy,
         recenterStats,
-        {
-          segmentIndex,
-          colorHex: orderedPixels[0]?.colorHex ?? null,
-          slotIndex: null,
-          resumePrefixCommands: profile.startColorIndex === 0 ? [] : [colorCommand(profile.startColorIndex)],
-        },
-      );
-      segmentIndex += 1;
+        segmentIndex,
+        colorHex: colorPixels[0]?.colorHex ?? null,
+        slotIndex: null,
+        resumePrefixCommands: profile.startColorIndex === 0 ? [] : [colorCommand(profile.startColorIndex)],
+        includeBrushToolResumePrefix,
+      });
+      current = result.current;
+      segmentIndex = result.segmentIndex;
     }
   } else if (profile.colorMode === "palette") {
     const usedColors = getUsedPaletteColors(pixelMap);
-    const orderedColors = planningOptions.optimizeColorBatches
+    const travelOrderedColors = planningOptions.optimizeColorBatches
       ? orderPaletteColors(
           usedColors,
           current,
@@ -1772,6 +2199,10 @@ export function generateScanlinePlan(
           planningOptions.pathStrategy,
         )
       : usedColors;
+    const orderedColors =
+      planningOptions.optimizeFillRegions === true
+        ? prioritizeFillOptimizedColors(travelOrderedColors, fillPlansByColor)
+        : travelOrderedColors;
 
     for (let batchStart = 0; batchStart < orderedColors.length; batchStart += PALETTE_SLOT_COUNT) {
       const batch = planPaletteColorBatch(
@@ -1784,9 +2215,11 @@ export function generateScanlinePlan(
       commands.push(...batch.map((color) => color.configCommand));
 
       const workUnits = createPaletteWorkUnits(batch, pixelsByColor);
+      const batchHasFillPlans = batch.some((color) => fillPlansByColor.has(color.colorIndex));
 
       if (
         planningOptions.optimizeColorBatches === true &&
+        !batchHasFillPlans &&
         shouldTryPaletteWorkUnitInterleaving(workUnits)
       ) {
         const orderedWorkUnits = orderPaletteWorkUnits(
@@ -1833,10 +2266,13 @@ export function generateScanlinePlan(
                 segmentIndex,
                 colorHex: unit.colorHex,
                 slotIndex: unit.slotIndex,
-                resumePrefixCommands: [
-                  ...getNeededPaletteConfigCommands(batch, orderedWorkUnits, unitIndex),
-                  colorCommand(unit.slotIndex),
-                ],
+                resumePrefixCommands: withBrushToolResumePrefix(
+                  [
+                    ...getNeededPaletteConfigCommands(batch, orderedWorkUnits, unitIndex),
+                    colorCommand(unit.slotIndex),
+                  ],
+                  includeBrushToolResumePrefix,
+                ),
               },
             );
             segmentIndex += 1;
@@ -1857,37 +2293,34 @@ export function generateScanlinePlan(
           selectedSlot = color.slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(
-          pixelsByColor,
-          color.colorIndex,
-          current,
-          scoring,
-          planningOptions.pathStrategy,
-        );
-        current = appendResumeSegment(
+        const colorPixels = pixelsByColor.get(color.colorIndex) ?? [];
+        const result = appendPlannedColorSegments({
           commands,
           resumeSegments,
-          orderedPixels,
+          pixels: colorPixels,
+          fillPlan: fillPlansByColor.get(color.colorIndex) ?? null,
           current,
           profile,
           grid,
+          scoring,
+          pathStrategy: planningOptions.pathStrategy,
           recenterStats,
-          {
-            segmentIndex,
-            colorHex: color.colorHex,
-            slotIndex: color.slotIndex,
-            resumePrefixCommands: [
-              ...getRemainingPaletteConfigCommands(batch, batchIndex),
-              colorCommand(color.slotIndex),
-            ],
-          },
-        );
-        segmentIndex += 1;
+          segmentIndex,
+          colorHex: color.colorHex,
+          slotIndex: color.slotIndex,
+          resumePrefixCommands: [
+            ...getRemainingPaletteConfigCommands(batch, batchIndex),
+            colorCommand(color.slotIndex),
+          ],
+          includeBrushToolResumePrefix,
+        });
+        current = result.current;
+        segmentIndex = result.segmentIndex;
       }
     }
   } else {
     const usedColors = getUsedPaletteColors(pixelMap);
-    const orderedColors = planningOptions.optimizeColorBatches
+    const travelOrderedColors = planningOptions.optimizeColorBatches
       ? orderPaletteColors(
           usedColors,
           current,
@@ -1896,6 +2329,10 @@ export function generateScanlinePlan(
           planningOptions.pathStrategy,
         )
       : usedColors;
+    const orderedColors =
+      planningOptions.optimizeFillRegions === true
+        ? prioritizeFillOptimizedColors(travelOrderedColors, fillPlansByColor)
+        : travelOrderedColors;
     let didResetOfficialPaletteState = false;
 
     for (let batchStart = 0; batchStart < orderedColors.length; batchStart += PALETTE_SLOT_COUNT) {
@@ -1917,9 +2354,11 @@ export function generateScanlinePlan(
       commands.push(...batch.map((color) => color.configCommand));
 
       const workUnits = createPaletteWorkUnits(batch, pixelsByColor);
+      const batchHasFillPlans = batch.some((color) => fillPlansByColor.has(color.colorIndex));
 
       if (
         planningOptions.optimizeColorBatches === true &&
+        !batchHasFillPlans &&
         shouldTryPaletteWorkUnitInterleaving(workUnits)
       ) {
         const orderedWorkUnits = orderPaletteWorkUnits(
@@ -1966,11 +2405,14 @@ export function generateScanlinePlan(
                 segmentIndex,
                 colorHex: unit.colorHex,
                 slotIndex: unit.slotIndex,
-                resumePrefixCommands: [
-                  basicPaletteResetCommand(),
-                  ...getNeededPaletteConfigCommands(batch, orderedWorkUnits, unitIndex),
-                  colorCommand(unit.slotIndex),
-                ],
+                resumePrefixCommands: withBrushToolResumePrefix(
+                  [
+                    basicPaletteResetCommand(),
+                    ...getNeededPaletteConfigCommands(batch, orderedWorkUnits, unitIndex),
+                    colorCommand(unit.slotIndex),
+                  ],
+                  includeBrushToolResumePrefix,
+                ),
               },
             );
             segmentIndex += 1;
@@ -1991,33 +2433,30 @@ export function generateScanlinePlan(
           selectedSlot = color.slotIndex;
         }
 
-        const orderedPixels = getOrderedPixelsForColor(
-          pixelsByColor,
-          color.colorIndex,
-          current,
-          scoring,
-          planningOptions.pathStrategy,
-        );
-        current = appendResumeSegment(
+        const colorPixels = pixelsByColor.get(color.colorIndex) ?? [];
+        const result = appendPlannedColorSegments({
           commands,
           resumeSegments,
-          orderedPixels,
+          pixels: colorPixels,
+          fillPlan: fillPlansByColor.get(color.colorIndex) ?? null,
           current,
           profile,
           grid,
+          scoring,
+          pathStrategy: planningOptions.pathStrategy,
           recenterStats,
-          {
-            segmentIndex,
-            colorHex: color.colorHex,
-            slotIndex: color.slotIndex,
-            resumePrefixCommands: [
-              basicPaletteResetCommand(),
-              ...getRemainingPaletteConfigCommands(batch, batchIndex),
-              colorCommand(color.slotIndex),
-            ],
-          },
-        );
-        segmentIndex += 1;
+          segmentIndex,
+          colorHex: color.colorHex,
+          slotIndex: color.slotIndex,
+          resumePrefixCommands: [
+            basicPaletteResetCommand(),
+            ...getRemainingPaletteConfigCommands(batch, batchIndex),
+            colorCommand(color.slotIndex),
+          ],
+          includeBrushToolResumePrefix,
+        });
+        current = result.current;
+        segmentIndex = result.segmentIndex;
       }
     }
   }
@@ -2026,6 +2465,7 @@ export function generateScanlinePlan(
   return {
     commands,
     recenterStats,
+    fillStats,
     resumePlan: {
       inputConfigCommand: serializeCommand(inputConfig),
       initialCursor,

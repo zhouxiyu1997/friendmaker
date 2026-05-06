@@ -10,6 +10,7 @@ import {
   calculateRuntimeBreakdown,
   estimateRuntimeMs,
   generateScanlinePlan,
+  type FillOptimizationStats,
   type PathStrategy,
   type RecenterStats,
   type ScanlinePlanningOptions,
@@ -56,6 +57,7 @@ export interface DrawPlan {
   pathStats: DrawPlanPathStats;
   componentStats: PixelMapComponentStats;
   recenterStats: RecenterStats;
+  fillStats: FillOptimizationStats;
   noiseCleanupStats: NoiseCleanupStats;
 }
 
@@ -74,6 +76,8 @@ export async function generateDrawPlan(
     enableRecenterShortcut?: boolean;
     recenterHoldMs?: number;
     enableColorBatchOptimization?: boolean;
+    enableFillOptimization?: boolean;
+    fillMinReturnRatio?: number;
   },
 ): Promise<DrawPlan> {
   const { pixelMap, usedColorIndexes, noiseCleanupStats } = await pixelizeImage(imageSource, profile, options);
@@ -83,6 +87,10 @@ export async function generateDrawPlan(
     recenterMode: options?.enableRecenterShortcut === true ? "left-hold" : "off",
     ...(typeof options?.recenterHoldMs === "number" ? { recenterHoldMs: options.recenterHoldMs } : {}),
     optimizeColorBatches: options?.enableColorBatchOptimization === true,
+    optimizeFillRegions: options?.enableFillOptimization === true,
+    ...(typeof options?.fillMinReturnRatio === "number"
+      ? { fillMinReturnRatio: options.fillMinReturnRatio }
+      : {}),
   };
   const scanlinePlan = generateScanlinePlan(pixelMap, profile, scanlineOptions);
   const drawCommands = scanlinePlan.commands;
@@ -111,6 +119,7 @@ export async function generateDrawPlan(
     pathStats,
     componentStats,
     recenterStats: scanlinePlan.recenterStats,
+    fillStats: scanlinePlan.fillStats,
     noiseCleanupStats,
   };
 }

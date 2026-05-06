@@ -1,5 +1,7 @@
 import type { ControllerButton } from "../types.js";
 
+export type DrawingActionTool = "brush" | "fill";
+
 export type DrawCommand =
   | { type: "inputConfig"; buttonPressMs: number; inputDelayMs: number; homeMs: number }
   | { type: "home" }
@@ -10,6 +12,7 @@ export type DrawCommand =
   | { type: "hold"; button: ControllerButton; ms: number }
   | { type: "color"; index: number }
   | { type: "colorFast"; index: number }
+  | { type: "toolFast"; tool: DrawingActionTool }
   | { type: "basicPaletteReset" }
   | { type: "paletteConfig"; slot: number; colorHex: string }
   | { type: "basicPaletteConfig"; slot: number; row: number; col: number }
@@ -56,6 +59,10 @@ export function colorCommand(index: number): DrawCommand {
 
 export function colorFastCommand(index: number): DrawCommand {
   return { type: "colorFast", index };
+}
+
+export function toolFastCommand(tool: DrawingActionTool): DrawCommand {
+  return { type: "toolFast", tool };
 }
 
 export function basicPaletteResetCommand(): DrawCommand {

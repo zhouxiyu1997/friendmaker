@@ -98,6 +98,10 @@ bool pressPaletteMenuButton(ControllerTransport &transport, ControllerButton but
       button, COLOR_PALETTE_MENU_PRESS_DURATION_MS, COLOR_PALETTE_MENU_INPUT_DELAY_MS);
 }
 
+bool pressToolMenuButton(ControllerTransport &transport, ControllerButton button) {
+  return transport.pressButton(button, TOOL_MENU_PRESS_DURATION_MS, TOOL_MENU_INPUT_DELAY_MS);
+}
+
 }  // namespace
 
 SwitchController::SwitchController(ControllerTransport &transport) : transport_(transport) {}
@@ -192,6 +196,10 @@ bool SwitchController::drawLine(int dx, int dy) {
 
 bool SwitchController::pressButton(ControllerButton button) {
   waitUntilReady();
+  if (button == ControllerButton::X) {
+    toolTrackingReady_ = false;
+  }
+
   return transport_.pressButton(button, buttonPressMs_, inputDelayMs_);
 }
 
@@ -296,6 +304,42 @@ bool SwitchController::selectColorFast(int index) {
   delay(inputDelayMs_);
   currentPaletteSlot_ = slotIndex;
   paletteSlotTrackingReady_ = true;
+  return true;
+}
+
+bool SwitchController::selectToolFast(DrawingToolSelection tool) {
+  waitUntilReady();
+
+  if (toolTrackingReady_ && currentTool_ == tool) {
+    return true;
+  }
+
+  const int currentIndex =
+      currentTool_ == DrawingToolSelection::Fill ? 0 : 1;
+  const int targetIndex = tool == DrawingToolSelection::Fill ? 0 : 1;
+  const int delta = targetIndex - currentIndex;
+  const ControllerButton directionButton =
+      delta < 0 ? ControllerButton::DpadLeft : ControllerButton::DpadRight;
+  toolTrackingReady_ = false;
+
+  if (!transport_.pressButton(ControllerButton::X, buttonPressMs_, inputDelayMs_)) {
+    return false;
+  }
+  delay(TOOL_MENU_OPEN_SETTLE_MS);
+
+  for (int step = 0; step < abs(delta); step += 1) {
+    if (!pressToolMenuButton(transport_, directionButton)) {
+      return false;
+    }
+  }
+
+  if (!pressToolMenuButton(transport_, ControllerButton::A)) {
+    return false;
+  }
+
+  currentTool_ = tool;
+  toolTrackingReady_ = true;
+  delay(inputDelayMs_);
   return true;
 }
 

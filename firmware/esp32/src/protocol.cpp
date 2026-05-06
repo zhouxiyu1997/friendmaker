@@ -144,6 +144,32 @@ bool parseBasicColorConfigCommand(const String &line, int &slotIndex, int &row, 
 
 bool isBasicColorResetCommand(const String &line) { return line == "BC RESET"; }
 
+bool parseToolFastCommand(const String &line, DrawingToolSelection &tool) {
+  if (!line.startsWith("TF ")) {
+    return false;
+  }
+
+  String token = line.substring(3);
+  token.trim();
+  token.toUpperCase();
+
+  if (token == "BRUSH") {
+    tool = DrawingToolSelection::Brush;
+    return true;
+  }
+
+  if (token == "FILL") {
+    tool = DrawingToolSelection::Fill;
+    return true;
+  }
+
+  return false;
+}
+
+const char *drawingToolName(DrawingToolSelection tool) {
+  return tool == DrawingToolSelection::Fill ? "FILL" : "BRUSH";
+}
+
 bool parseStickCommand(const String &line, int &x, int &y, uint16_t &holdMs) {
   if (!line.startsWith("STICK ")) {
     return false;
@@ -629,6 +655,21 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     }
     Serial.printf("INFO action=color-fast slot=%d\n", index);
     return true;
+  }
+
+  DrawingToolSelection tool = DrawingToolSelection::Brush;
+
+  if (parseToolFastCommand(line, tool)) {
+    if (!controller.selectToolFast(tool)) {
+      return failControllerInput(error);
+    }
+    Serial.printf("INFO action=tool-fast name=%s\n", drawingToolName(tool));
+    return true;
+  }
+
+  if (line.startsWith("TF ")) {
+    error = "invalid fast tool";
+    return false;
   }
 
   if (line.startsWith("C ")) {

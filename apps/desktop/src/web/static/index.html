@@ -375,6 +375,32 @@
                 </span>
               </label>
 
+              <label class="checkbox-card" for="fill-optimization-checkbox">
+                <input id="fill-optimization-checkbox" type="checkbox" />
+                <span class="checkbox-copy">
+                  <strong>实验：高收益封闭区填充</strong>
+                  <small>先画封闭外轮廓，再切到填充工具补内部；只在收益达到阈值时启用，默认关闭。</small>
+                </span>
+              </label>
+
+              <label class="preview-select-card fill-threshold-card">
+                <span>填充收益阈值</span>
+                <input id="fill-return-ratio-range" type="range" min="2" max="8" step="0.5" value="4" />
+                <span class="range-number-group">
+                  <input
+                    id="fill-return-ratio-input"
+                    class="range-number-input"
+                    type="number"
+                    min="2"
+                    max="8"
+                    step="0.5"
+                    value="4"
+                  />
+                  <span class="range-unit">x</span>
+                </span>
+                <small>默认 4x：小面积或收益不够高时继续逐像素绘制。</small>
+              </label>
+
               <label class="preview-select-card">
                 <span>辅助线</span>
                 <select id="preview-guide-select">

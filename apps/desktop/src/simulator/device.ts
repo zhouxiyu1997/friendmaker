@@ -61,6 +61,7 @@ interface SimulatedDeviceState {
   x: number;
   y: number;
   colorIndex: number;
+  tool: "brush" | "fill";
   drawCount: number;
   paused: boolean;
   ended: boolean;
@@ -81,6 +82,7 @@ export class SimulatedDevice {
     x: 0,
     y: 0,
     colorIndex: 0,
+    tool: "brush",
     drawCount: 0,
     paused: false,
     ended: false,
@@ -218,7 +220,7 @@ export class SimulatedDevice {
 
     if (trimmed === "I") {
       lines.push(
-        `INFO transport=${this.transportName} x=${this.state.x} y=${this.state.y} color=${this.state.colorIndex} draws=${this.state.drawCount}`,
+        `INFO transport=${this.transportName} x=${this.state.x} y=${this.state.y} color=${this.state.colorIndex} tool=${this.state.tool} draws=${this.state.drawCount}`,
       );
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
@@ -310,6 +312,19 @@ export class SimulatedDevice {
       }
 
       this.state.colorIndex = colorIndex;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
+    if (trimmed.startsWith("TF ")) {
+      const tool = trimmed.slice(3).trim().toLowerCase();
+
+      if (tool !== "brush" && tool !== "fill") {
+        await delay(options.ackDelayMs);
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid fast tool"), lines);
+      }
+
+      this.state.tool = tool;
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }

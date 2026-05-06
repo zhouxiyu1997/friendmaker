@@ -5,6 +5,11 @@
 #include "config.h"
 #include "controller_transport.h"
 
+enum class DrawingToolSelection : uint8_t {
+  Fill = 0,
+  Brush = 1,
+};
+
 class SwitchController {
  public:
   explicit SwitchController(ControllerTransport &transport);
@@ -22,6 +27,7 @@ class SwitchController {
   bool pressButtons(uint32_t buttonsMask);
   bool selectColor(int index);
   bool selectColorFast(int index);
+  bool selectToolFast(DrawingToolSelection tool);
   void resetBasicPaletteTracking();
   bool configurePaletteSlot(int index, uint8_t red, uint8_t green, uint8_t blue);
   bool configureBasicPaletteSlot(int index, uint8_t row, uint8_t col);
@@ -42,6 +48,8 @@ class SwitchController {
   bool basicPaletteTrackingReady_ = false;
   int currentPaletteSlot_ = 0;
   bool paletteSlotTrackingReady_ = false;
+  DrawingToolSelection currentTool_ = DrawingToolSelection::Brush;
+  bool toolTrackingReady_ = true;
   uint16_t buttonPressMs_ = BUTTON_PRESS_DURATION_MS;
   uint16_t inputDelayMs_ = INPUT_DELAY_MS;
   uint16_t homeMs_ = HOME_DURATION_MS;
