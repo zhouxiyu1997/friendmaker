@@ -2,7 +2,16 @@
 
 [简体中文](../arrival-checklist.md)
 
-Use this checklist when your `ESP32-WROOM-32 / ESP-32S` board arrives.
+This is an internal developer bring-up / smoke-test checklist, not the main public user flow.
+
+Its goal is to use the `Mac + CLI + serial monitor` path to prove a few low-level facts first when a board arrives:
+
+- serial connectivity is working
+- firmware can be compiled and flashed
+- the ACK protocol path is working
+- the `Bluetooth Classic HID` transport layer has started
+
+If you only want the public user flow, start with [Quick Start](user-trial-guide.md).
 
 ## Path note
 
@@ -30,7 +39,7 @@ pio device monitor -b 115200
 
 Notes:
 
-- the first build is slower than before because `esp32dev_wireless` now uses `Arduino + ESP-IDF`
+- the first build is slower than before because `esp32dev_wireless` uses `Arduino + ESP-IDF`
 - this is required so the firmware can link the `Bluetooth Classic HID` stack
 
 If your specific clone behaves more like a `NodeMCU-32S` during upload, switch to:
@@ -95,5 +104,14 @@ It still does not prove by itself:
 
 - that the board can already pair stably with `Switch`
 - that the current report format and pairing behavior are fully good enough on real hardware
+- that the packaged desktop workflow, driver helpers, recovery sessions, or drawing-template flow are all already healthy
 
 The current firmware still exposes a generic gamepad HID skeleton. Real `Switch` pairing behavior and report timing still need real-device validation.
+
+## 7. What to do next after this passes
+
+If this internal checklist is already passing, the next step is to return to the formal workflow:
+
+1. open the packaged desktop app, or run `npm run ui:dev`
+2. continue with `Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> Script Studio`
+3. if low-level bring-up already passes but the desktop workflow still fails, investigate `PlatformIO` preparation, resource paths, driver-helper entry points, or page-side integration first

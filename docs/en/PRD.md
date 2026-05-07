@@ -3,16 +3,16 @@
 [简体中文](../PRD.md)
 
 Version: v0.2
-Status: Active Alpha
-Updated: 2026-04-29
+Status: Alpha trial
+Updated: 2026-05-07
 
 ## 1. Product overview
 
-`Friend Maker` is an automatic drawing tool built around `macOS / Windows + ESP32-WROOM-32 / ESP-32S + Nintendo Switch`.
+`Friend Maker` is an automatic drawing tool built around `macOS / Windows x64 + ESP32-WROOM-32 / ESP-32S + Nintendo Switch`.
 
 The user imports an image on the computer, adjusts drawing parameters, and generates an action script. An ESP32 then emulates a `Bluetooth Classic` Switch Pro Controller and draws the image onto the `Tomodachi Life` canvas in a stable and repeatable way.
 
-The current version is no longer just a script-generation prototype. It is now a usable local web workspace with these four main stages:
+The current version is no longer just a script-generation prototype. It is now a packaged desktop application that embeds the same local web workspace, while still keeping the repo-based workflow as a development, debugging, and protocol-validation entry path. The mainline workflow is still organized around these four pages:
 
 - `Script Studio`
 - `Firmware Flash`
@@ -27,9 +27,9 @@ The current product still follows three guiding principles:
 
 ## 2. One-line summary of the current version
 
-As of `2026-04-29`, the repository already supports one testable closed loop:
+As of `2026-05-07`, the repository already supports one testable closed loop:
 
-`Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> Script Studio -> serial ACK transport -> ESP32 Bluetooth controller output -> Switch canvas drawing`
+`Packaged desktop app / repo-based workflow -> Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> Script Studio -> serial ACK transport -> ESP32 Bluetooth controller output -> Switch canvas drawing`
 
 The recommended first-run order is fixed as:
 
@@ -70,25 +70,37 @@ The current goal is not to solve fully automatic, high-fidelity multicolor drawi
 
 ### 5.1 Product goals
 
-- complete the four-page web UI workflow
-- let flashing, connection testing, and drawing all happen inside one local system
+- connect the packaged desktop entry, repo-based workflow, and the four-page web workflow into one coherent local system
+- let flashing, connection testing, timing tuning, and drawing all happen inside one local toolchain
 - move `mono drawing`, `official palette drawing`, and `custom multicolor` into a state that is testable, repeatable, and debuggable
 
 ### 5.2 Success criteria for the current alpha
 
 The current alpha should satisfy at least the following:
 
-- users can import `PNG / JPG / SVG`
-- users can view previews, statistics, and actual command scripts
-- users can flash ESP32 firmware through local `PlatformIO` from the web UI
-- users can connect the controller, reset Bluetooth, and run button/stick tests from the web UI
-- users can tune `inputDelay / buttonPressDuration` and run loopback timing tests from the web UI
+- users can launch the packaged desktop app on `macOS` or `Windows x64`, or start the local workspace through the repo workflow
+- users can enter the `Script Studio / Firmware Flash / Controller Test / Timing Tune / Benchmark` pages normally
+- users can import `PNG / JPG / SVG` and inspect previews, statistics, and actual command scripts
+- users can flash ESP32 firmware through local `PlatformIO` from the page
+- users can connect the controller, reset Bluetooth, and run button / stick tests from the page
+- users can tune `inputDelay / buttonPressDuration` and run loopback timing tests from the page
 - users can send scripts over serial in `ACK` mode and observe the process in logs
 - users can finish mono, official-palette, or custom-multicolor drawing under the current fixed assumptions
+- users can see persisted recovery sessions and resume unfinished drawings
+- users can choose a drawing template and see its effect in both preview generation and final command generation
 
 ## 6. Capabilities already completed
 
-### 6.1 Script Studio
+### 6.1 Desktop app and runtime
+
+- `Electron` desktop shell is already in place
+- packaged build paths already exist for `macOS` (`dmg` / `zip`)
+- packaged build path already exists for `Windows x64` (`nsis`)
+- the repo-based workflow is still available for development, debugging, and protocol validation
+- packaged builds include firmware resources, app icons, and bundled `Windows` driver resources
+- the packaged runtime copies firmware into a writable directory before handing it to `PlatformIO`
+
+### 6.2 Script Studio
 
 - fixed `256x256` script-coordinate canvas
 - six brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
@@ -99,22 +111,23 @@ The current alpha should satisfy at least the following:
 - custom-multicolor quantization levels: `8 / 9 / 16 / 18 / 24 / 32 / 64 / 84 / 128`
 - image scale and X/Y offset
 - automatic background removal
-- preview guides
+- drawing templates, template previews, and template category selection
 - official palette preview and used-color highlighting
 - copy, download, and execute command scripts
 - one-click drawing start
 - pause / resume / stop / forced recovery-state reset
 - fixed-height scrolling execution log
 
-### 6.2 Firmware Flash page
+### 6.3 Firmware Flash page
 
 - automatic local `PlatformIO` detection
 - firmware environment and serial-port selection
-- direct compile-and-flash flow inside the web UI
+- direct compile-and-flash flow inside the page
 - result cards for flash outcomes
 - full flash logs
+- `Windows` driver helper entry points
 
-### 6.3 Controller Test page
+### 6.4 Controller Test page
 
 - refresh serial ports
 - connect controller
@@ -125,7 +138,7 @@ The current alpha should satisfy at least the following:
 - display recent host, transport layer, initialization steps, and errors
 - fixed-height scrolling test log
 
-### 6.4 Timing Tune / Benchmark page
+### 6.5 Timing Tune / Benchmark page
 
 - adjust `inputDelay` and `buttonPressDuration`
 - persist timing values locally
@@ -133,31 +146,39 @@ The current alpha should satisfy at least the following:
 - loopback benchmark and result cards
 - sync timing into the final drawing script through `CFG INPUT`
 
-### 6.5 Firmware and protocol
+### 6.6 Recovery sessions and drawing templates
+
+- recovery sessions are persisted under the user's documents directory
+- paused, interrupted, or crashed runs can be reopened from saved recovery state
+- recovery records store command progress, resume plans, serial options, and preview summaries
+- drawing templates have separate definitions, categories, mask assets, and preview assets
+- template cropping directly affects both preview generation and final command generation
+
+### 6.7 Firmware and protocol
 
 - text-protocol parsing
 - serial ACK transport path
 - base commands such as `I / H / M / P / A / B / X / Y / C / W / S / R / E`
 - `BC RESET` and official-palette slot configuration commands
 - Bluetooth controller state reading
-- test commands such as `TAP` and `HOLD`
+- test commands such as `TAP`, `HOLD`, and `STICK`
 
 ## 7. Scope and non-goals
 
 ### 7.1 In-scope for the current version
 
-- platform:
-  - full test path on `macOS`
-  - manual install and manual launch on `Windows`
-- local form factor: `TypeScript CLI + Local Web UI`
+- platforms:
+  - packaged desktop app on `macOS`
+  - packaged desktop app on `Windows x64`
+  - repo-based workflow on `macOS / Windows`
+- local form factor: `Electron desktop app + embedded local web workspace + TypeScript development toolchain`
 - hardware mainline: `ESP32-WROOM-32 / ESP-32S`
 - controller path: `ESP32 Bluetooth Classic -> Switch`
 - target scene: the Switch version of the `Tomodachi Life` drawing page
 
 ### 7.2 Explicit non-goals for now
 
-- Electron desktop packaging
-- Linux validation support
+- formal `Linux` packaging and formal `Linux` support
 - automatic visual calibration
 - exact custom-color auto tuning
 - automatic recognition of arbitrary game UIs
@@ -167,21 +188,21 @@ The current alpha should satisfy at least the following:
 
 ### 8.1 First-run flow
 
-1. Launch the local web UI
+1. Launch the packaged desktop app, or start the local workspace through the repo workflow
 2. Flash the recommended firmware from `Firmware Flash`
 3. Complete Bluetooth connection and button validation in `Controller Test`
-4. Return to `Script Studio`, import an image, and adjust parameters
-5. Generate preview and commands first
-6. Start the real drawing only after the result looks correct
+4. Use `Timing Tune / Benchmark` to stabilize the current board, cable, and timing values first
+5. Return to `Script Studio`, import an image, and adjust parameters
+6. Generate preview and commands first, then start the real drawing
 
 ### 8.2 Day-to-day drawing flow
 
-1. Open the web UI
+1. Open the packaged app or local debug entry
 2. Confirm controller status quickly
 3. Import a new image
 4. Choose `mono drawing`, `official palette drawing`, or `custom multicolor`
-5. Confirm brush size, center-start assumption, and official-palette slot assumptions
-6. Start drawing and watch execution progress in the log
+5. Confirm brush size, center-start assumption, template selection, and official-palette slot assumptions
+6. Start drawing and watch progress through logs and recovery state
 
 ## 9. Technical and scene assumptions
 
@@ -202,8 +223,8 @@ These are not the final product shape. They are the current engineering boundari
 - the workflow still depends on fixed scene assumptions instead of full auto calibration
 - the official `7x12` palette is still being calibrated
 - `custom multicolor` is already available as a formal feature, but color fidelity and long-run stability still need more work
-- drawing quality is still affected by in-game brush behavior, starting position, and connection stability
-- Windows still lacks a one-click launcher
+- the desktop app still depends on successful local `PlatformIO`, toolchain, and upstream download preparation
+- packaged installation flow and error messaging still need more polish, especially on `Windows`
 
 ## 11. Milestone status
 
@@ -211,8 +232,8 @@ These are not the final product shape. They are the current engineering boundari
 
 Status: completed
 
-- the four-page local web UI structure is in place
-- documentation, test flows, and example assets are in place
+- the four-page local web workspace is in place
+- public docs, developer docs, test flows, and example assets are in place
 
 ### Phase 1: serial transport and script execution
 
@@ -221,62 +242,69 @@ Status: completed
 - image preview, command generation, and serial ACK transport are connected
 - logs and pause / resume / stop controls are connected
 
-### Phase 2: firmware flashing inside the web UI
+### Phase 2: desktop shell and bundled resources
 
 Status: completed
 
-- local `PlatformIO` can be invoked from the web UI
-- flash results and logs are visible
+- the `Electron` main-process entry is in place
+- packaged build scripts exist for `macOS` and `Windows x64`
+- packaged firmware copying, icon resources, and bundled `Windows` driver resources are in place
 
-### Phase 3: Bluetooth connection and controller testing
+### Phase 3: in-page flashing and device validation
 
 Status: completed to the usable-test stage
 
+- local `PlatformIO` can be invoked from the page
+- flash results and logs are visible
 - controller connection, state reading, and step tests are connected
-- connection stability and timing calibration still need more work
 
-### Phase 4: full drawing loop
+### Phase 4: full drawing loop and recovery capability
 
 Status: entered alpha trial
 
 - `Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> Script Studio -> Start Drawing` is now runnable
-- mono and official-palette mainline flows are both testable
+- mono, official-palette, and custom-multicolor flows are all testable
+- recovery sessions and drawing templates are part of the formal workflow
 
 ### Phase 5: later optimization stage
 
-Status: not started
+Status: ongoing
 
-- Electron packaging
 - visual calibration
 - offline execution
 - more stable color and position calibration
+- more complete packaged install, recovery, and troubleshooting UX
 
 ## 12. Acceptance criteria for the current stage
 
 The current stage should be accepted against these criteria:
 
 - `npm run check` and `npm run build` pass
-- the web UI starts normally and shows the four pages
+- the packaged desktop entry launches and opens the four-page workflow
 - `Firmware Flash` can detect `PlatformIO` and serial ports
 - `Controller Test` can show connection state and send test commands
 - `Script Studio` can generate preview, script, and execution statistics
+- recovery sessions can be written, reloaded, and resumed
+- drawing templates can be selected and reflected in both preview output and final command generation
 - during real execution, logs stay observable and commands advance through ACK
 
 ## 13. Matching implementation in the repository
 
-- Web UI service: `apps/desktop/src/web/server.ts`
-- Web UI interaction: `apps/desktop/src/web/static/app.js`
-- Web UI page: `apps/desktop/src/web/static/index.html`
+- desktop packaging and scripts: `package.json`
+- desktop main process: `apps/desktop/src/electron/main.ts`
+- web UI service: `apps/desktop/src/web/server.ts`
+- web UI interaction: `apps/desktop/src/web/static/app.js`
+- web UI page: `apps/desktop/src/web/static/index.html`
+- recovery sessions: `apps/desktop/src/web/recoverySessions.ts`
+- drawing templates: `apps/desktop/src/drawingTemplates.ts`
 - image processing: `apps/desktop/src/image/*`
 - path generation: `apps/desktop/src/path/scanline.ts`
 - serial sending: `apps/desktop/src/serial/sender.ts`
 - firmware implementation: `firmware/esp32/src/*`
-- trial guide: `user-trial-guide.md`
 
 ## 14. Priority for the next stage
 
 1. keep improving Bluetooth connection stability and long-run drawing stability
-2. keep calibrating the official `7x12` palette mapping and real-device appearance
-3. keep improving execution logs, status prompts, and failure recovery UX
-4. improve the Windows trial path and installation experience
-5. do not move into Electron packaging until stability is clearly better
+2. keep improving custom-multicolor color correction, color fidelity, and real-device appearance
+3. keep optimizing drawing paths, command execution paths, and long-run efficiency
+4. keep improving user experience, including execution logs, status prompts, recovery UX, packaged desktop install flow, and internal validation guidance

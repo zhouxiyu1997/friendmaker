@@ -4,7 +4,7 @@
 
 Built specifically for the Switch version of `Tomodachi Life`.
 
-Updated: 2026-04-29
+Updated: 2026-05-07
 Status: active development
 
 ## Author notes
@@ -18,7 +18,7 @@ Status: active development
 
 The current objective is not to complete fully automatic, high-fidelity multicolor drawing for arbitrary images in one step. The current objective is to make this real-world usage chain stable first:
 
-`Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> web image import -> serial ACK execution -> ESP32 Bluetooth controller output -> stable reproduction on the Switch drawing canvas`
+`Packaged desktop app / repo-based workflow -> Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> Script Studio -> serial ACK execution -> ESP32 Bluetooth controller output -> stable reproduction on the Switch drawing canvas`
 
 Current priorities:
 
@@ -27,36 +27,58 @@ Current priorities:
 3. keep calibrating color sources and offset assumptions
 4. only then move on to more ambitious automation
 
-## 2. Stable capabilities right now
+## 2. Current runtime shape
+
+The project currently has two real entry routes:
+
+- `Packaged desktop app`: for `macOS` and `Windows x64`
+- `Repo-based workflow`: for development, debugging, and protocol validation
+
+In the current implementation:
+
+- `apps/desktop/src/electron/main.ts` is responsible for the desktop shell, runtime path selection, local web-server startup, and main-window lifecycle
+- `package.json` already contains scripts such as `electron:dev`, `dist:mac`, and `dist:win:x64`
+- packaged builds do not run firmware directly from a read-only resource directory; they first copy `firmware/esp32` into a writable location before handing it to `PlatformIO`
+- the `Windows` package includes `drivers/windows` resources so the desktop UI can expose driver-helper entry points
+- `apps/desktop/src/web/recoverySessions.ts` is responsible for recovery-session persistence, reload, cleanup, and state conversion
+- recovery sessions are currently stored under the user's documents directory in `FriendMaker/recovery-sessions`
+- `apps/desktop/src/drawingTemplates.ts` owns drawing-template definitions, and template masks / previews are loaded from static assets
+
+So the real development shape is no longer just "CLI + webpage". It is:
+
+`Electron desktop app + embedded local web workspace + TypeScript development toolchain`
+
+## 3. Stable capabilities right now
 
 As of the current version, these parts are already verified or basically usable:
 
+- packaged desktop build scripts and a desktop entry already exist for `macOS` and `Windows x64`
 - the web UI already covers `Script Studio / Firmware Flash / Controller Test / Timing Tune / Benchmark`
-- the web UI can directly invoke `PlatformIO` to compile and flash firmware
-- the web UI can directly run controller connection, Bluetooth reset, and button / D-pad / stick tests
-- the web UI can directly tune `inputDelay / buttonPressDuration` and run loopback timing tests
+- the page can directly invoke `PlatformIO` to compile and flash firmware
+- the page can directly run controller connection, Bluetooth reset, and button / D-pad / stick tests
+- the page can directly tune `inputDelay / buttonPressDuration` and run loopback timing tests
 - a `256x256` script-coordinate canvas
 - six brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
 - drawing starts from the center of the canvas after entering the drawing page
 - after recovery, re-entering the drawing page is still modeled as starting again from the center
 - `A` is used for drawing / confirming a stroke
 - the D-pad is used for one-cell movement
-- the web UI can import images, generate previews, inspect statistics, and execute commands
+- the page can import images, generate previews, inspect statistics, and execute commands
 - the mono drawing path is already working
 - the official-palette drawing path is already integrated through `image-q`
 - the custom-multicolor path is already integrated as a formal feature and can write batches into the `9` custom color slots
 - official colors are quantized into the `7 x 12` / `84`-color base palette and then mapped into the game's right-side `9` palette slots
+- the drawing-template system already supports categories, previews, masks, and command-time cropping
 - automatic background removal, preview guides, and official-palette previews are already integrated
-- execution logs, flash logs, and test logs are all observable in the web UI
+- execution logs, flash logs, and test logs are all observable in the page
 - `inputDelay` currently behaves more like a stability knob, while `buttonPressDuration` behaves more like an input-strength knob
-- recovery tasks are persisted to disk after pause, stop, or abnormal exit; if the app exits while paused, that task is converted into a recoverable task on the next launch
-- custom multicolor is already shipped as a formal feature, but color fidelity and long-run stability still need more work
+- recovery tasks are persisted after pause, stop, or abnormal exit; if the app exits while paused, that task is converted into a recoverable task on the next launch
+- packaged desktop builds include firmware resources, app icons, and bundled `Windows` driver resources
 - ESP32 already supports the base serial protocol
-- ESP32 already supports the ACK execution path required by the web UI drawing flow
-- ESP32 already supports the `TAP <BUTTON> <COUNT>` test command
-- ESP32 already supports the `HOLD <BUTTON> <MS>` test command
+- ESP32 already supports the ACK execution path required by formal drawing
+- ESP32 already supports test commands such as `TAP <BUTTON> <COUNT>`, `HOLD <BUTTON> <MS>`, and `STICK <X> <Y> <MS>`
 
-## 3. Current modeling of the drawing page
+## 4. Current modeling of the drawing page
 
 The current target drawing page is modeled with these fixed rules:
 
@@ -79,7 +101,7 @@ Important distinction:
 - if the docs mention "reset to top-left" or "top-left start", that does not refer to the main canvas by default
 - those descriptions only apply to internal navigation modeling in color lists, the base-color page, or the custom-color edit page
 
-## 4. Multicolor split
+## 5. Multicolor split
 
 There are currently two possible multicolor routes.
 
@@ -107,20 +129,20 @@ The long-term plan for this route should be:
 3. quantize input images into these `84` colors in the web UI
 4. let ESP32 only open the color page and move to the correct cell
 
-Current conclusion:
-
-`base colors` are the recommended mainline path for future multicolor drawing.
-
 Currently implemented design:
 
-- the web UI now includes `official palette drawing`
-- official palette drawing quantizes the input image into `84` base colors
-- the script layer now has the `BC <slot> <row> <col>` command
+- the web UI already includes `official palette drawing`
+- official-palette drawing quantizes the input image into `84` base colors
+- the script layer already has the `BC <slot> <row> <col>` command
 - the firmware configures the 9 palette slots through `slot -> base-color page row/col`
-- the current strategy no longer tries to "reset to top-left"; instead, it assumes all 9 slots begin from the game's default colors and then tracks each slot's current `row/col`, moving in normal four directions to reach the target
+- the current strategy no longer tries to "reset to top-left"; instead, it assumes all 9 slots begin from the game's default colors and then tracks each slot's current `row / col`
 - the script starts with `BC RESET` to reset the firmware's internal slot-tracking state back to the default-slot assumption
 - `BC RESET` only resets palette-slot tracking state; it does not mean the main canvas cursor is reset to top-left
 - after moving to the target cell on the base-color page, pressing `A` returns directly to the canvas, so official-palette slot configuration no longer sends extra `B / A / B`
+
+Current conclusion:
+
+`base colors 7x12` are the recommended mainline path for future multicolor drawing.
 
 ### Route B: custom colors
 
@@ -134,12 +156,10 @@ Known facts:
 - there are other non-palette items above the list
 - pressing `Y` again enters the palette edit page
 - inside the edit page, `R` switches to the `custom colors` tab and `L` switches to the `base colors` tab
-- `B` exits the palette page or edit page
+- `B` exits the palette page / edit page
 - `A` selects the current palette slot
-- inside the edit page:
-  - `ZL / ZR` control the hue bar at the bottom
-  - the large block above is a two-dimensional color area
-  - the direction semantics for `M 1 0 / M -1 0 / M 0 -1 / M 0 1` are already confirmed
+- inside the edit page, `ZL / ZR` control the hue bar at the bottom, while the large block above is a two-dimensional color area
+- the direction semantics for `M 1 0 / M -1 0 / M 0 -1 / M 0 1` are already confirmed
 
 Why custom-color automation still needs more work:
 
@@ -152,11 +172,11 @@ Current conclusion:
 
 `custom color auto tuning` is already connected as a formal part of `custom multicolor`, but both color precision and stability still need more work.
 
-## 5. Confirmed facts about the custom-color page
+## 6. Confirmed facts about the custom-color page
 
 Even though auto color editing is already connected, these confirmed facts still need to be kept because they are part of future optimization work.
 
-### 5.1 Palette list
+### 6.1 Palette list
 
 - `Y` opens the palette list
 - repeatedly pressing `Down` can stably reach the bottom
@@ -168,7 +188,7 @@ This means the stable selection strategy for the palette list should be:
 2. move all the way down to the bottom
 3. move back upward to the target slot
 
-### 5.2 Direction semantics in the edit page
+### 6.2 Direction semantics in the edit page
 
 Confirmed:
 
@@ -181,7 +201,7 @@ Confirmed:
   - `ZL` moves left
   - `ZR` moves right
 
-### 5.3 Reset strategy in the edit page
+### 6.3 Reset strategy in the edit page
 
 Confirmed:
 
@@ -198,7 +218,7 @@ Recommended reset order:
 2. reset leftward
 3. hold `ZL` to the left edge of the hue bar
 
-### 5.4 Range exploration results
+### 6.4 Range exploration results
 
 Current observed behavior:
 
@@ -219,11 +239,11 @@ If custom-color automation is pushed further later, it must:
 - prioritize `TAP` counts
 - stop using raw `HOLD` duration as a direct color-coordinate conversion
 
-## 6. Current protocol additions
+## 7. Current protocol additions
 
 In addition to the original drawing commands, the protocol now includes these test commands.
 
-### 6.1 `TAP`
+### 7.1 `TAP`
 
 Format:
 
@@ -245,7 +265,7 @@ Meaning:
 - this is a discrete step command
 - it is suitable for calibrating step counts in the edit page or hue bar
 
-### 6.2 `HOLD`
+### 7.2 `HOLD`
 
 Format:
 
@@ -266,7 +286,7 @@ Meaning:
 - suitable only for rough range observation
 - not suitable as the final basis for precise color tuning
 
-### 6.3 `STICK`
+### 7.3 `STICK`
 
 Format:
 
@@ -302,39 +322,25 @@ Meaning:
 - suitable for directly testing simulated stick reset behavior in the custom-color edit page
 - this is a raw input command with no position calibration
 
-## 7. Current strategy decisions
+## 8. Current strategy decisions
 
 The current recommendations should be fixed clearly as:
 
-### 7.1 Mono
+### 8.1 Mono
 
 Continue using it as the mainline development and validation route.
 
-### 7.2 Multicolor
+### 8.2 Multicolor
 
 Prioritize the `base colors 7x12` route.
 
-### 7.3 Custom colors
+### 8.3 Custom colors
 
 Already included as one of the formal automatic-drawing capabilities, but still needs more optimization in color precision and stability.
 
-## 8. Suggested next development order
+## 9. Suggested next development order
 
 1. keep improving Bluetooth connection stability and long-duration drawing stability
-2. keep calibrating the `7 x 12` official palette mapping and real-device appearance
-3. keep improving logs, status cards, and recovery prompts
-4. keep improving the Windows trial path and installation instructions
-5. keep improving the stability and color fidelity of custom-color auto tuning
-
-## 9. Important reminder
-
-At the current stage, do not keep investing effort into "precise automatic custom-color restoration from hex values" for very clear reasons:
-
-- open-loop input is still unstable
-- tap displacement is not linear
-- long holds accelerate
-- without visual feedback, precise reproduction cannot be guaranteed
-
-So the practical conclusion is:
-
-`base colors` are currently the most realistic, most engineering-friendly, and easiest-to-stabilize multicolor route.
+2. keep improving custom-multicolor color correction, color fidelity, and real-device appearance
+3. keep optimizing drawing paths, command execution paths, and long-run efficiency
+4. keep improving user experience, including logs, status cards, failure-recovery prompts, packaged desktop install flow, and internal validation guidance

@@ -2,7 +2,16 @@
 
 [English](en/arrival-checklist.md)
 
-这份清单适合在你的 `ESP32-WROOM-32 / ESP-32S` 开发板刚到手时使用。
+这是一份开发者内部验板 / 冒烟测试清单，不是公开用户主流程。
+
+它的目标是在开发板刚到手时，先用 `Mac + CLI + 串口监视器` 这条底层 bring-up 路线确认下面几件事已经成立：
+
+- 串口链路正常
+- 固件可以编译并刷入
+- ACK 协议链路正常
+- `Bluetooth Classic HID` 传输层已经拉起
+
+如果你只是想按公开流程开始使用，请先看：[快速上手](user-trial-guide.md)。
 
 ## 路径说明
 
@@ -30,7 +39,7 @@ pio device monitor -b 115200
 
 说明：
 
-- 现在第一次编译会比以前更慢，因为 `esp32dev_wireless` 已经改成使用 `Arduino + ESP-IDF`
+- 现在第一次编译会比以前更慢，因为 `esp32dev_wireless` 使用的是 `Arduino + ESP-IDF`
 - 这样做是为了让固件能链接 `Bluetooth Classic HID` 协议栈
 
 如果你手上的某块兼容板刷写行为更接近 `NodeMCU-32S`，可以改用：
@@ -95,5 +104,14 @@ npm run dev -- --image ./examples/demo.svg --port <your-serial-port> --send
 
 - 这块板子已经能稳定连上 `Switch`
 - 当前报告格式与配对行为已经完全满足实机要求
+- 桌面端 workflow 下的驱动辅助、恢复任务或模板流程已经全部正常
 
 当前固件暴露的是一个通用游戏手柄 HID 骨架，`Switch` 侧的真实配对表现和报告时序，仍然需要实机继续验证。
+
+## 7. 通过后下一步做什么
+
+如果这份内部验板清单已经通过，下一步建议回到正式 workflow：
+
+1. 打开桌面端安装包，或运行 `npm run ui:dev`
+2. 按 `刷入固件 -> 手柄测试 -> 调试测速 -> 脚本生成` 继续完整流程
+3. 如果底层验板已经通过、但桌面端流程仍失败，优先排查 `PlatformIO` 准备、资源路径、驱动辅助入口或页面侧集成问题
