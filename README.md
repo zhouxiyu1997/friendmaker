@@ -290,3 +290,7 @@ The Switch Bluetooth compatibility path under `firmware/esp32` borrows from and 
 - Original source author: Xiaohongshu creator `惜羽拓麻镇`
 - If you publicly repost or mirror this project, it is recommended that you credit `惜羽拓麻镇`
 - It is also recommended that you include the original publication link
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=zhouxiyu1997/friendmaker&type=Date)](https://star-history.com/#zhouxiyu1997/friendmaker&Date)
