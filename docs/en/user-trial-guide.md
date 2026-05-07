@@ -14,7 +14,7 @@ Before you start:
 - A first successful run still usually involves `ESP32` flashing, serial-port or driver setup, `Switch` controller pairing, and timing adjustment
 - If you have never worked with `ESP32`, `PlatformIO`, or similar device workflows before, follow the steps in order; the first environment setup usually needs stable internet access, and you should leave time for setup and debugging
 
-If you have not read the project overview yet, start from the repo home page: [README](../../README.en.md).
+If you have not read the project overview yet, start from the repo home page: [README](../../README.md#en).
 If you hit issues with serial, networking, firmware, connection, or drift, jump directly to [Troubleshooting](troubleshooting.md).
 
 ## 1. Understand the project first
