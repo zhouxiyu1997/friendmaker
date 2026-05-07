@@ -4,6 +4,7 @@
 建议按“你卡在哪一页，就先看哪一节”的方式使用。
 
 如果你还没走过完整主流程，先看：[快速上手](user-trial-guide.md)。
+如果你在中国境内使用、且不方便翻墙，这份文档里涉及环境下载的问题统一看：[中国境内网络受限补充](troubleshooting-mainland-network.md)。
 
 ## 1. 页面里看不到串口
 
@@ -67,7 +68,6 @@ python -m pip install --user --upgrade platformio
 
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，速度慢是正常的
 - 如果是在 `Windows` 上用源码路线，`Python` 是手动安装 `PlatformIO` 的前提之一
-- 如果你在中国境内使用，且主要问题是 `PlatformIO`、`Python`、`Node.js`、`npm` 或首次编译依赖下载，直接改看：[中国境内网络受限补充](troubleshooting-mainland-network.md)
 
 ## 3. 固件刷写失败
 
@@ -198,6 +198,5 @@ pio run -e esp32dev_wireless -t upload
 
 - [快速上手](user-trial-guide.md)
 - [硬件连接说明](wiring.md)
-- [中国境内网络受限补充](troubleshooting-mainland-network.md)
 - [Windows 平台补充](setup-windows.md)
 - [macOS 平台补充](setup-mac.md)

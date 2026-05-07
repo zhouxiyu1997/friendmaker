@@ -49,7 +49,7 @@
 
 - 这不是 `零门槛`、`即装即用` 的纯消费级工具
 - 首次使用通常仍需要完成 `ESP32` 刷写、串口或驱动识别、`Switch` 手柄配对和 `timing` 调整
-- 如果你之前没有接触过 `ESP32`、`PlatformIO` 或类似链路，建议严格按文档逐步验证，并预留一定的环境准备与调试时间
+- 如果你之前没有接触过 `ESP32`、`PlatformIO` 或类似链路，建议严格按文档逐步验证；首次环境准备通常需要稳定外网，并预留一定的准备与调试时间
 
 ### 当前推荐怎么用
 
@@ -104,7 +104,6 @@
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要 `稳定联网`
 - 如果应用提示缺少 `Python`，允许它下载一个供 `Friend Maker` 使用的本地运行环境即可
 - `Windows` 下如果 `PlatformIO` 已就绪但没有串口，可在应用里优先安装 `CP210x` 驱动，再尝试 `CH340/CH341`
-- 如果你在中国境内、又不方便翻墙，`PlatformIO` / `Python` / `Node.js` / `npm` 的替代下载路径见 [中国境内网络受限补充](docs/troubleshooting-mainland-network.md)
 
 #### 路线 B：仓库源码
 
@@ -131,10 +130,6 @@ cd /path/to/friendmaker/firmware/esp32
 pio run -e esp32dev_wireless -t upload
 ```
 
-如果你在中国境内、又不方便翻墙，源码路线建议先看：
-
-- [中国境内网络受限补充](docs/troubleshooting-mainland-network.md)
-
 如果 `pio` 不在 `PATH` 里，请改用完整路径：
 
 - `macOS`：`~/.platformio/penv/bin/pio`
@@ -144,7 +139,6 @@ pio run -e esp32dev_wireless -t upload
 
 - [快速上手](docs/user-trial-guide.md)：第一次试用、安装启动、刷固件、连接手柄、调 timing、开始绘制
 - [排障说明](docs/troubleshooting.md)：看不到串口、准备环境失败、刷写失败、连接不稳、串键、漂移、颜色偏差
-- [中国境内网络受限补充](docs/troubleshooting-mainland-network.md)：`PlatformIO`、`Python`、`Node.js`、`npm` 的替代下载路径，以及首次编译缓存复制思路
 - [硬件连接说明](docs/wiring.md)：支持板型、连接方式、线材与供电注意事项
 - [Windows 平台补充](docs/setup-windows.md)：驱动、`winget`、`COM` 口和 Windows 特有注意事项
 - [macOS 平台补充](docs/setup-mac.md)：串口驱动、源码启动和 macOS 特有注意事项
