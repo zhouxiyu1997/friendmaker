@@ -1,33 +1,201 @@
-# Troubleshooting
+# 朋友制作器排障说明
 
-## `sharp` install fails
+这份文档只处理当前公开流程里最高频的问题。
+建议按“你卡在哪一页，就先看哪一节”的方式使用。
 
-- Confirm Node.js is at least 18.17
-- Re-run `npm install`
+如果你还没走过完整主流程，先看：[快速上手](user-trial-guide.md)。
 
-## Serial port times out waiting for `OK <session> <seq>`
+## 1. 页面里看不到串口
 
-- Make sure the ESP32 firmware is flashed
-- Confirm the baud rate matches both sides
-- Use `npm run dev -- --list-ports` to verify the device path
-- Open a serial monitor and check whether the board prints sequenced ACK lines such as `OK a1b2c3d4 1`
-- Manual serial tests must send sequenced frames, for example `SEQ a1b2c3d4 1 I`; the CLI and Web UI wrap visible commands automatically
-- Start with `npm run dev -- --commands-file ./examples/smoke-test-commands.txt --port <device> --send` before trying full image streaming
+优先检查：
 
-## ESP32 board does not appear on macOS
+- 数据线是否支持 `数据传输`，而不只是充电
+- 开发板是否已经重新插拔过
+- 串口是否已经被别的程序占用
 
-- Confirm the cable supports data, not just charging
-- Look for a port such as `/dev/cu.SLAB_USBtoUART` or `/dev/cu.usbserial-*` as an example device name
-- If the board uses `CP2102` and no port appears, install the official `CP210x VCP` driver from Silicon Labs
+推荐处理顺序：
 
-## Drawing drifts on Switch
+1. 重新插拔开发板
+2. 在应用里点击 `刷新串口`
+3. 如果你在源码路线里运行，可以先执行：
 
-- Increase `cellMoveDuration`
-- Increase `inputDelay`
-- Reduce canvas size to `32x32`
-- Start with the mono profile before enabling palette mode
+```bash
+npm run dev -- --list-ports
+```
 
-## Color selection is wrong
+4. 如果是 `Windows x64`，并且 `PlatformIO` 已就绪但仍没有串口：
+   - 先安装 `CP210x` 驱动
+   - 重新插拔开发板
+   - 再尝试 `CH340/CH341`
+5. 如果是 `macOS`，并且你的板子使用 `CP210x` 或 `CH340/CH341`，请确认对应串口驱动已经就绪
 
-- Adjust the placeholder logic in `firmware/esp32/src/controller.cpp`
-- Keep the game's palette order fixed while calibrating
+相关文档：
+
+- [Windows 平台补充](setup-windows.md)
+- [macOS 平台补充](setup-mac.md)
+- [硬件连接说明](wiring.md)
+
+## 2. PlatformIO / Python / 网络准备失败
+
+常见信号：
+
+- `刷入固件` 页提示找不到 `PlatformIO`
+- 点了 `准备 PlatformIO` 后失败
+- 应用提示缺少 `Python`
+- 下载工具链或依赖时卡很久、失败或反复重试
+
+优先检查：
+
+- 当前网络是否稳定
+- 是否处在离线、弱网或被代理限制的环境
+- `Windows` 上是否允许应用下载本地 `Python` 运行环境
+
+推荐处理顺序：
+
+1. 切换到稳定网络后重试
+2. 再次点击 `准备 PlatformIO`
+3. 如果应用提示缺少 `Python`，允许它下载
+4. 如果你走的是源码路线，也可以手动安装 `PlatformIO`
+
+手动安装示例：
+
+```powershell
+python -m pip install --user --upgrade platformio
+```
+
+说明：
+
+- 首次准备 `PlatformIO`、下载工具链与部分依赖时，速度慢是正常的
+- 如果是在 `Windows` 上用源码路线，`Python` 是手动安装 `PlatformIO` 的前提之一
+
+## 3. 固件刷写失败
+
+常见信号：
+
+- `编译并刷入固件` 失败
+- 提示串口被占用
+- 固件上传中断
+- 板子一直进不去下载模式
+
+优先检查：
+
+- 串口是否被下面这些程序占用：
+  - `pio device monitor`
+  - Arduino 串口监视器
+  - 其它串口助手
+- 当前选择的目标环境是否正确
+- 数据线和供电是否稳定
+
+推荐处理顺序：
+
+1. 关闭所有串口监视器和串口工具
+2. 回到应用里重新点击 `刷新串口`
+3. 确认目标环境：
+   - 常见板子优先用 `esp32dev_wireless`
+   - 明确写着 `NodeMCU-32S` 的板子可以改用 `nodemcu_32s_wireless`
+4. 再次点击 `编译并刷入固件`
+5. 如果板子进不去下载模式，按住实体板上的 `BOOT` 键，再重新刷入
+
+源码路线兜底命令：
+
+```bash
+cd /path/to/friendmaker/firmware/esp32
+pio run -e esp32dev_wireless -t upload
+```
+
+## 4. 手柄连不上或连接易断
+
+这是当前版本的已知情况。
+项目已经尽量补了重置、重连和恢复流程，但不同开发板的 `USB` 串口芯片、供电和做工差异仍会影响表现。
+
+推荐处理顺序：
+
+1. 在 `手柄测试` 页点击 `重置手柄蓝牙`
+2. 等待完成后再点 `连接手柄`
+3. 在 `Switch` 上重新进入 `控制器 -> 更改握法/顺序`
+4. 如果还是连不上，按一下开发板上的 `EN` 键重启，再重新连接
+5. 如果还是不稳定，回到 `刷入固件` 页重新刷一次固件
+6. 如果仍然频繁掉线，也一起排查：
+   - 数据线是否稳定
+   - 供电是否充足
+   - 当前这块开发板是否存在个体差异
+   - 附近是否有太多同时活跃的蓝牙设备
+   - 当前开发板是否已经明显发热
+
+说明：
+
+- 主测设备在连接建立后通常可以保持稳定
+- 如果你的板子在连接阶段频繁掉线，不一定是单一软件问题
+- 保持蓝牙环境干净、减少同时活跃的蓝牙设备，通常更稳
+- 某些板子在温度较高时更容易出现不稳定，适当降温后再重试可能会改善
+
+## 5. 单步测试里出现串键、粘连或异常连发
+
+推荐处理顺序：
+
+1. 按一下开发板上的 `EN` 键重启
+2. 回到 `手柄测试` 页重新点击 `连接手柄`
+3. 重新做一轮按钮、方向键或摇杆单步测试
+4. 如果还是反复出现，也排查：
+   - 数据线是否稳定
+   - 供电是否充足
+   - 开发板个体差异
+   - 附近是否有太多同时活跃的蓝牙设备
+   - 开发板是否已经明显发热
+
+补充说明：
+
+- 这类现象经常和连接稳定性、板子状态或供电波动一起出现
+- 如果重启开发板后症状缓解，通常说明当前链路状态已经被刷新
+
+## 6. 绘制错位、漂移或长流程越来越不稳
+
+优先检查：
+
+- 是否已经先跑过 `调试测速`
+- `Switch` 里的画笔大小是否和网页一致
+- 光标是否从 `画布中心` 起步
+- 开始绘制后是否还手动碰过手柄或屏幕
+
+推荐处理顺序：
+
+1. 回到 `调试测速` 页，先从推荐默认值 `45 / 65` 开始
+2. 优先增加 `inputDelay`
+3. 只有在稳定性基本够用后，再微调 `buttonPressDuration`
+4. 第一次试用时，先用：
+   - `单色绘制`
+   - 简单图片
+   - `3` 号笔或更大的笔刷
+5. 如果还是不稳，重新做一遍：
+   - `刷入固件`
+   - `手柄测试`
+   - `调试测速`
+
+经验口径：
+
+- `inputDelay` 更像稳定性旋钮
+- `buttonPressDuration` 更像力度旋钮
+
+## 7. 颜色和预览不完全一样
+
+这是当前版本的已知情况，尤其更容易出现在 `官方色绘制` 里。
+
+常见原因：
+
+- 网页里的近似色和游戏内官方色盘并不是逐像素完全一致
+- 实机观感会受到画笔大小和游戏内显示效果影响
+- 如果你手动改过右侧 `9` 个色盘槽位，`官方色绘制` 的前提也会被破坏
+
+建议：
+
+1. 先确认当前用的是 `官方色绘制`
+2. 保持游戏默认的 `9` 个色盘槽位颜色
+3. 先用结构简单、颜色数量较少的图片验证链路
+4. 如果是第一次试用，优先从 `单色绘制` 开始
+
+## 8. 还需要看哪里
+
+- [快速上手](user-trial-guide.md)
+- [硬件连接说明](wiring.md)
+- [Windows 平台补充](setup-windows.md)
+- [macOS 平台补充](setup-mac.md)

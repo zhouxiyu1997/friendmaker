@@ -1,67 +1,84 @@
-# Setup on macOS
+# macOS 平台补充
 
-## Path note
+这份文档只补充 `macOS` 平台差异。
+完整主流程请先看：[快速上手](user-trial-guide.md)。
 
-- Commands in this document assume you are already inside your own local project directory
-- Replace serial examples such as `/dev/cu.usbmodemXXXX` or `/dev/cu.SLAB_USBtoUART` with your own device path
-- If `pio` is already in your shell `PATH`, you can use `pio ...`; otherwise keep using the full `~/.platformio/penv/bin/pio ...` form
+## 1. 当前支持范围
 
-## Prerequisites
+- 支持：`macOS` 桌面端安装包
+- 支持：仓库源码路线
 
-- Node.js 22 or newer
-- `pnpm` via Corepack, or plain `npm`
-- An `ESP32-WROOM-32` / `ESP-32S` development board with USB serial
+当前推荐优先使用：
 
-## Install
+- `macOS` 桌面端安装包
+
+## 2. macOS 下最常见的差异
+
+### 2.1 串口设备名称
+
+`macOS` 下常见串口名称包括：
+
+- `/dev/cu.SLAB_USBtoUART`
+- `/dev/cu.usbserial-*`
+- 其它 `cu.*` 设备名
+
+如果应用里始终没有串口：
+
+1. 先确认数据线支持数据传输
+2. 重新插拔开发板
+3. 再检查驱动是否已经就绪
+
+### 2.2 串口驱动
+
+不同兼容板可能使用不同 USB 转串口芯片。常见情况：
+
+- `CP210x`
+- `CH340 / CH341`
+
+如果板子已经插上，但系统里始终没有对应串口，请确认当前板子的驱动是否已经安装。
+
+## 3. 仓库源码路线的 macOS 补充
+
+如果你从源码运行，请先准备：
+
+- `Node.js 20+`
+- `npm 10+`
+- `PlatformIO Core 6+`
+
+常用命令：
 
 ```bash
+cd /path/to/friendmaker
 npm install
+npm run check
+npm run ui:dev
 ```
 
-If you prefer `pnpm`, enable it with Corepack first:
+你也可以直接双击：
+
+- `Start Friend Maker.command`
+
+这个脚本会转到仓库里的 `scripts/macos-launch.sh`，自动检查依赖并启动本地界面。
+
+## 4. macOS 下的手动 PlatformIO 命令
+
+刷入固件示例：
 
 ```bash
-corepack enable
-corepack prepare pnpm@10.11.1 --activate
-pnpm install
+cd /path/to/friendmaker/firmware/esp32
+~/.platformio/penv/bin/pio run -e esp32dev_wireless -t upload
 ```
 
-## First dry run
+如果你的板子更接近 `NodeMCU-32S`，也可以改用：
 
 ```bash
-npm run dev -- --image ./examples/demo.svg --preview ./tmp/demo-preview.png --write-commands ./tmp/demo-commands.txt
+~/.platformio/penv/bin/pio run -e nodemcu_32s_wireless -t upload
 ```
 
-## List serial ports
+## 5. macOS 平台上的额外提醒
 
-```bash
-npm run dev -- --list-ports
-```
+- 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要稳定联网
+- 源码路线下，运行期间不要关闭启动本地服务的那个终端窗口
+- 如果没有串口，优先排查数据线、驱动和开发板个体差异
 
-## Stream to the board
-
-```bash
-npm run dev -- --image ./examples/demo.svg --port <your-serial-port> --send
-```
-
-## Flash firmware for ESP32-WROOM-32 / ESP-32S
-
-```bash
-pio run -e esp32dev_wireless -t upload
-pio device monitor -b 115200
-```
-
-If your clone board uploads more reliably as NodeMCU-32S, switch to:
-
-```bash
-pio run -e nodemcu_32s_wireless -t upload
-pio device monitor -b 115200
-```
-
-## Smoke test a fresh board
-
-```bash
-npm run dev -- --commands-file ./examples/smoke-test-commands.txt --port <your-serial-port> --send
-```
-
-For a step-by-step bring-up flow, see `docs/arrival-checklist.md`.
+还需要继续排障时，请看：[排障说明](troubleshooting.md)。

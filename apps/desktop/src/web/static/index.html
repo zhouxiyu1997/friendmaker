@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="朋友制作器（Friend Maker）是一个面向 Nintendo Switch《朋友收集：梦想生活》/ Tomodachi Life 的自动绘制工具，支持脚本生成、ESP32 固件刷写、手柄测试与调试测速。"
+      content="朋友制作器（Friend Maker）是一个面向 Nintendo Switch《朋友收集：梦想生活》/ Tomodachi Life 的自动绘制工作台，支持 ESP32 固件刷写、手柄测试、输入时序调试，以及图片到绘制脚本的闭环执行。"
     />
     <meta
       name="keywords"
@@ -23,33 +23,37 @@
           </div>
           <h1 class="hero-brand">朋友制作器 / Friend Maker</h1>
           <p class="hero-body">
-            自动绘画的基本原理，是通过数据线连接电脑与 ESP32 开发板，先刷入固定固件，再由电脑发送绘图指令，开发板按规律模拟
-            Switch 手柄输入完成自动绘画。
+            朋友制作器把图片处理、ESP32 固件刷写、Switch 手柄链路测试和正式绘制放进同一套本地工作台。图片会先转换成像素预览和动作脚本，
+            再通过 ESP32 模拟 Switch Pro Controller 输入完成自动绘制。
           </p>
           <p class="subcopy">
-            推荐顺序是先刷固件，再做手柄测试，最后回到“脚本生成”页导入图片并先点“仅生成命令”。手柄测试未通过时，不允许开始正式绘制。开始前请确认
-            Switch 处于初始绘画页面、画笔停在画布中心、侧边色彩槽保持默认；“自定义多色（自动量化）”已开放实验入口，但稳定性仍弱于“官方色绘制”。建议首次先用简单图和大画笔测试，开始绘制后不要再操作手柄或触碰屏幕，以免错位。
+            桌面端安装包和仓库源码两种进入方式，最终都会汇合到“刷入固件 -> 手柄测试 -> 调试测速 -> 脚本生成”这套四页工作流。当前主线支持
+            “单色绘制”“官方色绘制”和“自定义多色（自动量化）”。开始前请确认 Switch 已进入绘图页、画笔停在画布中心；如果使用官方色绘制，再额外确认官方色槽位仍保持默认状态。
           </p>
         </div>
         <div class="hero-side">
           <div class="hero-badge">
-            <span>Current Mode</span>
-            <strong>Studio + Flash + Test + Tune</strong>
+            <span>Current Workflow</span>
+            <strong>Flash -> Test -> Tune -> Draw</strong>
           </div>
           <section class="workflow-card" aria-label="推荐流程">
             <span class="workflow-label">推荐流程</span>
             <ol class="workflow-list">
               <li>
                 <strong>先刷固件</strong>
-                <span>先到“刷入固件”更新 ESP32，确保后面的蓝牙连接和按键测试基于最新版本进行。</span>
+                <span>先到“刷入固件”确认 PlatformIO、串口设备和当前固件环境都正常。</span>
               </li>
               <li>
                 <strong>再测连接</strong>
-                <span>进入“手柄测试”确认开发板已经能被 Switch 正常识别、连接，并进入可发送状态。</span>
+                <span>在“手柄测试”里完成配对、按钮测试和方向测试，确认链路已经进入可发送状态。</span>
+              </li>
+              <li>
+                <strong>再调 timing</strong>
+                <span>在“调试测速”里优先调 inputDelay，把当前板子、线材和连接稳定性先跑出来。</span>
               </li>
               <li>
                 <strong>最后导图</strong>
-                <span>确认连接没问题后，再回到“脚本生成”输入图片、调整参数并开始正式绘制。</span>
+                <span>回到“脚本生成”导入图片、检查预览，再开始绘制；如果之前中断，也可以从页面内的恢复任务继续。</span>
               </li>
             </ol>
           </section>
@@ -163,7 +167,7 @@
                 <span>绘制模式</span>
                 <select id="color-mode-select">
                   <option value="mono" selected>单色绘制</option>
-                  <option value="palette">自定义多色（测试中）</option>
+                  <option value="palette">自定义多色</option>
                   <option value="official">官方色绘制</option>
                 </select>
               </label>
