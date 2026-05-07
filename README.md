@@ -26,7 +26,7 @@
 
 ### 项目是什么
 
-- 面向当前实机链路的本地工作台，而不是只生成命令的脚本仓库
+- 面向当前实机链路的本地工作台
 - 目标是把 `ESP32 固件`、`串口 ACK 发送`、`Switch 手柄链路测试` 和 `图片转绘制脚本` 串成一套闭环
 - 当前默认围绕桌面端四页工作流组织：`刷入固件`、`手柄测试`、`调试测速`、`脚本生成`
 
@@ -44,6 +44,12 @@
 - 已经有 `Nintendo Switch` 和 `ESP32-WROOM-32 / ESP-32S` 开发板
 - 想优先使用带界面的闭环工作流，而不是手工维护串口脚本
 - 能接受当前版本仍然优先追求 `输入稳定性`，而不是极限速度或零校准上手
+
+### 开始前提示
+
+- 这不是 `零门槛`、`即装即用` 的纯消费级工具
+- 首次使用通常仍需要完成 `ESP32` 刷写、串口或驱动识别、`Switch` 手柄配对和 `timing` 调整
+- 如果你之前没有接触过 `ESP32`、`PlatformIO` 或类似链路，建议严格按文档逐步验证，并预留一定的环境准备与调试时间
 
 ### 当前推荐怎么用
 
@@ -96,8 +102,9 @@
 - `Windows x64`：运行 `.exe` 安装包后直接启动 `Friend Maker`
 - 首次进入 `刷入固件` 页时，如果提示缺少 `PlatformIO`，点击 `准备 PlatformIO`
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要 `稳定联网`
-- 如果应用提示缺少 `Python`，允许它下载一个仅供 `Friend Maker` 使用的本地运行环境即可
+- 如果应用提示缺少 `Python`，允许它下载一个供 `Friend Maker` 使用的本地运行环境即可
 - `Windows` 下如果 `PlatformIO` 已就绪但没有串口，可在应用里优先安装 `CP210x` 驱动，再尝试 `CH340/CH341`
+- 如果你在中国境内、又不方便翻墙，`PlatformIO` / `Python` / `Node.js` / `npm` 的替代下载路径见 [中国境内网络受限补充](docs/troubleshooting-mainland-network.md)
 
 #### 路线 B：仓库源码
 
@@ -124,15 +131,20 @@ cd /path/to/friendmaker/firmware/esp32
 pio run -e esp32dev_wireless -t upload
 ```
 
+如果你在中国境内、又不方便翻墙，源码路线建议先看：
+
+- [中国境内网络受限补充](docs/troubleshooting-mainland-network.md)
+
 如果 `pio` 不在 `PATH` 里，请改用完整路径：
 
 - `macOS`：`~/.platformio/penv/bin/pio`
-- `Windows`：`%USERPROFILE%\\.platformio\\penv\\Scripts\\pio.exe`
+- `Windows`：`%USERPROFILE%\.platformio\penv\Scripts\pio.exe`
 
 ### 对外文档导航
 
 - [快速上手](docs/user-trial-guide.md)：第一次试用、安装启动、刷固件、连接手柄、调 timing、开始绘制
 - [排障说明](docs/troubleshooting.md)：看不到串口、准备环境失败、刷写失败、连接不稳、串键、漂移、颜色偏差
+- [中国境内网络受限补充](docs/troubleshooting-mainland-network.md)：`PlatformIO`、`Python`、`Node.js`、`npm` 的替代下载路径，以及首次编译缓存复制思路
 - [硬件连接说明](docs/wiring.md)：支持板型、连接方式、线材与供电注意事项
 - [Windows 平台补充](docs/setup-windows.md)：驱动、`winget`、`COM` 口和 Windows 特有注意事项
 - [macOS 平台补充](docs/setup-mac.md)：串口驱动、源码启动和 macOS 特有注意事项
@@ -180,6 +192,12 @@ It brings `ESP32 firmware flashing`, `controller connection testing`, `input tim
 - People who already have a `Nintendo Switch` and an `ESP32-WROOM-32 / ESP-32S` board
 - People who want a UI-first end-to-end workflow instead of hand-maintained serial scripts
 - People who are okay with the current priority being `input stability` rather than maximum speed
+
+### Before you start
+
+- This is not a `zero-setup`, consumer-style plug-and-play tool
+- A first successful run still usually involves `ESP32` flashing, serial-port or driver setup, `Switch` controller pairing, and timing adjustment
+- If you have never worked with `ESP32`, `PlatformIO`, or similar device workflows before, follow the docs step by step and expect some setup and debugging time
 
 ### Recommended way to use it
 
@@ -263,7 +281,7 @@ pio run -e esp32dev_wireless -t upload
 If `pio` is not in `PATH`, use the full path instead:
 
 - `macOS`: `~/.platformio/penv/bin/pio`
-- `Windows`: `%USERPROFILE%\\.platformio\\penv\\Scripts\\pio.exe`
+- `Windows`: `%USERPROFILE%\.platformio\penv\Scripts\pio.exe`
 
 ### Public docs
 

@@ -11,6 +11,7 @@
 当前推荐优先使用：
 
 - `macOS` 桌面端安装包
+- 如果你在中国境内使用、且不方便翻墙，额外看：[中国境内网络受限补充](troubleshooting-mainland-network.md)
 
 ## 2. macOS 下最常见的差异
 
@@ -60,6 +61,15 @@ npm run ui:dev
 
 这个脚本会转到仓库里的 `scripts/macos-launch.sh`，自动检查依赖并启动本地界面。
 
+如果你主要卡在：
+
+- `Homebrew` 安装慢
+- `Node.js` 下载慢
+- `npm install` 很慢
+- `PlatformIO` / `Python` 安装失败
+
+优先改看：[中国境内网络受限补充](troubleshooting-mainland-network.md)。
+
 ## 4. macOS 下的手动 PlatformIO 命令
 
 刷入固件示例：
@@ -80,5 +90,6 @@ cd /path/to/friendmaker/firmware/esp32
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要稳定联网
 - 源码路线下，运行期间不要关闭启动本地服务的那个终端窗口
 - 如果没有串口，优先排查数据线、驱动和开发板个体差异
+- 如果主要问题是网络受限或上游下载过慢，优先看：[中国境内网络受限补充](troubleshooting-mainland-network.md)
 
 还需要继续排障时，请看：[排障说明](troubleshooting.md)。

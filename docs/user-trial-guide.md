@@ -6,6 +6,12 @@
 
 `刷入固件 -> 手柄测试 -> 调试测速 -> 脚本生成`
 
+开始前先提醒一句：
+
+- 这不是 `零门槛`、`即装即用` 的纯消费级工具
+- 首次使用通常仍需要完成 `ESP32` 刷写、串口或驱动识别、`Switch` 手柄配对和 `timing` 调整
+- 如果你之前没有接触过 `ESP32`、`PlatformIO` 或类似链路，建议严格按顺序逐步验证，并预留一定的环境准备与调试时间
+
 如果你还没了解项目定位，先看仓库首页：[README](../README.md)。
 如果中途遇到串口、联网、固件、连接或漂移问题，直接跳到：[排障说明](troubleshooting.md)。
 
@@ -69,6 +75,7 @@
 - 当前不建议把 `ESP32-C3 / ESP32-S3 / ESP32-C6` 当作主线板型
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时需要稳定联网；如果网络波动，准备流程可能失败或明显变慢
 - `Windows ARM64` 当前不在支持范围内
+- 如果你在中国境内使用，且不方便翻墙，先看：[中国境内网络受限补充](troubleshooting-mainland-network.md)
 
 硬件连接方式见：[硬件连接说明](wiring.md)。
 
@@ -97,6 +104,7 @@
 - 首次进入 `刷入固件` 页时，如果提示缺少 `PlatformIO`，点击 `准备 PlatformIO`
 - 如果应用提示缺少 `Python`，允许它下载一个仅供 `Friend Maker` 使用的本地运行环境即可
 - `Windows` 下如果 `PlatformIO` 已就绪但没有串口，可先在应用内安装 `CP210x` 驱动，再尝试 `CH340/CH341`
+- 如果你在中国境内使用，且这一步反复卡在 `PlatformIO` / `Python` 下载，直接改看：[中国境内网络受限补充](troubleshooting-mainland-network.md)
 
 平台细节见：
 
@@ -152,6 +160,7 @@ http://127.0.0.1:4307
 
 - 它负责 `安装和检查`
 - 安装完成后，仍然需要你手动运行 `npm run ui:dev`
+- 如果你在中国境内使用，且 `Node.js`、`npm`、`PlatformIO` 任一步下载明显受阻，优先参考：[中国境内网络受限补充](troubleshooting-mainland-network.md)
 
 ## 4. 刷入 ESP32 固件
 
@@ -195,7 +204,7 @@ pio run -e esp32dev_wireless -t upload
 如果 `pio` 不在 `PATH` 里，请改用完整路径：
 
 - `macOS`：`~/.platformio/penv/bin/pio`
-- `Windows`：`%USERPROFILE%\\.platformio\\penv\\Scripts\\pio.exe`
+- `Windows`：`%USERPROFILE%\.platformio\penv\Scripts\pio.exe`
 
 `Windows` 示例：
 
@@ -317,6 +326,7 @@ $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t up
 公开文档建议这样分工使用：
 
 - [排障说明](troubleshooting.md)：遇到问题时先看这里
+- [中国境内网络受限补充](troubleshooting-mainland-network.md)：如果主要卡在 `Python`、`PlatformIO`、`Node.js`、`npm` 或首次编译下载
 - [硬件连接说明](wiring.md)：确认支持板型、连接方式、线材和供电
 - [Windows 平台补充](setup-windows.md)：看 `winget`、驱动、`COM` 口相关问题
 - [macOS 平台补充](setup-mac.md)：看串口、驱动和源码启动相关问题
