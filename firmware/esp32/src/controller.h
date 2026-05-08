@@ -27,6 +27,7 @@ class SwitchController {
   bool resetBluetooth(bool reconnectLastPeer = false);
   void pause();
   void resume();
+  bool isPaused() const;
   void end();
   void printTransportStatus(Print &output) const;
   const char *transportName() const;

@@ -62,6 +62,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool pairingComplete_ = false;
   bool paired_ = false;
   uint8_t timer_ = 0;
+  int sendFailureCount_ = 0;
   const char *initStep_ = "idle";
   const char *initError_ = "none";
   uint8_t buttonsRight_ = 0;

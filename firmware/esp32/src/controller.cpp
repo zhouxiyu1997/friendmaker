@@ -430,6 +430,8 @@ void SwitchController::pause() { paused_ = true; }
 
 void SwitchController::resume() { paused_ = false; }
 
+bool SwitchController::isPaused() const { return paused_; }
+
 void SwitchController::end() { paused_ = false; }
 
 void SwitchController::printTransportStatus(Print &output) const {

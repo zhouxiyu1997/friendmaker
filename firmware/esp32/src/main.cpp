@@ -191,12 +191,38 @@ void loop() {
   String line = Serial.readStringUntil('\n');
   line.trim();
 
+  if (line.length() == 0) {
+    return;
+  }
+
   SequencedFrame frame;
 
   if (!parseSequencedFrame(line, frame)) {
-    Serial.println("ERR protocol frame required");
+    Serial.printf("ECHO raw command=\"%s\"\n", line.c_str());
+
+    // Backward-compatible raw mode: accept plain commands typed in serial monitor.
+    String error;
+    const bool ok = executeCommand(line, controller, error);
+
+    if (ok) {
+      Serial.println("OK");
+    } else {
+      const bool allowNoBtDryRun = error == "controller input report failed";
+
+      if (allowNoBtDryRun) {
+        Serial.println("OK dry-run no-bt");
+      } else {
+        Serial.println("ERR " + (error.length() > 0 ? error : "unknown error"));
+      }
+    }
     return;
   }
+
+  Serial.printf(
+      "ECHO seq session=%s sequence=%lu command=\"%s\"\n",
+      frame.sessionId.c_str(),
+      static_cast<unsigned long>(frame.sequence),
+      frame.command.c_str());
 
   String ackLine;
 

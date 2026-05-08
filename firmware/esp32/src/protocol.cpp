@@ -380,6 +380,12 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     return true;
   }
 
+  if (controller.isPaused() && line != "R" && line != "S" && line != "I" &&
+      line != "E" && !line.startsWith("BT RESET")) {
+    error = "controller paused (send R to resume)";
+    return false;
+  }
+
   if (line == "I") {
     Serial.printf("INFO transport=%s\n", controller.transportName());
     controller.printTransportStatus(Serial);
