@@ -799,7 +799,7 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool 
 
   const bool shouldWaitForSendEvent = waitForSendEvent && paired_;
   uint32_t expectedEventCount = 0;
-  const bool shouldSendFullReport = paired_;
+  const bool shouldSendFullReport = connected_ || paired_;
   const uint8_t *payload = shouldSendFullReport ? report30_ : dummyReport_;
   const size_t payloadLength = shouldSendFullReport ? sizeof(report30_) : sizeof(dummyReport_);
 
@@ -990,7 +990,6 @@ void ClassicBtControllerTransport::markControllerPaired() {
   }
   paired_ = true;
   pairingComplete_ = true;
-  discoverable_ = false;
 }
 
 bool ClassicBtControllerTransport::sendSubcommandReply(
@@ -1239,6 +1238,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       if (connected_) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
+        esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
         sendCurrentInputReport(false);
       }
