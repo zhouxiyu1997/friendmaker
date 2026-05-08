@@ -30,7 +30,8 @@ constexpr uint8_t kStickMax = 255;
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
-constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+// 300 ms gives the L2CAP TX queue time to drain before giving up on a button press.
+constexpr uint16_t kHidCongestionRetryBudgetMs = 300;
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
 constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
 constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
@@ -109,10 +110,12 @@ String formatBluetoothAddress(const uint8_t address[6]) {
   return String(buffer);
 }
 
+// kReply02 MAC bytes (offset 18-23) are filled dynamically at reply time
+// using the actual BT MAC address — see buildReply02().
 uint8_t kReply02[] = {
     0x00, 0x8E, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x00, 0x00, 0x00,
-    0x82, 0x02, 0x04, 0x00, kControllerTypeProCon, 0x02, 0xD4, 0xF0, 0x57, 0x6E,
-    0xF0, 0xD7, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x82, 0x02, 0x04, 0x00, kControllerTypeProCon, 0x02, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00};
 
@@ -339,6 +342,11 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
     return false;
   }
   bluedroidReady_ = true;
+
+  // Disable BT modem sleep (RF clock stays on). This tightens sniff LMP
+  // timing and reduces the collision window where two simultaneous sniff
+  // requests (Switch PM + BTA_DM_PM) leave the ACL TX credit counter stalled.
+  esp_bt_sleep_disable();
 
   initStep_ = "gap_register";
   err = esp_bt_gap_register_callback(
@@ -624,7 +632,45 @@ uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   while (true) {
-    if (!transport->explicitInputActive_) {
+    // ACL TX stall detection: after the sniff-mode LMP collision (Switch PM
+    // vs BTA_DM_PM race), the ESP32 BT controller's num_completed_pkts events
+    // stop firing, pinning the L2CAP credit counter at 0. Sends queue (ESP_OK)
+    // but SEND_REPORT_EVT comes back reason=8 indefinitely. Detect this by
+    // checking how long since the last successful EVT; if > 800 ms while
+    // connected+paired, disconnect the HID channel so the Switch reconnects.
+    // We do NOT do a full stack restart — just an HID disconnect. The ACL link
+    // stays up (or the Switch tears it down), and the Switch reconnects in ~1 s.
+    if (transport->paired_ && transport->connected_ &&
+        transport->lastSuccessfulSendMs_ > 0 &&
+        (millis() - transport->lastSuccessfulSendMs_) > 800) {
+      Serial.println("INFO bt acl-stall detected, disconnecting hid");
+      // Reset the timer first so this branch doesn't retrigger before
+      // paired_/connected_ clear in the upcoming CLOSE_EVT callback.
+      transport->lastSuccessfulSendMs_ = 0;
+      esp_bt_hid_device_disconnect();
+      // Yield so CLOSE_EVT fires and clears paired_/connected_.
+      vTaskDelay(pdMS_TO_TICKS(200));
+      continue;
+    }
+
+    // Deferred reconnect after ACL stall disconnect: the HID stack needs ~500 ms
+    // to fully close before a new connect can succeed (avoids busy status:5).
+    if (transport->pendingReconnectAfterMs_ > 0 &&
+        millis() >= transport->pendingReconnectAfterMs_) {
+      transport->pendingReconnectAfterMs_ = 0;
+      if (transport->hasPeerAddress_ && !transport->connected_) {
+        transport->attemptVirtualCablePlug(transport->lastPeerAddress_, "stall-reconnect");
+      }
+    }
+
+    // Only send 0x30 reports after pairing handshake completes (paired_ = true).
+    // Before that, the interrupt channel must be quiet so the Switch can drive
+    // the subcmd sequence (0x02, 0x08, SPI reads, 0x30) without interference.
+    // Switch Lite firmware is strict about this: it closes HID if it receives
+    // unsolicited 0x30 reports before subcmd 0x03 sets the input report mode.
+    // The inputReportSendMutex_ blocks this task during explicit input so it
+    // sends immediately when explicit input ends (no stale delay gap).
+    if (transport->paired_) {
       transport->sendCurrentInputReport(false);
     }
     vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
@@ -698,6 +744,7 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   discoverable_ = true;
   reportCongested_ = false;
   consecutiveSendReportFailures_ = 0;
+  lastSuccessfulSendMs_ = 0; // reset stall timer so it doesn't retrigger
   lastDropReason_ = reason;
   clearInputs();
 
@@ -914,11 +961,27 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
   }
 
   xSemaphoreTakeRecursive(inputReportSendMutex_, portMAX_DELAY);
+
+  // Wait for in-flight idle-send BTA callbacks to drain BEFORE resetting the
+  // submit/event counters. The idle task may have already posted send_report
+  // API calls (mutex given, BTA message queued) whose SEND_REPORT_EVT has not
+  // fired yet. If we reset immediately, those pending EVTs will later advance
+  // inputReportSendEventCount_ into the range we reserved for explicit sends,
+  // causing waitForInputReportAccepted to exit prematurely using the IDLE
+  // send's status — making all retries in repeatCurrentInputReport look like
+  // they fail even though L2CAP may have cleared congestion.
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
+    const uint32_t drainStart = millis();
+    while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
+           (millis() - drainStart) < 100) {
+      delay(1);
+    }
     Serial.printf(
-        "INFO bt send_report drain skipped submitted=%lu completed=%lu\n",
+        "INFO bt send_report drain submitted=%lu completed=%lu elapsed=%lu\n",
         static_cast<unsigned long>(inputReportSubmitCount_),
-        static_cast<unsigned long>(inputReportSendEventCount_));
+        static_cast<unsigned long>(inputReportSendEventCount_),
+        static_cast<unsigned long>(millis() - drainStart));
+    // Align to actual event count regardless of timeout.
     inputReportSubmitCount_ = inputReportSendEventCount_;
   }
   return true;
@@ -938,6 +1001,12 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
   bool loggedCongestionRetry = false;
 
   while (true) {
+    // Fire-and-forget (waitForSendEvent=false): esp_bt_hid_device_send_report
+    // returns ESP_OK when L2CAP accepts the packet into xmit_hold_q even when
+    // the channel is congested (L2CAP_DW_CONGESTED). The packet IS queued and
+    // WILL be delivered as the ACL link drains. Waiting for the EVT and
+    // treating reason=8 as failure causes spurious retries that fill the queue
+    // further and block the main loop for hundreds of ms.
     if (!sendCurrentInputReport(logFailure, false)) {
       if (shouldRetryAfterTransientSendFailure()) {
         if (congestionStartedAt == 0) {
@@ -1073,6 +1142,12 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
       data[11]);
 
   if (data[9] == 2) {
+    // Subcmd 0x02: Request Device Info. Bytes 18-23 must be our actual BT MAC
+    // address. Switch Lite firmware validates this against the advertising MAC.
+    const uint8_t *selfMac = esp_bt_dev_get_address();
+    if (selfMac != nullptr) {
+      std::memcpy(&kReply02[18], selfMac, 6);
+    }
     sendSubcommandReply(0x21, kReply02, sizeof(kReply02), "reply02");
     return;
   }
@@ -1159,6 +1234,12 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
         // incoming CTRL connection and trigger invalid-state rejects.
       }
       break;
+    case ESP_BT_GAP_QOS_CMPL_EVT:
+      Serial.printf(
+          "INFO bt qos-complete status=%d t_poll=%lu\n",
+          param->qos_cmpl.stat,
+          static_cast<unsigned long>(param->qos_cmpl.t_poll));
+      break;
     case ESP_BT_GAP_MODE_CHG_EVT:
       Serial.printf("INFO bt mode-change mode=%u\n", param->mode_chg.mode);
       break;
@@ -1239,8 +1320,15 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+        // Do NOT call esp_bt_gap_set_qos here. The QoS request races with
+        // BTA_DM_PM's sniff request, producing conflicting LMP transactions:
+        // BTM_ERR_PROCESSING (0x23) → sniff intv=8 → mode chaos. After that,
+        // the ACL TX path stalls and L2CAP stays permanently congested.
         ensureSendTask();
-        sendCurrentInputReport(false);
+        // Do not send any reports here. The Switch drives the subcmd handshake
+        // (0x02 device info, 0x08, SPI reads, 0x30 player lights). Sending
+        // unsolicited 0x30 reports before the handshake confuses Switch Lite,
+        // which closes HID immediately. The send task starts after paired_ = true.
       }
       Serial.printf(
           "INFO bt hid event=open status=%d conn=%d peer=%s\n",
@@ -1248,15 +1336,22 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
           param->open.conn_status,
           connected_ ? formatBluetoothAddress(lastPeerAddress_).c_str() : "unknown");
       break;
-    case ESP_HIDD_CLOSE_EVT:
+    case ESP_HIDD_CLOSE_EVT: {
       lastHidCloseStatus_ = param->close.status;
       lastHidCloseConnStatus_ = param->close.conn_status;
+      const bool hadPeer = hasPeerAddress_;
       enterReconnectableState("hid-close");
       Serial.printf(
           "INFO bt hid event=close status=%d conn=%d\n",
           param->close.status,
           param->close.conn_status);
+      // Schedule deferred reconnect via send task (not inline here) so the
+      // HID stack has time to fully settle before the next connect attempt.
+      if (hadPeer && appRegistered_ && hidReady_) {
+        pendingReconnectAfterMs_ = millis() + 500;
+      }
       break;
+    }
     case ESP_HIDD_SEND_REPORT_EVT:
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
         sendReportFailureCount_ += 1;
@@ -1265,6 +1360,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         }
       } else {
         consecutiveSendReportFailures_ = 0;
+        lastSuccessfulSendMs_ = millis();
       }
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;
@@ -1278,11 +1374,20 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                          param->send_report.reason == kHidErrCongested;
       readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
-        Serial.printf(
-            "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
-            param->send_report.status,
-            param->send_report.reason,
-            param->send_report.report_id);
+        // Suppress congestion noise (reason=8 = L2CAP channel full / reason=0).
+        // Idle sends are fire-and-forget and will flood when the link is in sniff.
+        // Explicit button-press failures are reported by waitForInputReportAccepted
+        // via "WARN bt send_report rejected", so we don't double-log here.
+        const bool isRoutineCongestion =
+            param->send_report.reason == kHidErrCongested ||
+            param->send_report.reason == 0;
+        if (!isRoutineCongestion) {
+          Serial.printf(
+              "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
+              param->send_report.status,
+              param->send_report.reason,
+              param->send_report.report_id);
+        }
       }
       break;
     case ESP_HIDD_GET_REPORT_EVT:

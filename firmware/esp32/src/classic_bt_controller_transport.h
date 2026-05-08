@@ -96,4 +96,11 @@ class ClassicBtControllerTransport : public ControllerTransport {
   uint8_t consecutiveSendReportFailures_ = 0;
   uint32_t sendReportFailureCount_ = 0;
   const char *lastDropReason_ = "none";
+  // Millis of the last SEND_REPORT_EVT that came back with success.
+  // Used to detect ACL TX credit stalls after sniff-mode collisions.
+  uint32_t lastSuccessfulSendMs_ = 0;
+  // When > 0, the send task should attempt to reconnect to lastPeerAddress_
+  // once millis() passes this value. Set by CLOSE_EVT after an ACL stall
+  // disconnect so the HID stack has time to fully settle.
+  volatile uint32_t pendingReconnectAfterMs_ = 0;
 };
