@@ -98,7 +98,8 @@ python -m pip install --user --upgrade platformio
    - 明确写着 `NodeMCU-32S` 的板子可以改用 `nodemcu_32s_wireless`
 4. 再次点击 `编译并刷入固件`
 5. 如果板子进不去下载模式，按住实体板上的 `BOOT` 键，再重新刷入
-6. 如果桌面端里反复刷写失败，先改用命令行手动刷入，确认固件链路本身是否正常
+6. 如果桌面端里反复刷写失败，并且你手上是主线 `ESP32-WROOM-32 / ESP-32S`，也可以改用 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个网页刷机站，用桌面版 `Chrome / Edge` 直接刷固件
+7. 如果网页刷机站也不方便使用，或你想继续确认本地固件链路，再改用命令行手动刷入，确认固件链路本身是否正常
 
 手动刷入命令：
 
