@@ -11,6 +11,7 @@
     "verify:pages": "node scripts/verify-pages.mjs"
   },
   "dependencies": {
+    "esptool-js": "0.5.7",
     "esp-web-tools": "10.1.1"
   },
   "devDependencies": {

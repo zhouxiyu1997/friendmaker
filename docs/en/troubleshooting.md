@@ -98,7 +98,8 @@ Recommended order:
    - switch to `nodemcu_32s_wireless` if your board is clearly labeled `NodeMCU-32S`
 4. Click `Build and Flash Firmware` again
 5. If the board does not enter download mode, hold the physical `BOOT` button and try flashing again
-6. If the desktop flow keeps failing, switch to manual command-line flashing first to confirm whether the firmware path itself is healthy
+6. If the desktop flow keeps failing, and your board is the mainline `ESP32-WROOM-32 / ESP-32S`, you can also switch to [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) and flash directly from desktop `Chrome / Edge`
+7. If the web flasher is not an option, or you still want to confirm the local firmware path itself, switch to manual command-line flashing
 
 Manual flash command:
 
