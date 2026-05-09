@@ -320,6 +320,7 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
           ControllerButton::ZL, COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS, inputDelayMs_)) {
     return false;
   }
+  delay(COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS);
 
   for (int step = 0; step < hueSteps; step += 1) {
     if (!transport_.pressButton(ControllerButton::ZR, buttonPressMs_, inputDelayMs_)) {
@@ -327,16 +328,14 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
     }
   }
 
-  if (saturationSteps > 0) {
-    if (!transport_.moveDirection(
-            1, 0, static_cast<uint16_t>(saturationSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+  for (uint16_t step = 0; step < saturationSteps; step += 1) {
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadRight)) {
       return false;
     }
   }
 
-  if (valueDropSteps > 0) {
-    if (!transport_.moveDirection(
-            0, 1, static_cast<uint16_t>(valueDropSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+  for (uint16_t step = 0; step < valueDropSteps; step += 1) {
+    if (!pressPaletteMenuButton(transport_, ControllerButton::DpadDown)) {
       return false;
     }
   }
