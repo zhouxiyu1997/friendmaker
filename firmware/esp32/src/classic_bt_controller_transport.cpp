@@ -431,8 +431,6 @@ void ClassicBtControllerTransport::clearConnectionState() {
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
   reconnectLastPeerOnRegister_ = false;
-  warmupActive_ = false;
-  rediscoverableAt_ = 0;
 }
 
 bool ClassicBtControllerTransport::shutdownClassicBluetooth() {
@@ -626,24 +624,6 @@ uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   while (true) {
-    if (transport->warmupActive_ && transport->connected_) {
-      if (millis() - transport->connectionOpenedAt_ >= kPostOpenWarmupMs) {
-        transport->warmupActive_ = false;
-        transport->readyForReports_ = transport->isHidReportChannelOpen();
-        Serial.printf("INFO bt warmup complete ready=%s\n",
-                      boolName(transport->readyForReports_));
-      }
-    }
-
-    if (transport->rediscoverableAt_ != 0 && millis() >= transport->rediscoverableAt_) {
-      transport->rediscoverableAt_ = 0;
-      if (!transport->connected_ && transport->gapReady_ && transport->appRegistered_) {
-        esp_err_t err = esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
-        transport->discoverable_ = err == ESP_OK;
-        Serial.printf("INFO bt deferred discoverable err=%s\n", esp_err_to_name(err));
-      }
-    }
-
     if (!transport->explicitInputActive_) {
       transport->sendCurrentInputReport(false);
     }
@@ -715,46 +695,23 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   authComplete_ = false;
   pairingComplete_ = false;
   paired_ = false;
-  warmupActive_ = false;
+  discoverable_ = true;
   reportCongested_ = false;
   consecutiveSendReportFailures_ = 0;
   lastDropReason_ = reason;
   clearInputs();
 
-  const uint32_t now = millis();
-  if (now - lastDisconnectAt_ < kFlapWindowMs) {
-    recentDisconnectCount_++;
-  } else {
-    recentDisconnectCount_ = 1;
-  }
-  lastDisconnectAt_ = now;
-
-  if (recentDisconnectCount_ >= kFlapThreshold) {
-    uint16_t backoff = recentDisconnectCount_ >= 3 ? kFlapBackoffMaxMs : kFlapBackoffMs;
-    rediscoverableAt_ = now + backoff;
-    discoverable_ = false;
-    Serial.printf(
-        "INFO bt flap detected count=%u backoff=%ums reason=%s\n",
-        recentDisconnectCount_, backoff, reason);
-
-    if (recentDisconnectCount_ == kFlapThreshold) {
-      Serial.printf("INFO bt flap triggering stack restart\n");
-      shutdownClassicBluetooth();
-      clearInputs();
-      reconnectLastPeerOnRegister_ = false;
-      if (!initializeClassicBluetooth()) {
-        Serial.printf("WARN bt flap restart failed step=%s err=%s\n", initStep_, initError_);
-      }
-    }
-  } else {
-    rediscoverableAt_ = now + kDisconnectBackoffBaseMs;
-    discoverable_ = false;
-    Serial.printf(
-        "INFO bt reconnectable reason=%s backoff=%ums\n",
-        reason, kDisconnectBackoffBaseMs);
+  esp_err_t err = ESP_OK;
+  if (gapReady_ && appRegistered_) {
+    err = esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+    discoverable_ = err == ESP_OK;
   }
 
-  ensureSendTask();
+  Serial.printf(
+      "INFO bt reconnectable reason=%s discoverable=%s err=%s\n",
+      reason,
+      boolName(discoverable_),
+      esp_err_to_name(err));
 }
 
 void ClassicBtControllerTransport::printStatus(Print &output) const {
@@ -808,12 +765,6 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println(lastSendReportReason_);
   output.print("INFO bt_last_send_report_id=");
   output.println(lastSendReportId_);
-  output.print("INFO bt_warmup_active=");
-  output.println(boolName(warmupActive_));
-  output.print("INFO bt_flap_count=");
-  output.println(recentDisconnectCount_);
-  output.print("INFO bt_rediscoverable_in_ms=");
-  output.println(rediscoverableAt_ > millis() ? rediscoverableAt_ - millis() : 0);
 
   if (hasPeerAddress_) {
     output.print("INFO bt_last_peer=");
@@ -1280,6 +1231,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
     case ESP_HIDD_OPEN_EVT:
       connected_ = param->open.status == ESP_HIDD_SUCCESS &&
                    param->open.conn_status == ESP_HIDD_CONN_STATE_CONNECTED;
+      readyForReports_ = connected_ && appRegistered_ && hidReady_;
       discoverable_ = !connected_;
       reportCongested_ = false;
       consecutiveSendReportFailures_ = 0;
@@ -1287,12 +1239,8 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
         hasPeerAddress_ = true;
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
-        connectionOpenedAt_ = millis();
-        warmupActive_ = true;
-        readyForReports_ = false;
         ensureSendTask();
-      } else {
-        readyForReports_ = false;
+        sendCurrentInputReport(false);
       }
       Serial.printf(
           "INFO bt hid event=open status=%d conn=%d peer=%s\n",
