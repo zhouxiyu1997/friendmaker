@@ -96,4 +96,16 @@ class ClassicBtControllerTransport : public ControllerTransport {
   uint8_t consecutiveSendReportFailures_ = 0;
   uint32_t sendReportFailureCount_ = 0;
   const char *lastDropReason_ = "none";
+
+  uint32_t connectionOpenedAt_ = 0;
+  bool warmupActive_ = false;
+  static constexpr uint16_t kPostOpenWarmupMs = 150;
+  uint8_t recentDisconnectCount_ = 0;
+  uint32_t lastDisconnectAt_ = 0;
+  uint32_t rediscoverableAt_ = 0;
+  static constexpr uint16_t kDisconnectBackoffBaseMs = 500;
+  static constexpr uint16_t kFlapBackoffMs = 1000;
+  static constexpr uint16_t kFlapBackoffMaxMs = 2000;
+  static constexpr uint8_t kFlapThreshold = 2;
+  static constexpr uint32_t kFlapWindowMs = 30000;
 };
