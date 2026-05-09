@@ -11,6 +11,12 @@ import {
 
 const TRANSPARENCY_ALPHA_THRESHOLD = 16;
 
+interface PaletteEntry {
+  colorHex: string;
+  colorIndex: number;
+  rgb: RgbColor;
+}
+
 function isTransparentAlpha(alpha: number): boolean {
   return alpha <= TRANSPARENCY_ALPHA_THRESHOLD;
 }
@@ -153,11 +159,7 @@ function buildFixedPalettePixelMap(
     channels: number;
     data: Buffer;
   },
-  paletteEntries: Array<{
-    colorHex: string;
-    colorIndex: number;
-    rgb: RgbColor;
-  }>,
+  paletteEntries: PaletteEntry[],
 ): PixelMap {
   const pixelMap: PixelMap = [];
 
@@ -211,29 +213,6 @@ function buildFixedPalettePixelMap(
   return pixelMap;
 }
 
-function findNearestPaletteEntry(
-  rgb: RgbColor,
-  paletteEntries: Array<{
-    colorHex: string;
-    colorIndex: number;
-    rgb: RgbColor;
-  }>,
-) {
-  let nearestColor = paletteEntries[0];
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
-  for (const entry of paletteEntries) {
-    const distance = colorDistanceSquared(rgb, entry.rgb);
-
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestColor = entry;
-    }
-  }
-
-  return nearestColor;
-}
-
 function buildOfficialPalettePixelMap(
   image: {
     width: number;
@@ -251,39 +230,8 @@ function buildOfficialPalettePixelMap(
     colorIndex,
     rgb: parseHexColor(colorHex),
   }));
-  const source = iq.utils.PointContainer.fromBuffer(image.data, image.width, image.height);
-  const adaptivePalette = iq.buildPaletteSync([source], {
-    colors: Math.max(2, Math.min(options.colorCount, options.palette.length)),
-    paletteQuantization: "wuquant",
-    colorDistanceFormula: "euclidean-bt709",
-  });
-  const adaptivePalettePoints = adaptivePalette.getPointContainer().getPointArray();
-  const selectedEntries: Array<{
-    colorHex: string;
-    colorIndex: number;
-    rgb: RgbColor;
-  }> = [];
-  const seenOfficialIndexes = new Set<number>();
 
-  for (const point of adaptivePalettePoints) {
-    const nearestEntry = findNearestPaletteEntry(
-      { r: point.r, g: point.g, b: point.b },
-      officialPaletteEntries,
-    );
-
-    if (!nearestEntry || seenOfficialIndexes.has(nearestEntry.colorIndex)) {
-      continue;
-    }
-
-    selectedEntries.push(nearestEntry);
-    seenOfficialIndexes.add(nearestEntry.colorIndex);
-  }
-
-  if (selectedEntries.length === 0 && officialPaletteEntries[0]) {
-    selectedEntries.push(officialPaletteEntries[0]);
-  }
-
-  return buildFixedPalettePixelMap(image, selectedEntries);
+  return buildFixedPalettePixelMap(image, officialPaletteEntries);
 }
 
 export function quantizePixels(
