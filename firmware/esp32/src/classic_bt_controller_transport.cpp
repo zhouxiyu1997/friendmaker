@@ -1199,12 +1199,6 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
         // incoming CTRL connection and trigger invalid-state rejects.
       }
       break;
-    case ESP_BT_GAP_QOS_CMPL_EVT:
-      Serial.printf(
-          "INFO bt qos-complete status=%d t_poll=%lu\n",
-          param->qos_cmpl.stat,
-          static_cast<unsigned long>(param->qos_cmpl.t_poll));
-      break;
     case ESP_BT_GAP_MODE_CHG_EVT:
       Serial.printf("INFO bt mode-change mode=%u\n", param->mode_chg.mode);
       break;
