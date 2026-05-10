@@ -1294,10 +1294,9 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         // QoS settings not available in ESP-IDF 4.4.7
         // Start send task immediately to keep link active and prevent Sniff mode
         ensureSendTask();
-        // Do not send any reports here. The Switch drives the subcmd handshake
-        // (0x02 device info, 0x08, SPI reads, 0x30 player lights). Sending
-        // unsolicited 0x30 reports before the handshake confuses Switch Lite,
-        // which closes HID immediately. The send task starts after paired_ = true.
+        // Send an initial report to establish the connection. The Switch drives the subcmd handshake
+        // (0x02 device info, 0x08, SPI reads, 0x30 player lights). This initial report helps
+        // keep the link active during the pairing process.
         sendCurrentInputReport(false);
       }
       Serial.printf(
