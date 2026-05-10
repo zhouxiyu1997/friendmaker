@@ -19,6 +19,7 @@ const state = {
     idleTimeoutMs: 15 * 60 * 1000,
     lastUsedAt: null,
   },
+  firmwareSwitchModels: [],
   firmwareEnvironments: [],
   firmwareTooling: {
     available: false,
@@ -114,6 +115,7 @@ const state = {
   },
   firmware: {
     busy: false,
+    switchModelId: "switch",
     environmentId: "esp32dev_wireless",
     flash: {
       status: "idle",
@@ -264,6 +266,7 @@ const els = {
   statImageScale: document.getElementById("stat-image-scale"),
   statImageOrigin: document.getElementById("stat-image-origin"),
   statImageRange: document.getElementById("stat-image-range"),
+  firmwareModelSelect: document.getElementById("firmware-model-select"),
   firmwareEnvSelect: document.getElementById("firmware-env-select"),
   firmwarePortSelect: document.getElementById("firmware-port-select"),
   firmwareRefreshButton: document.getElementById("firmware-refresh-button"),
@@ -600,6 +603,11 @@ els.timingResetButton.addEventListener("click", () => {
 
 els.firmwareEnvSelect.addEventListener("change", () => {
   state.firmware.environmentId = els.firmwareEnvSelect.value;
+  syncFirmwareUi();
+});
+
+els.firmwareModelSelect.addEventListener("change", () => {
+  state.firmware.switchModelId = els.firmwareModelSelect.value;
   syncFirmwareUi();
 });
 
@@ -1303,6 +1311,7 @@ async function startFirmwareFlash() {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        switchModelId: state.firmware.switchModelId,
         environmentId: state.firmware.environmentId,
         portPath: state.selectedPortPath,
       }),
@@ -2980,12 +2989,19 @@ function syncStudioUi() {
 }
 
 function syncFirmwareUi() {
+  const switchModel = state.firmwareSwitchModels.find(
+    (item) => item.id === state.firmware.switchModelId,
+  );
   const environment = state.firmwareEnvironments.find(
     (item) => item.id === state.firmware.environmentId,
   );
   const selectedPortAvailable = state.ports.some((port) => port.path === state.selectedPortPath);
 
-  if (environment) {
+  if (switchModel && environment) {
+    els.firmwareEnvHint.textContent = `${switchModel.description} 当前硬件环境：${environment.label}`;
+    els.firmwareModelSelect.value = switchModel.id;
+    els.firmwareEnvSelect.value = environment.id;
+  } else if (environment) {
     els.firmwareEnvHint.textContent = environment.description;
     els.firmwareEnvSelect.value = environment.id;
   }
@@ -3013,6 +3029,7 @@ function syncFirmwareUi() {
   syncWindowsSerialDriverUi();
 
   els.firmwarePortSelect.disabled = state.firmware.busy;
+  els.firmwareModelSelect.disabled = state.firmware.busy || state.firmwareSwitchModels.length === 0;
   els.firmwareStopButton.disabled = !state.firmware.busy;
   els.firmwareFlashButton.disabled =
     state.firmware.busy || installing || !state.firmwareTooling.available || !selectedPortAvailable;
@@ -3625,6 +3642,7 @@ async function loadFirmwareInfo() {
       install: payload.install ?? state.firmwareTooling.install,
       installLineCount: previousLineCount,
     };
+    state.firmwareSwitchModels = Array.isArray(payload.switchModels) ? payload.switchModels : [];
     state.firmwareEnvironments = Array.isArray(payload.environments) ? payload.environments : [];
 
     if (payload.install?.status === "running") {
@@ -3640,10 +3658,15 @@ async function loadFirmwareInfo() {
       }
     }
 
+    if (!state.firmwareSwitchModels.some((item) => item.id === state.firmware.switchModelId)) {
+      state.firmware.switchModelId = state.firmwareSwitchModels[0]?.id ?? "";
+    }
+
     if (!state.firmwareEnvironments.some((item) => item.id === state.firmware.environmentId)) {
       state.firmware.environmentId = state.firmwareEnvironments[0]?.id ?? "";
     }
 
+    renderFirmwareSwitchModels();
     renderFirmwareEnvironments();
   } catch (error) {
     appendLog(els.firmwareLogOutput, `加载固件信息失败：${getErrorMessage(error)}`);
@@ -3729,6 +3752,28 @@ function renderFirmwareEnvironments() {
       ? environment.id === state.firmware.environmentId
       : index === 0;
     els.firmwareEnvSelect.appendChild(option);
+  });
+}
+
+function renderFirmwareSwitchModels() {
+  els.firmwareModelSelect.innerHTML = "";
+
+  if (state.firmwareSwitchModels.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "未检测到可用型号";
+    els.firmwareModelSelect.appendChild(option);
+    return;
+  }
+
+  state.firmwareSwitchModels.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.recommended ? `${model.label}（推荐）` : model.label;
+    option.selected = state.firmware.switchModelId
+      ? model.id === state.firmware.switchModelId
+      : index === 0;
+    els.firmwareModelSelect.appendChild(option);
   });
 }
 
