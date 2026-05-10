@@ -1,37 +1,35 @@
-# Switch Lite Connection Stability Fixes
 
-## Overview
+# Switch Lite Bluetooth HID Connection Stability: Minimal Fixes
 
-This document describes the code changes made to improve Bluetooth HID connection stability with Nintendo Switch Lite. The changes focus on timing adjustments, power management, and connection handling to prevent sniff mode conflicts and connection drops.
+## Summary
+This document summarizes the minimal code changes required to ensure stable Bluetooth HID pairing and operation with Nintendo Switch Lite, focusing on connection stability and avoiding unnecessary modifications.
 
-## Changes Made
+## Key Fixes
 
-### Bluetooth Power Management
-- **Runtime BT sleep disable**: Added `esp_bt_sleep_disable()` in `initializeClassicBluetooth()` (line 351) to prevent the ESP32 from entering sniff mode, which conflicts with Switch Lite's power management.
+- **Disable BT modem sleep at runtime**: `esp_bt_sleep_disable()` is called in `initializeClassicBluetooth()` to prevent the ESP32 from entering sniff mode, which causes LMP collisions and pairing instability on Switch Lite.
 
-### Timing Adjustments  
-- **Send task interval**: Changed `kIdleConnectedReportIntervalMs` from 15ms to 100ms (line 41) in `idleSendIntervalMs()` to reduce LMP collision risk during sniff mode transitions.
-- **Congestion retry budget**: Extended timeout from 120ms to 300ms in send task congestion handling (lines 635-645) to accommodate Switch Lite's slower L2CAP processing.
-- **Send task startup**: Modified HID open handler (`ESP_HIDD_OPEN_EVT` case, lines 1283-1300) to start send task immediately (without sending input reports) to prevent sniff mode transitions during pairing.
+- **Fixed send interval for input reports**: The send task uses a fixed 100ms interval (see `sendTaskTrampoline`) instead of dynamic timing. This avoids timing races and LMP collisions during pairing and normal operation.
 
-### Connection Handling
-- **HID open handler**: Set scan mode to non-connectable/non-discoverable and send immediate input report to keep the link active. (Modified `ESP_HIDD_OPEN_EVT` in `onHidEvent()`, lines 1283-1300)
-- **Congestion logging**: Suppressed reason=8/0 failures in `SEND_REPORT_EVT` handler (lines 1319-1350) to reduce serial noise from expected Switch Lite behavior.
-- **ACL stall detection**: Disabled stall detection logic in send task (lines 635-645) to prevent premature disconnects during Switch Lite compatibility.
+- **Initial delay after HID open**: A 1000ms delay is used at the start of the send task to allow Switch Lite encryption to complete before sending reports, improving pairing reliability.
 
-## Files Modified
+- **Extended congestion retry budget**: HID congestion retry budget is increased to 300ms so brief L2CAP congestion windows on Switch Lite do not prematurely fail button sends.
 
-| File | Changes |
-|------|---------|
-| `classic_bt_controller_transport.cpp` | BT sleep disable, timing adjustments, connection handling improvements |
+- **Drain in-flight send-report events before explicit input**: Before explicit input retries, the code waits briefly for queued idle-send callbacks to drain and re-aligns send counters. This prevents stale idle events from being misattributed to explicit button sends.
 
-## Compatibility Results
+- **Mark paired state on handshake reply path**: On the input report path that handles subcommand `0x03`, `markControllerPaired()` is called to ensure send task/report readiness state is synchronized once the link is live.
 
-✅ **Switch Lite**: Stable connections with single pairing notifications  
-✅ **Regular Switch**: Maintained existing functionality  
-✅ **Performance**: No degradation in button response  
-✅ **Power**: Acceptable increase for stability  
+- **Suppress routine congestion warning spam**: In `ESP_HIDD_SEND_REPORT_EVT`, expected congestion outcomes (reason `8` and `0`) are filtered from warning logs to reduce noise while preserving non-routine failure visibility.
+
+## Compatibility
+
+- **Switch Lite**: Stable pairing and operation, no repeated notifications, no LMP collision disconnects.
+- **Regular Switch**: Remains compatible, no regressions observed.
 
 ## Technical Rationale
 
-The Switch Lite has stricter timing requirements and different power management behavior compared to the regular Switch. These changes prevent sniff mode conflicts that cause connection instability while maintaining compatibility with existing Switch models.
+Switch Lite is more sensitive to timing and power management than the regular Switch. Disabling modem sleep and using a fixed, conservative send interval prevents sniff mode transitions and LMP collisions, which are the root cause of pairing instability. The initial delay ensures encryption is established before input reports are sent. The congestion retry/draintime changes improve reliability when send callbacks are delayed or reordered during transient channel pressure.
+
+## Files Modified
+
+- **Issue-specific logic**: `classic_bt_controller_transport.cpp` contains the Switch Lite stability fixes described above.
+- **Additional branch changes vs main**: `main.cpp`, `.gitignore`, and `.vscode/extensions.json` also differ from main but are not core to the Switch Lite BT stability fix itself.
