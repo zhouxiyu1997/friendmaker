@@ -710,7 +710,6 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   discoverable_ = true;
   reportCongested_ = false;
   consecutiveSendReportFailures_ = 0;
-  lastSuccessfulSendMs_ = 0; // reset stall timer so it doesn't retrigger
   lastDropReason_ = reason;
   clearInputs();
 
@@ -1208,7 +1207,6 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
           static_cast<unsigned long>(param->qos_cmpl.t_poll));
       break;
     case ESP_BT_GAP_MODE_CHG_EVT:
-      lastModeChangeMs_ = millis();
       Serial.printf("INFO bt mode-change mode=%u\n", param->mode_chg.mode);
       break;
     case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
@@ -1323,7 +1321,6 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         }
       } else {
         consecutiveSendReportFailures_ = 0;
-        lastSuccessfulSendMs_ = millis();
       }
       lastSendReportStatus_ = param->send_report.status;
       lastSendReportReason_ = param->send_report.reason;
