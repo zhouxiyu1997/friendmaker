@@ -31,7 +31,7 @@ const COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT = 213;
 const COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT = 112;
 const COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS = 1_500;
 const COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3_000;
-const COLOR_PALETTE_EDITOR_MOVE_STEP_MS = 20;
+const COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
 const BASIC_COLOR_TAB_SETTLE_MS = 140;
 const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
 
@@ -139,9 +139,10 @@ function estimatePaletteConfigDurationMs(
     (COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS + timing.inputDelayMs) +
     (COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS + timing.inputDelayMs) +
     (COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS + timing.inputDelayMs) +
+    COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS +
     hueSteps * generalPressMs +
-    (saturationSteps > 0 ? saturationSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs : 0) +
-    (valueDropSteps > 0 ? valueDropSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs : 0) +
+    saturationSteps * menuPressMs +
+    valueDropSteps * menuPressMs +
     3 * generalPressMs + // B, A, B
     timing.inputDelayMs +
     PALETTE_CONFIG_TIMEOUT_MARGIN_MS

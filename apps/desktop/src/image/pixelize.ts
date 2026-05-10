@@ -1,5 +1,6 @@
-import type { DrawingMask, DrawingProfile, PixelizationResult } from "../types.js";
+import type { DrawingMask, DrawingProfile, PixelMap, PixelizationResult, RgbColor } from "../types.js";
 import { createBrushGrid } from "../brushGrid.js";
+import { colorDistanceSquared, parseHexColor } from "../utils/colors.js";
 import type { ImageSource } from "./loadImage.js";
 import {
   applyDrawingMask,
@@ -10,6 +11,13 @@ import {
 import { autoRemoveBackground } from "./removeBackground.js";
 import { resizeImage } from "./resizeImage.js";
 import { quantizePixels } from "./quantize.js";
+
+interface PixelColorUsage {
+  colorIndex: number;
+  colorHex: string;
+  rgb: RgbColor;
+  count: number;
+}
 
 function collapsePixelMapForBrush(
   pixelMap: PixelizationResult["pixelMap"],
@@ -135,6 +143,88 @@ function collapsePixelMapForBrush(
   return collapsed;
 }
 
+function findNearestPixelColorUsage(
+  rgb: RgbColor,
+  usages: PixelColorUsage[],
+): PixelColorUsage | undefined {
+  let nearestUsage = usages[0];
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const usage of usages) {
+    const distance = colorDistanceSquared(rgb, usage.rgb);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestUsage = usage;
+    }
+  }
+
+  return nearestUsage;
+}
+
+function limitPixelMapColors(pixelMap: PixelMap, colorCount: number): PixelMap {
+  if (colorCount <= 0) {
+    return pixelMap;
+  }
+
+  const colorUsageByIndex = new Map<number, PixelColorUsage>();
+
+  for (const row of pixelMap) {
+    for (const pixel of row) {
+      if (pixel.alpha <= 0 || pixel.colorIndex < 0) {
+        continue;
+      }
+
+      const existing = colorUsageByIndex.get(pixel.colorIndex);
+
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+
+      colorUsageByIndex.set(pixel.colorIndex, {
+        colorIndex: pixel.colorIndex,
+        colorHex: pixel.colorHex,
+        rgb: parseHexColor(pixel.colorHex),
+        count: 1,
+      });
+    }
+  }
+
+  if (colorUsageByIndex.size <= colorCount) {
+    return pixelMap;
+  }
+
+  const selectedUsages = Array.from(colorUsageByIndex.values())
+    .sort((left, right) => right.count - left.count || left.colorIndex - right.colorIndex)
+    .slice(0, colorCount);
+  const selectedUsageIndexes = new Set(selectedUsages.map((usage) => usage.colorIndex));
+
+  return pixelMap.map((row) =>
+    row.map((pixel) => {
+      if (pixel.alpha <= 0 || pixel.colorIndex < 0 || selectedUsageIndexes.has(pixel.colorIndex)) {
+        return pixel;
+      }
+
+      const sourceUsage = colorUsageByIndex.get(pixel.colorIndex);
+      const nearestUsage = findNearestPixelColorUsage(
+        sourceUsage?.rgb ?? parseHexColor(pixel.colorHex),
+        selectedUsages,
+      );
+
+      if (!nearestUsage) {
+        return pixel;
+      }
+
+      return {
+        ...pixel,
+        colorIndex: nearestUsage.colorIndex,
+        colorHex: nearestUsage.colorHex,
+      };
+    }),
+  );
+}
+
 export async function pixelizeImage(
   imageSource: ImageSource,
   profile: DrawingProfile,
@@ -172,7 +262,11 @@ export async function pixelizeImage(
     monoThreshold: profile.monoThreshold,
     palette: profile.palette,
   });
-  const pixelMap = collapsePixelMapForBrush(fullPixelMap, profile, drawingMaskCoverageMap);
+  const collapsedPixelMap = collapsePixelMapForBrush(fullPixelMap, profile, drawingMaskCoverageMap);
+  const pixelMap =
+    profile.colorMode === "mono"
+      ? collapsedPixelMap
+      : limitPixelMapColors(collapsedPixelMap, profile.colorCount);
 
   const usedColorIndexes = Array.from(
     new Set(

@@ -98,7 +98,8 @@ Recommended order:
    - switch to `nodemcu_32s_wireless` if your board is clearly labeled `NodeMCU-32S`
 4. Click `Build and Flash Firmware` again
 5. If the board does not enter download mode, hold the physical `BOOT` button and try flashing again
-6. If the desktop flow keeps failing, switch to manual command-line flashing first to confirm whether the firmware path itself is healthy
+6. If the desktop flow keeps failing, and your board is the mainline `ESP32-WROOM-32 / ESP-32S`, you can also switch to [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) and flash directly from desktop `Chrome / Edge`
+7. If the web flasher is not an option, or you still want to confirm the local firmware path itself, switch to manual command-line flashing
 
 Manual flash command:
 
@@ -185,22 +186,22 @@ Rule of thumb:
 - `inputDelay` behaves more like a stability knob
 - `buttonPressDuration` behaves more like an input-strength knob
 
-## 7. Colors do not fully match the preview
+## 7. Colors still show slight differences from the preview
 
-This is still a known limitation, especially in `official palette drawing`.
+The current build keeps the web preview, generated commands, and final drawing colors much closer than before. If you still notice small differences, they are usually caused by in-game display and brush behavior rather than the preview picking a different color on its own.
 
 Common reasons:
 
-- the web preview and the in-game official palette are not pixel-perfect color twins
-- real-device appearance is also affected by brush size and in-game display behavior
+- real-device appearance is affected by brush size, edge anti-aliasing, and the game's own display behavior
+- `official palette drawing` still has to map into the game's built-in `7x12` palette, so it cannot be a pixel-perfect match for every source image
 - if you manually changed the `9` palette slots on the right, the assumptions behind `official palette drawing` no longer hold
 
 Suggestions:
 
-1. Confirm that you are using `official palette drawing`
-2. Keep the game's default `9` palette slot colors
-3. Start with structurally simpler images and fewer colors
-4. If this is your first test, start from `mono drawing`
+1. Confirm that the selected mode, color count, and `Current Preview Colors` panel all match your expectation
+2. Keep the game's default `9` palette slot colors when using `official palette drawing`
+3. For color-sensitive images, try a higher color count and a smaller brush first
+4. If this is your first test, start with a structurally simple image to validate the full pipeline
 
 ## 8. Where to look next
 

@@ -1,0 +1,87 @@
+name: Flasher Site Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/flasher/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install flasher site dependencies
+        run: npm ci --prefix site/flasher --ignore-scripts
+
+      - name: Type check flasher site
+        run: npm run check --prefix site/flasher
+
+      - name: Run flasher site tests
+        run: npm run test --prefix site/flasher
+
+      - name: Install PlatformIO Core
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install platformio
+
+      - name: Build ESP32 firmware
+        run: python -m platformio run -d firmware/esp32 -e esp32dev_wireless
+
+      - name: Build flasher site
+        run: npm run build --prefix site/flasher
+
+      - name: Verify Pages artifact
+        run: npm run verify:pages --prefix site/flasher
+
+      - name: Setup Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/flasher/dist/pages
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

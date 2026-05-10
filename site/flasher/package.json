@@ -1,0 +1,21 @@
+{
+  "name": "friend-maker-flasher-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.mjs",
+    "test": "node --test",
+    "build:web": "vite build --config vite.config.mjs",
+    "build": "npm run build:web && node scripts/build-pages.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "verify:pages": "node scripts/verify-pages.mjs"
+  },
+  "dependencies": {
+    "esptool-js": "0.5.7",
+    "esp-web-tools": "10.1.1"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vite": "7.1.4"
+  }
+}
