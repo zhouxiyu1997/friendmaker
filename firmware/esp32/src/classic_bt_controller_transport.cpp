@@ -1196,9 +1196,6 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
       break;
     case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
       Serial.printf("INFO bt acl-connect status=%u\n", param->acl_conn_cmpl_stat.stat);
-      if (param->acl_conn_cmpl_stat.stat == 0 && hasPeerAddress_ && !connected_) {
-        attemptVirtualCablePlug(lastPeerAddress_, "acl-connect");
-      }
       break;
     case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT:
       Serial.printf("INFO bt acl-disconnect reason=%u\n", param->acl_disconn_cmpl_stat.reason);
