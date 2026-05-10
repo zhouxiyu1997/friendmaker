@@ -301,6 +301,7 @@ const els = {
   controllerRefreshButton: document.getElementById("controller-refresh-button"),
   controllerInfoButton: document.getElementById("controller-info-button"),
   controllerResetButton: document.getElementById("controller-reset-button"),
+  controllerClearPeerButton: document.getElementById("controller-clear-peer-button"),
   controllerDisconnectButton: document.getElementById("controller-disconnect-button"),
   controllerSerialSessionStatus: document.getElementById("controller-serial-session-status"),
   controllerActionButtons: [...document.querySelectorAll("[data-controller-action]")],
@@ -1830,6 +1831,21 @@ els.controllerResetButton.addEventListener("click", async () => {
   }
 });
 
+els.controllerClearPeerButton.addEventListener("click", async () => {
+  state.controller.autoReconnectAttempted = false;
+  controllerStatusTimeoutRecoveryAttempted = false;
+  setControllerPendingStatus({
+    title: "正在清除已保存主机",
+    detail: "正在清除开发板里记录的上一次蓝牙主机，并重新进入可发现状态。",
+  });
+
+  const payload = await runControllerCommands(["BT CLEAR-PEER", "BT RESET", "I"], "清除已保存主机");
+
+  if (payload) {
+    startControllerStatusPolling();
+  }
+});
+
 els.controllerDisconnectButton.addEventListener("click", async () => {
   setControllerBusy(true);
   stopControllerStatusPolling();
@@ -2345,6 +2361,7 @@ function setControllerBusy(isBusy) {
   els.controllerRefreshButton.disabled = isBusy;
   els.controllerInfoButton.disabled = isBusy;
   els.controllerResetButton.disabled = isBusy;
+  els.controllerClearPeerButton.disabled = isBusy;
   els.controllerStepSelect.disabled = isBusy;
   els.controllerActionButtons.forEach((button) => {
     button.disabled = isBusy;
@@ -2508,7 +2525,7 @@ async function handleControllerStatusPollTimeout() {
     });
 
     const payload = await runControllerCommands(
-      ["BT RESET LAST-PEER", "I"],
+      ["BT RESET", "I"],
       "自动恢复手柄连接",
     );
 
@@ -2516,7 +2533,7 @@ async function handleControllerStatusPollTimeout() {
       startControllerStatusPolling();
     } else {
       setControllerRecoveryFailedStatus(
-        "自动恢复没有完成。请重新点击“连接手柄”；如果你是在换一台 Switch 配对，当前不会再默认回连旧主机。",
+        "自动恢复没有完成。请重新点击“连接手柄”；如果还是卡住，再按一下开发板上的 EN 键后重试。",
       );
     }
     return;
@@ -3200,6 +3217,7 @@ function syncControllerUi() {
   const shouldDisable = state.controller.busy || state.serialSession.busy || !hasPort;
   els.controllerInfoButton.disabled = shouldDisable;
   els.controllerResetButton.disabled = shouldDisable;
+  els.controllerClearPeerButton.disabled = shouldDisable;
   els.controllerSendCustomButton.disabled = !canSendTestCommands;
   els.controllerCustomCommands.disabled = !canSendTestCommands;
   els.controllerDisconnectButton.disabled = state.controller.busy || !state.serialSession.connected;
@@ -3321,6 +3339,8 @@ async function runControllerCommands(commands, label) {
 
   if (payload?.lines) {
     updateControllerStatusFromLines(payload.lines);
+  } else {
+    await requestControllerStatus();
   }
 
   return payload;
@@ -3337,6 +3357,8 @@ async function runTimingLabCommands(commands, label) {
 
   if (result?.payload?.lines) {
     updateControllerStatusFromLines(result.payload.lines);
+  } else {
+    await requestControllerStatus();
   }
 
   return result;

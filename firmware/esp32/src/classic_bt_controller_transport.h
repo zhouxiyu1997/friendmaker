@@ -12,6 +12,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) override;
   bool moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) override;
   bool resetConnection(bool reconnectLastPeer = false) override;
+  bool clearStoredPeer() override;
   void printStatus(Print &output) const override;
   const char *name() const override;
 
@@ -36,6 +37,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool beginExplicitInput();
   void endExplicitInput();
   void resetInputReportTracking();
+  bool clearPersistedPeerAddress();
   void markControllerPaired();
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);
   bool attemptVirtualCablePlug(const uint8_t peerAddress[6], const char *reason);
@@ -82,6 +84,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   volatile uint8_t lastInputReportReason_ = 0;
   uint8_t lastPeerAddress_[6] = {};
   bool hasPeerAddress_ = false;
+  bool hasReconnectablePeer_ = false;
   bool reconnectLastPeerOnRegister_ = false;
   uint32_t ignoredReportCount_ = 0;
   uint8_t lastIgnoredReportId_ = 0;

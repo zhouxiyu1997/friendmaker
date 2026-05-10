@@ -168,6 +168,11 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
+    /els\.controllerClearPeerButton\.addEventListener\("click", async \(\) => \{[\s\S]*runControllerCommands\(\["BT CLEAR-PEER", "BT RESET", "I"\], "清除已保存主机"\)[\s\S]*startControllerStatusPolling\(\)/u,
+  );
+
+  assert.match(
+    appSource,
     /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
   );
 
@@ -178,11 +183,21 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒，自动重置蓝牙并重试一次。[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
+    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒，自动重置蓝牙并重试一次。[\s\S]*BT RESET[\s\S]*自动恢复手柄连接/u,
   );
 
   assert.match(
     appSource,
     /if \(payload\) \{[\s\S]*startControllerStatusPolling\(\);[\s\S]*\} else \{[\s\S]*setControllerRecoveryFailedStatus\(/u,
+  );
+
+  assert.match(
+    appSource,
+    /const shouldDisable = state\.controller\.busy \|\| state\.serialSession\.busy \|\| !hasPort;[\s\S]*els\.controllerClearPeerButton\.disabled = shouldDisable;/u,
+  );
+
+  assert.match(
+    appSource,
+    /if \(payload\?\.lines\) \{[\s\S]*updateControllerStatusFromLines\(payload\.lines\);[\s\S]*\} else \{[\s\S]*await requestControllerStatus\(\);[\s\S]*\}/u,
   );
 });

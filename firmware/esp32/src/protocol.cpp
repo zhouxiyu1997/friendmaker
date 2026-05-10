@@ -399,6 +399,16 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     return true;
   }
 
+  if (line == "BT CLEAR-PEER") {
+    if (!controller.clearBluetoothPeer()) {
+      error = "bt clear-peer failed";
+      return false;
+    }
+
+    Serial.println("INFO action=bt-clear-peer");
+    return true;
+  }
+
   uint16_t buttonPressMs = 0;
   uint16_t inputDelayMs = 0;
   uint16_t homeMs = 0;

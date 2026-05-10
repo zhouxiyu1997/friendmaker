@@ -107,14 +107,50 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.match(
     firmwareSource,
-    /shouldReconnectLastPeer = reconnectLastPeer && hasPeerAddress_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
+    /shouldReconnectLastPeer =[\s\S]*reconnectLastPeer && hasPeerAddress_ && hasReconnectablePeer_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
   );
   assert.match(
     firmwareSource,
-    /reconnectLastPeerOnRegister_ && hasPeerAddress_[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+    /reconnectLastPeerOnRegister_ && hasPeerAddress_ && hasReconnectablePeer_[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /markControllerPaired\(\)[\s\S]*hasReconnectablePeer_ = hasPeerAddress_/u,
+  );
+  assert.match(
+    firmwareSource,
+    /beginExplicitInput\(\)[\s\S]*waitForInputReportDrain\(HID_SEND_REPORT_TIMEOUT_MS, true\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /repeatCurrentInputReport\([\s\S]*sendCurrentInputReport\(logFailure, true\)/u,
   );
   assert.doesNotMatch(
     firmwareSource,
     /else if \(hasPeerAddress_\)[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+  );
+});
+
+test("controller firmware can clear the stored bluetooth peer", async () => {
+  const firmwareSource = await readFile(
+    new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
+    "utf8",
+  );
+  const protocolSource = await readFile(
+    new URL("../../../firmware/esp32/src/protocol.cpp", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    firmwareSource,
+    /clearStoredPeer\(\)[\s\S]*clearPersistedPeerAddress\(\)[\s\S]*hasPeerAddress_ = false/u,
+  );
+  assert.match(
+    firmwareSource,
+    /clearPersistedPeerAddress\(\)[\s\S]*nvs_erase_key\(handle, "peer_addr"\)/u,
+  );
+  assert.match(
+    protocolSource,
+    /line == "BT CLEAR-PEER"[\s\S]*controller\.clearBluetoothPeer\(\)[\s\S]*INFO action=bt-clear-peer/u,
   );
 });
