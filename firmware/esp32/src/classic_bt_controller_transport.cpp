@@ -928,10 +928,6 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
     return true;
   }
 
-  if (inputReportSendMutex_ == nullptr) {
-    return true;
-  }
-
   xSemaphoreTakeRecursive(inputReportSendMutex_, portMAX_DELAY);
 
   // Wait for in-flight idle-send BTA callbacks to drain BEFORE resetting the
