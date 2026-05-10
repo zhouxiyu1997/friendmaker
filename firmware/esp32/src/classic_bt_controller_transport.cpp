@@ -30,7 +30,10 @@ constexpr uint8_t kStickMax = 255;
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
-constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kHidCongestionRetryBudgetMs = 300;
+constexpr uint16_t kSwitchLiteSendTaskStartupDelayMs = 1000;
+constexpr uint16_t kSwitchLiteSendTaskIntervalMs = 100;
+constexpr uint16_t kExplicitInputDrainBudgetMs = 100;
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
 constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
 constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
@@ -340,6 +343,11 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   }
   bluedroidReady_ = true;
 
+  err = esp_bt_sleep_disable();
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    Serial.printf("WARN bt sleep_disable failed err=%s\n", esp_err_to_name(err));
+  }
+
   initStep_ = "gap_register";
   err = esp_bt_gap_register_callback(
       reinterpret_cast<esp_bt_gap_cb_t>(&ClassicBtControllerTransport::onGapEvent));
@@ -623,11 +631,12 @@ uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
 
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
+  vTaskDelay(pdMS_TO_TICKS(kSwitchLiteSendTaskStartupDelayMs));
   while (true) {
     if (!transport->explicitInputActive_) {
       transport->sendCurrentInputReport(false);
     }
-    vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
+    vTaskDelay(pdMS_TO_TICKS(kSwitchLiteSendTaskIntervalMs));
   }
 }
 
@@ -667,8 +676,7 @@ bool ClassicBtControllerTransport::moveDirection(
 }
 
 bool ClassicBtControllerTransport::resetConnection(bool reconnectLastPeer) {
-  const bool shouldReconnectLastPeer =
-      reconnectLastPeer && hasPeerAddress_ && hasReconnectablePeer_;
+  const bool shouldReconnectLastPeer = reconnectLastPeer && hasPeerAddress_;
   Serial.printf(
       "INFO bt reset requested mode=stack-restart reconnect_last_peer=%s\n",
       boolName(shouldReconnectLastPeer));
@@ -994,15 +1002,19 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
   }
 
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
-    Serial.printf(
-        "INFO bt send_report drain wait submitted=%lu completed=%lu\n",
-        static_cast<unsigned long>(inputReportSubmitCount_),
-        static_cast<unsigned long>(inputReportSendEventCount_));
-    if (!waitForInputReportDrain(HID_SEND_REPORT_TIMEOUT_MS, true)) {
-      xSemaphoreGiveRecursive(inputReportSendMutex_);
-      explicitInputActive_ = false;
-      return false;
+    // Let already-queued idle callbacks settle briefly, then realign the
+    // counters so explicit input does not inherit stale send completions.
+    const uint32_t drainStartedAt = millis();
+    while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
+           (millis() - drainStartedAt) < kExplicitInputDrainBudgetMs) {
+      delay(1);
     }
+    Serial.printf(
+        "INFO bt send_report drain submitted=%lu completed=%lu elapsed=%lu\n",
+        static_cast<unsigned long>(inputReportSubmitCount_),
+        static_cast<unsigned long>(inputReportSendEventCount_),
+        static_cast<unsigned long>(millis() - drainStartedAt));
+    inputReportSubmitCount_ = inputReportSendEventCount_;
   }
   return true;
 }
@@ -1021,7 +1033,7 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
   bool loggedCongestionRetry = false;
 
   while (true) {
-    if (!sendCurrentInputReport(logFailure, true)) {
+    if (!sendCurrentInputReport(logFailure, false)) {
       if (shouldRetryAfterTransientSendFailure()) {
         if (congestionStartedAt == 0) {
           congestionStartedAt = millis();
@@ -1174,6 +1186,7 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
   }
   if (data[9] == 3) {
     sendSubcommandReply(0x21, kReply03, sizeof(kReply03), "reply03");
+    markControllerPaired();
     return;
   }
   if (data[9] == 4) {
@@ -1308,7 +1321,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         if (param->register_app.in_use && param->register_app.bd_addr != nullptr) {
           reconnectLastPeerOnRegister_ = false;
           attemptVirtualCablePlug(param->register_app.bd_addr, "register-app");
-        } else if (reconnectLastPeerOnRegister_ && hasPeerAddress_ && hasReconnectablePeer_) {
+        } else if (reconnectLastPeerOnRegister_ && hasPeerAddress_) {
           // Only explicit recovery resets should preferentially reconnect the
           // previously authenticated host; ordinary pairing stays neutral.
           reconnectLastPeerOnRegister_ = false;
@@ -1374,11 +1387,15 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                          param->send_report.reason == kHidErrCongested;
       readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
-        Serial.printf(
-            "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
-            param->send_report.status,
-            param->send_report.reason,
-            param->send_report.report_id);
+        const bool isRoutineCongestion = param->send_report.reason == kHidErrCongested ||
+                                         param->send_report.reason == 0;
+        if (!isRoutineCongestion) {
+          Serial.printf(
+              "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
+              param->send_report.status,
+              param->send_report.reason,
+              param->send_report.report_id);
+        }
       }
       break;
     case ESP_HIDD_GET_REPORT_EVT:

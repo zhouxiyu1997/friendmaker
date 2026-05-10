@@ -119,6 +119,7 @@ export function deriveControllerStatus(lines) {
   const connected = boolFromInfo(info.bt_connected);
   const paired = boolFromInfo(info.bt_paired);
   const rawReady = boolFromInfo(info.bt_ready_for_reports);
+  const peerReconnectable = boolFromInfo(info.bt_last_peer_reconnectable);
   const sendReportFailureCount = numberFromInfo(info.bt_send_report_failures) ?? 0;
   const lastSendReportStatus = numberFromInfo(info.bt_last_send_report_status);
   const lastSendReportReason = numberFromInfo(info.bt_last_send_report_reason);
@@ -206,5 +207,6 @@ export function deriveControllerStatus(lines) {
     lastSendReportReason,
     lastAclDisconnectReason,
     lastDropReason: info.bt_last_drop_reason ?? "-",
+    peerReconnectableValue: peerReconnectable,
   };
 }

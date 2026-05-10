@@ -74,6 +74,7 @@ test("deriveControllerStatus marks congested inferred-ready links as unstable", 
     "INFO bt_last_send_report_status=1",
     "INFO bt_last_send_report_reason=8",
     "INFO bt_last_acl_disconnect_reason=19",
+    "INFO bt_last_peer_reconnectable=true",
     "INFO bt_init_step=discoverable",
     "INFO bt_init_error=ESP_OK",
   ]);
@@ -89,6 +90,7 @@ test("deriveControllerStatus marks congested inferred-ready links as unstable", 
   assert.equal(status?.sendReportFailureCount, 7236);
   assert.equal(status?.lastSendReportReason, 8);
   assert.equal(status?.lastAclDisconnectReason, 19);
+  assert.equal(status?.peerReconnectableValue, true);
 });
 
 test("shouldReuseExistingControllerConnection keeps active bluetooth sessions intact", () => {
@@ -183,7 +185,12 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒，自动重置蓝牙并重试一次。[\s\S]*BT RESET[\s\S]*自动恢复手柄连接/u,
+    /function shouldPreferLastPeerResetAfterTimeout\(status = state\.controller\.status\)[\s\S]*status\.peerReconnectableValue === true[\s\S]*status\.connectedValue === true \|\| status\.authValue === true/u,
+  );
+
+  assert.match(
+    appSource,
+    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*const shouldReconnectLastPeer = shouldPreferLastPeerResetAfterTimeout\(\);[\s\S]*\? \["BT RESET LAST-PEER", "I"\][\s\S]*: \["BT RESET", "I"\][\s\S]*自动恢复手柄连接/u,
   );
 
   assert.match(

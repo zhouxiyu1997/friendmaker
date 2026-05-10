@@ -25,6 +25,7 @@ export interface DerivedControllerStatus {
   lastAclDisconnectReason: number | null;
   lastDropReason: string;
   peer: string;
+  peerReconnectableValue: boolean | null;
   initStep: string;
   initError: string;
 }

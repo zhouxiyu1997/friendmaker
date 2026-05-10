@@ -107,11 +107,11 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.match(
     firmwareSource,
-    /shouldReconnectLastPeer =[\s\S]*reconnectLastPeer && hasPeerAddress_ && hasReconnectablePeer_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
+    /shouldReconnectLastPeer =[\s\S]*reconnectLastPeer && hasPeerAddress_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
   );
   assert.match(
     firmwareSource,
-    /reconnectLastPeerOnRegister_ && hasPeerAddress_ && hasReconnectablePeer_[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+    /reconnectLastPeerOnRegister_ && hasPeerAddress_[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
   );
   assert.match(
     firmwareSource,
@@ -119,11 +119,31 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.match(
     firmwareSource,
-    /beginExplicitInput\(\)[\s\S]*waitForInputReportDrain\(HID_SEND_REPORT_TIMEOUT_MS, true\)/u,
+    /beginExplicitInput\(\)[\s\S]*inputReportSendEventCount_ < inputReportSubmitCount_[\s\S]*kExplicitInputDrainBudgetMs[\s\S]*inputReportSubmitCount_ = inputReportSendEventCount_/u,
   );
   assert.match(
     firmwareSource,
-    /repeatCurrentInputReport\([\s\S]*sendCurrentInputReport\(logFailure, true\)/u,
+    /repeatCurrentInputReport\([\s\S]*sendCurrentInputReport\(logFailure, false\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /esp_bt_sleep_disable\(\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /vTaskDelay\(pdMS_TO_TICKS\(kSwitchLiteSendTaskStartupDelayMs\)\)[\s\S]*vTaskDelay\(pdMS_TO_TICKS\(kSwitchLiteSendTaskIntervalMs\)\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /kHidCongestionRetryBudgetMs = 300/u,
+  );
+  assert.match(
+    firmwareSource,
+    /if \(data\[9\] == 3\) \{[\s\S]*sendSubcommandReply\(0x21, kReply03, sizeof\(kReply03\), "reply03"\);[\s\S]*markControllerPaired\(\);/u,
+  );
+  assert.match(
+    firmwareSource,
+    /const bool isRoutineCongestion =[\s\S]*param->send_report\.reason == 0[\s\S]*if \(!isRoutineCongestion\)/u,
   );
   assert.doesNotMatch(
     firmwareSource,

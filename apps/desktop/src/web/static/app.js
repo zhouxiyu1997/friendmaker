@@ -183,6 +183,7 @@ const state = {
       lastSendReportReason: null,
       lastAclDisconnectReason: null,
       lastDropReason: "-",
+      peerReconnectableValue: null,
       updatedAt: null,
     },
   },
@@ -2470,6 +2471,7 @@ function setControllerPendingStatus({ title, detail }) {
     lastSendReportReason: null,
     lastAclDisconnectReason: null,
     lastDropReason: "-",
+    peerReconnectableValue: null,
     initStep: "-",
     initError: "-",
   });
@@ -2507,6 +2509,18 @@ function isControllerConnectionStillInProgress(status = state.controller.status)
   );
 }
 
+function shouldPreferLastPeerResetAfterTimeout(status = state.controller.status) {
+  if (!status || status.peer === "-") {
+    return false;
+  }
+
+  if (status.peerReconnectableValue === true) {
+    return true;
+  }
+
+  return status.connectedValue === true || status.authValue === true;
+}
+
 async function handleControllerStatusPollTimeout() {
   stopControllerStatusPolling();
 
@@ -2515,19 +2529,24 @@ async function handleControllerStatusPollTimeout() {
     !controllerStatusTimeoutRecoveryAttempted
   ) {
     controllerStatusTimeoutRecoveryAttempted = true;
+    const shouldReconnectLastPeer = shouldPreferLastPeerResetAfterTimeout();
+    const recoveryCommands = shouldReconnectLastPeer
+      ? ["BT RESET LAST-PEER", "I"]
+      : ["BT RESET", "I"];
     appendLog(
       els.controllerLogOutput,
-      "等待连接超过 45 秒，自动重置蓝牙并重试一次。",
+      shouldReconnectLastPeer
+        ? "等待连接超过 45 秒，自动重置蓝牙并优先尝试恢复上次主机连接。"
+        : "等待连接超过 45 秒，自动重置蓝牙并重试一次。",
     );
     setControllerPendingStatus({
       title: "正在自动恢复手柄连接",
-      detail: "开发板长时间停留在广播或握手状态，正在重置蓝牙并重新进入可发现状态。",
+      detail: shouldReconnectLastPeer
+        ? "开发板长时间停留在握手状态，正在重置蓝牙并优先恢复上次保存的主机连接。"
+        : "开发板长时间停留在广播或握手状态，正在重置蓝牙并重新进入可发现状态。",
     });
 
-    const payload = await runControllerCommands(
-      ["BT RESET", "I"],
-      "自动恢复手柄连接",
-    );
+    const payload = await runControllerCommands(recoveryCommands, "自动恢复手柄连接");
 
     if (payload) {
       startControllerStatusPolling();
