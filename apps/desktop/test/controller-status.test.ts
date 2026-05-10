@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  asControllerDisconnectedStatus,
   deriveControllerStatus,
   normalizeControllerDeviceLines,
   readInfoLineMap,
+  shouldMarkControllerDisconnected,
   shouldReuseExistingControllerConnection,
 } from "../src/web/static/controllerStatus.js";
 
@@ -91,6 +93,28 @@ test("deriveControllerStatus marks congested inferred-ready links as unstable", 
   assert.equal(status?.lastAclDisconnectReason, 19);
 });
 
+test("deriveControllerStatus treats USB HID transport as sendable when USB is started", () => {
+  const status = deriveControllerStatus([
+    "INFO transport=usb-hid-switch",
+    "INFO usb_mode=switch-hid",
+    "INFO usb_started=true",
+    "INFO usb_reports=1",
+    "INFO usb_report_failures=1",
+  ]);
+
+  assert.ok(status);
+  assert.equal(status?.tone, "success");
+  assert.equal(status?.transport, "usb-hid-switch");
+  assert.equal(status?.profile, "switch-hid");
+  assert.equal(status?.connected, "USB已启动");
+  assert.equal(status?.paired, "不适用");
+  assert.equal(status?.ready, "可发送");
+  assert.equal(status?.connectedValue, true);
+  assert.equal(status?.pairedValue, true);
+  assert.equal(status?.readyValue, true);
+  assert.equal(status?.sendReportFailureCount, 1);
+});
+
 test("shouldReuseExistingControllerConnection keeps active bluetooth sessions intact", () => {
   assert.equal(
     shouldReuseExistingControllerConnection({
@@ -148,6 +172,53 @@ test("shouldReuseExistingControllerConnection keeps active bluetooth sessions in
     }),
     false,
   );
+  assert.equal(
+    shouldReuseExistingControllerConnection({
+      readyValue: false,
+      connectedValue: false,
+      authValue: false,
+      discoverableValue: false,
+      disconnectedValue: true,
+    }),
+    false,
+  );
+});
+
+test("controller status marks a previously ready bluetooth controller as disconnected", () => {
+  const nextStatus = deriveControllerStatus([
+    "INFO transport=classic-bt-uartswitchcon",
+    "INFO bt_profile=uartswitchcon-pro-controller",
+    "INFO bt_discoverable=false",
+    "INFO bt_auth_complete=false",
+    "INFO bt_connected=false",
+    "INFO bt_paired=false",
+    "INFO bt_ready_for_reports=false",
+    "INFO bt_last_peer=E0:EF:BF:10:40:25",
+    "INFO bt_last_acl_disconnect_reason=19",
+    "INFO bt_init_step=discoverable",
+    "INFO bt_init_error=ESP_OK",
+  ]);
+
+  assert.ok(nextStatus);
+  assert.equal(
+    shouldMarkControllerDisconnected(
+      {
+        readyValue: true,
+      },
+      nextStatus,
+    ),
+    true,
+  );
+
+  const disconnectedStatus = asControllerDisconnectedStatus(nextStatus);
+  assert.equal(disconnectedStatus.tone, "warning");
+  assert.equal(disconnectedStatus.pill, "已断开");
+  assert.equal(disconnectedStatus.title, "手柄已断开");
+  assert.equal(disconnectedStatus.ready, "未就绪");
+  assert.equal(disconnectedStatus.readyValue, false);
+  assert.equal(disconnectedStatus.disconnectedValue, true);
+  assert.match(disconnectedStatus.detail, /直接点击网页端“连接手柄”即可恢复/u);
+  assert.match(disconnectedStatus.detail, /更改握法\/顺序/u);
 });
 
 test("controller status updates also resync the controller action buttons", async () => {
@@ -163,12 +234,12 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /els\.controllerInfoButton\.addEventListener\("click", async \(\) => \{[\s\S]*await requestControllerStatus\(\)[\s\S]*shouldReuseExistingControllerConnection\(state\.controller\.status\)[\s\S]*runControllerCommands\(\["BT RESET", "I"\], "连接手柄"\)/u,
+    /els\.controllerInfoButton\.addEventListener\("click", async \(\) => \{[\s\S]*await requestControllerStatus\(\)[\s\S]*shouldReuseExistingControllerConnection\(state\.controller\.status\)[\s\S]*runControllerCommands\(\["BT RESET LAST-PEER", "I"\], "连接手柄"\)/u,
   );
 
   assert.match(
     appSource,
-    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
+    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*当前不会自动重置蓝牙[\s\S]*setControllerRecoveryFailedStatus\(/u,
   );
 
   assert.match(
@@ -178,11 +249,36 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒，自动重置蓝牙并重试一次。[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
+    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*等待连接超过 45 秒[\s\S]*当前不会自动重置蓝牙[\s\S]*setControllerRecoveryFailedStatus\(/u,
   );
 
   assert.match(
     appSource,
-    /if \(payload\) \{[\s\S]*startControllerStatusPolling\(\);[\s\S]*\} else \{[\s\S]*setControllerRecoveryFailedStatus\(/u,
+    /shouldMarkControllerDisconnected\(previousStatus, status\)[\s\S]*asControllerDisconnectedStatus\(status\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /state\.controller\.status\.disconnectedValue === true[\s\S]*检测到蓝牙手柄已断开[\s\S]*stopControllerStatusPolling\(\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /state\.controller\.status\.readyValue === true[\s\S]*controllerStatusPollDeadlineMs = 0[\s\S]*ensureControllerStatusPollTimer\(CONTROLLER_READY_WATCH_INTERVAL_MS\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /async function executeStudioCommands[\s\S]*appendLog\(els\.studioLogOutput, logPrefix\);[\s\S]*stopControllerStatusPolling\(\);[\s\S]*setStudioBusy\(true\);/u,
+  );
+
+  assert.match(
+    appSource,
+    /ensureFreshControllerActionStatus\(action\)[\s\S]*runControllerCommands\(commands, `测试动作 \$\{action\}`\)/u,
+  );
+
+  assert.match(
+    appSource,
+    /const shouldRefreshStatusAfterRun = !commands\.some\(\(command\) => command\.trim\(\) === "I"\)[\s\S]*await requestControllerStatus\(\);/u,
   );
 });

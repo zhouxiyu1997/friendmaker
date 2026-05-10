@@ -1,5 +1,7 @@
 import {
+  asControllerDisconnectedStatus,
   deriveControllerStatus,
+  shouldMarkControllerDisconnected,
   shouldReuseExistingControllerConnection,
 } from "./controllerStatus.js";
 import {
@@ -178,6 +180,7 @@ const state = {
       readyInferredValue: false,
       unstableValue: false,
       reconnectRecommendedValue: false,
+      disconnectedValue: false,
       sendReportFailureCount: 0,
       lastSendReportStatus: null,
       lastSendReportReason: null,
@@ -364,6 +367,7 @@ const STUDIO_RESET_REVEAL_DELAY_MS = 4_000;
 let firmwareFlashPollTimer = null;
 let controllerStatusPollTimer = null;
 let controllerStatusPollDeadlineMs = 0;
+let controllerStatusPollIntervalMs = 0;
 let controllerStatusPollInFlight = false;
 let controllerStatusTimeoutRecoveryAttempted = false;
 let studioPreviewRefreshTimer = null;
@@ -372,6 +376,7 @@ let studioPreviewBoundsRequestSerial = 0;
 const studioTemplateOverlayCache = new Map();
 const CONTROLLER_STATUS_POLL_INTERVAL_MS = 1_000;
 const CONTROLLER_STATUS_POLL_WINDOW_MS = 45_000;
+const CONTROLLER_READY_WATCH_INTERVAL_MS = 3_000;
 
 const STUDIO_IMAGE_SCALE_LIMITS = {
   min: 25,
@@ -1212,6 +1217,7 @@ async function executeStudioCommands({ logPrefix }) {
 
   appendLog(els.studioLogOutput, logPrefix);
 
+  stopControllerStatusPolling();
   setStudioBusy(true);
 
   try {
@@ -1808,7 +1814,7 @@ els.controllerInfoButton.addEventListener("click", async () => {
     detail: "正在重置蓝牙并重新进入可发现状态，请保持 Switch 停在“更改握法/顺序”页面。",
   });
 
-  const payload = await runControllerCommands(["BT RESET", "I"], "连接手柄");
+  const payload = await runControllerCommands(["BT RESET LAST-PEER", "I"], "连接手柄");
 
   if (payload) {
     startControllerStatusPolling();
@@ -1823,7 +1829,7 @@ els.controllerResetButton.addEventListener("click", async () => {
     detail: "正在重启蓝牙协议栈并读取最新状态，请稍等片刻。",
   });
 
-  const payload = await runControllerCommands(["BT RESET", "I"], "重置手柄蓝牙");
+  const payload = await runControllerCommands(["BT RESET LAST-PEER", "I"], "重置手柄蓝牙");
 
   if (payload) {
     startControllerStatusPolling();
@@ -1863,6 +1869,11 @@ els.controllerActionButtons.forEach((button) => {
 
     if (commands.length === 0) {
       appendLog(els.controllerLogOutput, `未知测试动作：${action}`);
+      return;
+    }
+
+    stopControllerStatusPolling();
+    if (!(await ensureFreshControllerActionStatus(action))) {
       return;
     }
 
@@ -2448,6 +2459,7 @@ function setControllerPendingStatus({ title, detail }) {
     readyInferredValue: false,
     unstableValue: false,
     reconnectRecommendedValue: false,
+    disconnectedValue: false,
     sendReportFailureCount: 0,
     lastSendReportStatus: null,
     lastSendReportReason: null,
@@ -2464,7 +2476,12 @@ function updateControllerStatusFromLines(lines) {
   if (!status) {
     return;
   }
-  setControllerStatus(status);
+
+  const previousStatus = state.controller.status;
+  const nextStatus = shouldMarkControllerDisconnected(previousStatus, status)
+    ? asControllerDisconnectedStatus(status)
+    : status;
+  setControllerStatus(nextStatus);
 }
 
 function isControllerReadyForStudio() {
@@ -2480,45 +2497,67 @@ function setControllerRecoveryFailedStatus(detail) {
   });
 }
 
-function isControllerConnectionStillInProgress(status = state.controller.status) {
+function shouldAutoRecoverControllerTimeout(status = state.controller.status) {
   return (
     status?.readyValue !== true &&
     status?.tone !== "error" &&
-    (status?.connectedValue === true ||
-      status?.authValue === true ||
-      status?.discoverableValue === true)
+    status?.discoverableValue === true &&
+    status?.authValue !== true &&
+    status?.connectedValue !== true
   );
+}
+
+function canSendControllerAction(action, status = state.controller.status) {
+  if (action === "pair-lr") {
+    return (
+      status?.readyValue === true ||
+      status?.connectedValue === true ||
+      status?.authValue === true
+    );
+  }
+
+  return status?.readyValue === true;
+}
+
+async function ensureFreshControllerActionStatus(action) {
+  const statusOk = await requestControllerStatus({ logErrors: true });
+
+  if (statusOk !== true) {
+    appendLog(els.controllerLogOutput, "动作发送前状态刷新失败，请重新点击“连接手柄”后再试。");
+    return false;
+  }
+
+  if (canSendControllerAction(action)) {
+    return true;
+  }
+
+  if (action === "pair-lr") {
+    appendLog(
+      els.controllerLogOutput,
+      "当前还没有进入可发送输入的蓝牙阶段。请让 Switch 停在“更改握法/顺序”页面继续等待；状态至少到“已认证”或“已连接”后再按 L+R。",
+    );
+  } else {
+    appendLog(
+      els.controllerLogOutput,
+      "当前手柄状态不是“已就绪”，已阻止发送普通按键，避免网页绿色状态过期后继续发无效命令。请重新连接手柄。",
+    );
+  }
+
+  return false;
 }
 
 async function handleControllerStatusPollTimeout() {
   stopControllerStatusPolling();
 
-  if (
-    isControllerConnectionStillInProgress() &&
-    !controllerStatusTimeoutRecoveryAttempted
-  ) {
+  if (shouldAutoRecoverControllerTimeout() && !controllerStatusTimeoutRecoveryAttempted) {
     controllerStatusTimeoutRecoveryAttempted = true;
     appendLog(
       els.controllerLogOutput,
-      "等待连接超过 45 秒，自动重置蓝牙并重试一次。",
+      "等待连接超过 45 秒。为避免打断 Switch 正在进行的蓝牙握手，当前不会自动重置蓝牙；请确认停在“更改握法/顺序”页面后手动点击“重置手柄蓝牙”。",
     );
-    setControllerPendingStatus({
-      title: "正在自动恢复手柄连接",
-      detail: "开发板长时间停留在广播或握手状态，正在重置蓝牙并重新进入可发现状态。",
-    });
-
-    const payload = await runControllerCommands(
-      ["BT RESET LAST-PEER", "I"],
-      "自动恢复手柄连接",
+    setControllerRecoveryFailedStatus(
+      "开发板长时间停留在广播或握手状态。请确认 Switch 停在“更改握法/顺序”页面，然后手动点击“重置手柄蓝牙”；如果还是卡住，再按一下开发板上的 EN 键后重试。",
     );
-
-    if (payload) {
-      startControllerStatusPolling();
-    } else {
-      setControllerRecoveryFailedStatus(
-        "自动恢复没有完成。请重新点击“连接手柄”；如果你是在换一台 Switch 配对，当前不会再默认回连旧主机。",
-      );
-    }
     return;
   }
 
@@ -2609,49 +2648,54 @@ async function pollControllerStatus() {
     return;
   }
 
-  if (state.controller.status.reconnectRecommendedValue === true) {
+  if (state.controller.status.disconnectedValue === true) {
     stopControllerStatusPolling();
-
-    if (!state.controller.autoReconnectAttempted) {
-      state.controller.autoReconnectAttempted = true;
-      appendLog(
-        els.controllerLogOutput,
-        "检测到手柄已经连上但报告通道持续拥塞，自动重置蓝牙并重试一次。",
-      );
-      setControllerPendingStatus({
-        title: "正在自动恢复手柄连接",
-        detail: "检测到当前连接容易立刻断联，正在重置蓝牙并重新进入可发现状态。",
-      });
-
-      const payload = await runControllerCommands(
-        ["BT RESET LAST-PEER", "I"],
-        "自动恢复手柄连接",
-      );
-
-      if (payload) {
-        startControllerStatusPolling();
-      } else {
-        setControllerRecoveryFailedStatus(
-          "自动恢复没有完成。请重新点击“连接手柄”；如果还是容易断联，再按一下开发板上的 EN 键后重试。",
-        );
-      }
-
-      return;
-    }
-
     appendLog(
       els.controllerLogOutput,
-      "自动重试后连接仍然不稳定。请重新点击“连接手柄”；如果还是容易断联，再按一下开发板上的 EN 键后重试。",
+      "检测到蓝牙手柄已断开。通常直接点击网页端“连接手柄”即可恢复；如果长时间无法恢复或一直广播，再进入 Switch 的“更改握法/顺序”页面后重试。",
+    );
+    return;
+  }
+
+  if (state.controller.status.reconnectRecommendedValue === true) {
+    stopControllerStatusPolling();
+    state.controller.autoReconnectAttempted = true;
+    appendLog(
+      els.controllerLogOutput,
+      "检测到手柄报告通道不稳定。为避免打断 Switch 正在进行的蓝牙握手，当前不会自动重置蓝牙；请手动点击“重置手柄蓝牙”后重试。",
+    );
+    setControllerRecoveryFailedStatus(
+      "当前蓝牙报告通道不稳定，继续发送按键容易出现电脑显示完成但 Switch 不响应。请手动重置蓝牙并重新进入“更改握法/顺序”页面配对。",
     );
     return;
   }
 
   if (
-    state.controller.status.readyValue === true ||
     state.controller.status.tone === "error"
   ) {
     stopControllerStatusPolling();
+    return;
   }
+
+  if (state.controller.status.readyValue === true) {
+    controllerStatusPollDeadlineMs = 0;
+    ensureControllerStatusPollTimer(CONTROLLER_READY_WATCH_INTERVAL_MS);
+  }
+}
+
+function ensureControllerStatusPollTimer(intervalMs) {
+  if (controllerStatusPollTimer && controllerStatusPollIntervalMs === intervalMs) {
+    return;
+  }
+
+  if (controllerStatusPollTimer) {
+    window.clearInterval(controllerStatusPollTimer);
+  }
+
+  controllerStatusPollIntervalMs = intervalMs;
+  controllerStatusPollTimer = window.setInterval(() => {
+    void pollControllerStatus();
+  }, intervalMs);
 }
 
 function startControllerStatusPolling(durationMs = CONTROLLER_STATUS_POLL_WINDOW_MS) {
@@ -2664,11 +2708,7 @@ function startControllerStatusPolling(durationMs = CONTROLLER_STATUS_POLL_WINDOW
     Date.now() + durationMs,
   );
 
-  if (!controllerStatusPollTimer) {
-    controllerStatusPollTimer = window.setInterval(() => {
-      void pollControllerStatus();
-    }, CONTROLLER_STATUS_POLL_INTERVAL_MS);
-  }
+  ensureControllerStatusPollTimer(CONTROLLER_STATUS_POLL_INTERVAL_MS);
 
   void pollControllerStatus();
 }
@@ -2682,10 +2722,12 @@ function stopControllerStatusPolling() {
 
   window.clearInterval(controllerStatusPollTimer);
   controllerStatusPollTimer = null;
+  controllerStatusPollIntervalMs = 0;
 }
 
 function renderStudioConnectionStatus() {
   const ready = state.controller.status.readyValue === true;
+  const disconnected = state.controller.status.disconnectedValue === true;
   const connected = state.controller.status.connectedValue === true;
   const auth = state.controller.status.authValue === true;
   const discoverable = state.controller.status.discoverableValue === true;
@@ -2700,6 +2742,11 @@ function renderStudioConnectionStatus() {
     pill = "已连接";
     title = "手柄已连接，可以开始绘制";
     detail = `当前开发板已经处于可发送状态，可以把绘制脚本发到 ${state.selectedPortPath || "串口设备"}。`;
+  } else if (disconnected) {
+    tone = "warning";
+    pill = "已断开";
+    title = "手柄已断开";
+    detail = "Switch 已经不再保持开发板蓝牙手柄连接。通常直接到“手柄测试”页点击“连接手柄”即可恢复；如果长时间无法恢复或一直广播，再进入 Switch 的“更改握法/顺序”页面后重试。";
   } else {
     tone = "warning";
     pill = "需要测试";
@@ -3193,6 +3240,11 @@ function syncTimingLabUi() {
 function syncControllerUi() {
   const hasPort = Boolean(state.selectedPortPath);
   const ready = state.controller.status.readyValue === true;
+  const canAttemptPair =
+    !state.controller.busy &&
+    !state.serialSession.busy &&
+    hasPort &&
+    canSendControllerAction("pair-lr");
   const canSendTestCommands = !state.controller.busy && !state.serialSession.busy && hasPort && ready;
 
   els.controllerPortSelect.disabled = state.controller.busy || state.serialSession.busy;
@@ -3204,7 +3256,8 @@ function syncControllerUi() {
   els.controllerCustomCommands.disabled = !canSendTestCommands;
   els.controllerDisconnectButton.disabled = state.controller.busy || !state.serialSession.connected;
   els.controllerActionButtons.forEach((button) => {
-    button.disabled = !canSendTestCommands;
+    const action = button.dataset.controllerAction ?? "";
+    button.disabled = action === "pair-lr" ? !canAttemptPair : !canSendTestCommands;
   });
   els.controllerTimingHint.textContent = `当前动作测试会先套用 ${buildSharedTimingConfigCommand()}。`;
   renderSerialSessionStatus();
@@ -3310,6 +3363,7 @@ async function runTimedSerialCommands({
 }
 
 async function runControllerCommands(commands, label) {
+  const shouldRefreshStatusAfterRun = !commands.some((command) => command.trim() === "I");
   const result = await runTimedSerialCommands({
     commands,
     label,
@@ -3321,6 +3375,10 @@ async function runControllerCommands(commands, label) {
 
   if (payload?.lines) {
     updateControllerStatusFromLines(payload.lines);
+  }
+
+  if (shouldRefreshStatusAfterRun) {
+    await requestControllerStatus();
   }
 
   return payload;

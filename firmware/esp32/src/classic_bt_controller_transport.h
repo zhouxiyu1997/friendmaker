@@ -36,9 +36,12 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool beginExplicitInput();
   void endExplicitInput();
   void resetInputReportTracking();
+  void rememberPeerAddress(const uint8_t peerAddress[6]);
+  void persistLastPeerAddress(const uint8_t peerAddress[6]);
   void markControllerPaired();
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);
   bool attemptVirtualCablePlug(const uint8_t peerAddress[6], const char *reason);
+  void scheduleLastPeerReconnect(const char *reason);
   void enterReconnectableState(const char *reason);
   void processIncomingReport(uint8_t reportId, uint16_t len, uint8_t *data);
   void handleGapEvent(int event, void *param);
@@ -47,6 +50,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   static void onGapEvent(int event, void *param);
   static void onHidEvent(int event, void *param);
   static void sendTaskTrampoline(void *param);
+  static void reconnectTaskTrampoline(void *param);
 
   static ClassicBtControllerTransport *instance_;
 
@@ -83,7 +87,16 @@ class ClassicBtControllerTransport : public ControllerTransport {
   uint8_t lastPeerAddress_[6] = {};
   bool hasPeerAddress_ = false;
   bool reconnectLastPeerOnRegister_ = false;
+  TaskHandle_t reconnectTaskHandle_ = nullptr;
   uint32_t ignoredReportCount_ = 0;
+  uint32_t intrReportCount_ = 0;
+  uint8_t lastIntrReportId_ = 0;
+  uint16_t lastIntrReportLen_ = 0;
+  uint8_t lastIntrSubcommand_ = 0;
+  uint8_t lastIntrArg0_ = 0;
+  uint8_t lastIntrArg1_ = 0;
+  uint32_t replyCount_ = 0;
+  const char *lastReplyLabel_ = "-";
   uint8_t lastIgnoredReportId_ = 0;
   uint16_t lastIgnoredReportLen_ = 0;
   uint8_t lastAclDisconnectReason_ = 0;

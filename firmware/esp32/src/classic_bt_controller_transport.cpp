@@ -29,12 +29,13 @@ constexpr uint8_t kStickMax = 255;
 // is congested, so a short retry window is safe and avoids aborting the whole
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
-constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
-constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS * 2;
+constexpr uint16_t kHidCongestionRetryBudgetMs = 800;
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
-constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
-constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
-constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
+constexpr uint16_t kIdlePrePairingReportIntervalMs = 60;
+constexpr uint16_t kIdleCongestedReportIntervalMs = 120;
+constexpr uint16_t kIdleConnectedReportIntervalMs = 30;
+constexpr uint16_t kLastPeerReconnectDelayMs = 1200;
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -115,6 +116,11 @@ uint8_t kReply02[] = {
     0xF0, 0xD7, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00};
+constexpr size_t kReply02BluetoothAddressOffset = 18;
+
+void setReply02BluetoothAddress(const uint8_t address[6]) {
+  std::memcpy(&kReply02[kReply02BluetoothAddressOffset], address, 6);
+}
 
 uint8_t kReply08[] = {
     0x01, 0x8E, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x00, 0x00, 0x00,
@@ -251,9 +257,11 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   uint8_t baseMac[6] = {};
   const char *baseMacSource = "efuse-derived";
   bool shouldPersistDerivedMac = false;
-  nvs_handle handle;
+  bool nvsOpened = false;
+  nvs_handle handle = 0;
   err = nvs_open("storage", NVS_READWRITE, &handle);
   if (err == ESP_OK) {
+    nvsOpened = true;
     size_t size = sizeof(baseMac);
     err = nvs_get_blob(handle, "mac_addr", baseMac, &size);
     if (err == ESP_OK && size == sizeof(baseMac)) {
@@ -286,7 +294,18 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
     }
   }
 
-  if (err == ESP_OK || shouldPersistDerivedMac) {
+  if (nvsOpened) {
+    uint8_t peerAddress[6] = {};
+    size_t peerAddressSize = sizeof(peerAddress);
+    const esp_err_t peerErr = nvs_get_blob(handle, "peer_addr", peerAddress, &peerAddressSize);
+    if (peerErr == ESP_OK && peerAddressSize == sizeof(peerAddress)) {
+      std::memcpy(lastPeerAddress_, peerAddress, sizeof(lastPeerAddress_));
+      hasPeerAddress_ = true;
+      reconnectLastPeerOnRegister_ = true;
+      Serial.printf(
+          "INFO bt loaded_peer=%s source=nvs\n",
+          formatBluetoothAddress(lastPeerAddress_).c_str());
+    }
     nvs_close(handle);
   }
 
@@ -294,6 +313,10 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   if (err != ESP_OK) {
     Serial.printf("WARN base_mac_set failed err=%s\n", esp_err_to_name(err));
     return false;
+  }
+  uint8_t btMac[6] = {};
+  if (esp_read_mac(btMac, ESP_MAC_BT) == ESP_OK) {
+    setReply02BluetoothAddress(btMac);
   }
 
   Serial.printf(
@@ -305,6 +328,17 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
       baseMac[4],
       baseMac[5],
       baseMacSource);
+  if (btMac[0] != 0 || btMac[1] != 0 || btMac[2] != 0 || btMac[3] != 0 ||
+      btMac[4] != 0 || btMac[5] != 0) {
+    Serial.printf(
+        "INFO bt device_mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
+        btMac[0],
+        btMac[1],
+        btMac[2],
+        btMac[3],
+        btMac[4],
+        btMac[5]);
+  }
   return true;
 }
 
@@ -420,6 +454,14 @@ void ClassicBtControllerTransport::clearConnectionState() {
   initStep_ = "idle";
   initError_ = "none";
   ignoredReportCount_ = 0;
+  intrReportCount_ = 0;
+  lastIntrReportId_ = 0;
+  lastIntrReportLen_ = 0;
+  lastIntrSubcommand_ = 0;
+  lastIntrArg0_ = 0;
+  lastIntrArg1_ = 0;
+  replyCount_ = 0;
+  lastReplyLabel_ = "-";
   lastIgnoredReportId_ = 0;
   lastIgnoredReportLen_ = 0;
   lastAclDisconnectReason_ = 0;
@@ -430,13 +472,17 @@ void ClassicBtControllerTransport::clearConnectionState() {
   lastSendReportId_ = 0;
   sendReportFailureCount_ = 0;
   lastDropReason_ = "none";
-  reconnectLastPeerOnRegister_ = false;
+  reconnectLastPeerOnRegister_ = hasPeerAddress_;
 }
 
 bool ClassicBtControllerTransport::shutdownClassicBluetooth() {
   initStep_ = "shutdown";
   initError_ = "none";
   readyForReports_ = false;
+  if (reconnectTaskHandle_ != nullptr) {
+    vTaskDelete(reconnectTaskHandle_);
+    reconnectTaskHandle_ = nullptr;
+  }
 
   const esp_err_t scanErr =
       esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
@@ -631,6 +677,18 @@ void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   }
 }
 
+void ClassicBtControllerTransport::reconnectTaskTrampoline(void *param) {
+  auto *transport = static_cast<ClassicBtControllerTransport *>(param);
+  vTaskDelay(pdMS_TO_TICKS(kLastPeerReconnectDelayMs));
+
+  if (transport->hasPeerAddress_ && !transport->connected_) {
+    transport->attemptVirtualCablePlug(transport->lastPeerAddress_, "delayed-last-peer");
+  }
+
+  transport->reconnectTaskHandle_ = nullptr;
+  vTaskDelete(nullptr);
+}
+
 bool ClassicBtControllerTransport::pressButtons(
     uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
   if (!beginExplicitInput()) {
@@ -667,10 +725,15 @@ bool ClassicBtControllerTransport::moveDirection(
 }
 
 bool ClassicBtControllerTransport::resetConnection(bool reconnectLastPeer) {
+  // Let the Switch initiate the HID connection from "Change Grip/Order".
+  // Proactive virtual-cable reconnects can race with the host's incoming
+  // connection while the ESP32 Bluetooth stack is restarting.
   const bool shouldReconnectLastPeer = reconnectLastPeer && hasPeerAddress_;
+  const bool requestedReconnectLastPeer = reconnectLastPeer && hasPeerAddress_;
   Serial.printf(
-      "INFO bt reset requested mode=stack-restart reconnect_last_peer=%s\n",
-      boolName(shouldReconnectLastPeer));
+      "INFO bt reset requested mode=stack-restart reconnect_last_peer=%s requested_last_peer=%s\n",
+      boolName(shouldReconnectLastPeer),
+      boolName(requestedReconnectLastPeer));
 
   shutdownClassicBluetooth();
 
@@ -747,6 +810,22 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println(lastDropReason_);
   output.print("INFO bt_ignored_report_count=");
   output.println(ignoredReportCount_);
+  output.print("INFO bt_intr_report_count=");
+  output.println(intrReportCount_);
+  output.print("INFO bt_last_intr_report=");
+  output.print(lastIntrReportId_);
+  output.print("/");
+  output.println(lastIntrReportLen_);
+  output.print("INFO bt_last_intr_subcmd=");
+  output.print(lastIntrSubcommand_);
+  output.print("/");
+  output.print(lastIntrArg0_);
+  output.print("/");
+  output.println(lastIntrArg1_);
+  output.print("INFO bt_reply_count=");
+  output.println(replyCount_);
+  output.print("INFO bt_last_reply=");
+  output.println(lastReplyLabel_);
   output.print("INFO bt_last_ignored_report=");
   output.print(lastIgnoredReportId_);
   output.print("/");
@@ -765,6 +844,14 @@ void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println(lastSendReportReason_);
   output.print("INFO bt_last_send_report_id=");
   output.println(lastSendReportId_);
+  output.print("INFO bt_report_congested=");
+  output.println(boolName(reportCongested_));
+  output.print("INFO bt_consecutive_send_failures=");
+  output.println(consecutiveSendReportFailures_);
+  output.print("INFO bt_input_report_submitted=");
+  output.println(inputReportSubmitCount_);
+  output.print("INFO bt_input_report_completed=");
+  output.println(inputReportSendEventCount_);
 
   if (hasPeerAddress_) {
     output.print("INFO bt_last_peer=");
@@ -938,7 +1025,7 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
   bool loggedCongestionRetry = false;
 
   while (true) {
-    if (!sendCurrentInputReport(logFailure, false)) {
+    if (!sendCurrentInputReport(logFailure, true)) {
       if (shouldRetryAfterTransientSendFailure()) {
         if (congestionStartedAt == 0) {
           congestionStartedAt = millis();
@@ -984,6 +1071,41 @@ void ClassicBtControllerTransport::resetInputReportTracking() {
   consecutiveSendReportFailures_ = 0;
 }
 
+void ClassicBtControllerTransport::rememberPeerAddress(const uint8_t peerAddress[6]) {
+  const bool changed = !hasPeerAddress_ ||
+                       std::memcmp(lastPeerAddress_, peerAddress, sizeof(lastPeerAddress_)) != 0;
+  std::memcpy(lastPeerAddress_, peerAddress, sizeof(lastPeerAddress_));
+  hasPeerAddress_ = true;
+
+  if (changed) {
+    persistLastPeerAddress(peerAddress);
+  }
+}
+
+void ClassicBtControllerTransport::persistLastPeerAddress(const uint8_t peerAddress[6]) {
+  nvs_handle handle = 0;
+  esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt persist_peer open failed err=%s\n", esp_err_to_name(err));
+    return;
+  }
+
+  err = nvs_set_blob(handle, "peer_addr", peerAddress, 6);
+  if (err == ESP_OK) {
+    err = nvs_commit(handle);
+  }
+  nvs_close(handle);
+
+  if (err != ESP_OK) {
+    Serial.printf("WARN bt persist_peer failed err=%s\n", esp_err_to_name(err));
+    return;
+  }
+
+  Serial.printf(
+      "INFO bt persisted_peer=%s\n",
+      formatBluetoothAddress(peerAddress).c_str());
+}
+
 void ClassicBtControllerTransport::markControllerPaired() {
   if (!paired_) {
     resetInputReportTracking();
@@ -1020,6 +1142,8 @@ bool ClassicBtControllerTransport::sendSubcommandReply(
     return false;
   }
 
+  replyCount_ += 1;
+  lastReplyLabel_ = label;
   Serial.printf("INFO bt reply label=%s report=%u len=%u\n", label, reportId, length);
   return true;
 }
@@ -1047,6 +1171,26 @@ bool ClassicBtControllerTransport::attemptVirtualCablePlug(
   return true;
 }
 
+void ClassicBtControllerTransport::scheduleLastPeerReconnect(const char *reason) {
+  if (!hasPeerAddress_ || reconnectTaskHandle_ != nullptr) {
+    return;
+  }
+
+  Serial.printf(
+      "INFO bt reconnect scheduled reason=%s peer=%s delay_ms=%u\n",
+      reason,
+      formatBluetoothAddress(lastPeerAddress_).c_str(),
+      kLastPeerReconnectDelayMs);
+  xTaskCreatePinnedToCore(
+      &ClassicBtControllerTransport::reconnectTaskTrampoline,
+      "bt_reconnect_task",
+      3072,
+      this,
+      1,
+      &reconnectTaskHandle_,
+      0);
+}
+
 void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint16_t len, uint8_t *data) {
   if (len < 12 || data == nullptr) {
     const bool repeated = ignoredReportCount_ > 0 && lastIgnoredReportId_ == reportId &&
@@ -1056,13 +1200,29 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
     lastIgnoredReportLen_ = len;
     if (!repeated || ignoredReportCount_ <= 5 || (ignoredReportCount_ % 20) == 0) {
       Serial.printf(
-          "INFO bt intr ignored report=%u len=%u count=%lu\n",
+          "INFO bt intr ignored report=%u len=%u count=%lu data=",
           reportId,
           len,
           static_cast<unsigned long>(ignoredReportCount_));
+      if (data == nullptr) {
+        Serial.print("null");
+      } else {
+        const uint16_t loggedLength = len < 16 ? len : 16;
+        for (uint16_t index = 0; index < loggedLength; index += 1) {
+          Serial.printf("%02X", data[index]);
+        }
+      }
+      Serial.println();
     }
     return;
   }
+
+  intrReportCount_ += 1;
+  lastIntrReportId_ = reportId;
+  lastIntrReportLen_ = len;
+  lastIntrSubcommand_ = data[9];
+  lastIntrArg0_ = data[10];
+  lastIntrArg1_ = data[11];
 
   Serial.printf(
       "INFO bt intr report=%u len=%u subcmd=%u arg0=%u arg1=%u\n",
@@ -1073,6 +1233,18 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
       data[11]);
 
   if (data[9] == 2) {
+    const uint8_t *btAddress = esp_bt_dev_get_address();
+    if (btAddress != nullptr) {
+      setReply02BluetoothAddress(btAddress);
+      Serial.printf(
+          "INFO bt reply02_mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
+          btAddress[0],
+          btAddress[1],
+          btAddress[2],
+          btAddress[3],
+          btAddress[4],
+          btAddress[5]);
+    }
     sendSubcommandReply(0x21, kReply02, sizeof(kReply02), "reply02");
     return;
   }
@@ -1129,7 +1301,9 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
     return;
   }
   if (data[9] == 48) {
-    markControllerPaired();
+    // UARTSwitchCon only treats 0x30 as "paired" for Joy-Con mode. In Pro
+    // Controller mode, Switch usually still needs the later 0x21/0x21 NFC/IR
+    // MCU step before the controller remains usable outside Change Grip/Order.
     sendSubcommandReply(0x21, kReply3001, sizeof(kReply3001), "reply3001");
     return;
   }
@@ -1152,8 +1326,7 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
           param->auth_cmpl.stat,
           reinterpret_cast<const char *>(param->auth_cmpl.device_name));
       if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
-        std::memcpy(lastPeerAddress_, param->auth_cmpl.bda, sizeof(lastPeerAddress_));
-        hasPeerAddress_ = true;
+        rememberPeerAddress(param->auth_cmpl.bda);
         // Let Switch initiate the HID control channel after authentication.
         // Proactively opening a virtual cable here can race with the host's own
         // incoming CTRL connection and trigger invalid-state rejects.
@@ -1217,12 +1390,11 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
 
         if (param->register_app.in_use && param->register_app.bd_addr != nullptr) {
           reconnectLastPeerOnRegister_ = false;
-          attemptVirtualCablePlug(param->register_app.bd_addr, "register-app");
+          rememberPeerAddress(param->register_app.bd_addr);
+          scheduleLastPeerReconnect("register-app");
         } else if (reconnectLastPeerOnRegister_ && hasPeerAddress_) {
-          // Only explicit recovery resets should preferentially reconnect the
-          // previously authenticated host; ordinary pairing stays neutral.
           reconnectLastPeerOnRegister_ = false;
-          attemptVirtualCablePlug(lastPeerAddress_, "register-app-last-peer");
+          scheduleLastPeerReconnect("register-app-last-peer");
         } else {
           reconnectLastPeerOnRegister_ = false;
         }
@@ -1236,8 +1408,7 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       reportCongested_ = false;
       consecutiveSendReportFailures_ = 0;
       if (connected_) {
-        std::memcpy(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_));
-        hasPeerAddress_ = true;
+        rememberPeerAddress(param->open.bd_addr);
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
         sendCurrentInputReport(false);

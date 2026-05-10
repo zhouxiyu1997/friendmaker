@@ -197,6 +197,38 @@ function getEmbeddedDeviceLine(line: string): string | null {
   return DEVICE_LINE_PREFIXES.some((prefix) => candidate.startsWith(prefix)) ? candidate : null;
 }
 
+function splitSequencedAckAndEmbeddedDeviceLine(line: string): {
+  ackLine: string;
+  embeddedDeviceLine: string | null;
+} | null {
+  if (!line.startsWith("OK ") && !line.startsWith("ERR ")) {
+    return null;
+  }
+
+  const embeddedIndexes = DEVICE_LINE_PREFIXES.map((prefix) => line.indexOf(prefix)).filter(
+    (index) => index > 0,
+  );
+
+  if (embeddedIndexes.length === 0) {
+    return null;
+  }
+
+  const embeddedIndex = Math.min(...embeddedIndexes);
+  const ackLine = line.slice(0, embeddedIndex).trim();
+
+  if (!parseSequencedAck(ackLine)) {
+    return null;
+  }
+
+  const embeddedDeviceLine = line.slice(embeddedIndex).trim();
+  return {
+    ackLine,
+    embeddedDeviceLine: DEVICE_LINE_PREFIXES.some((prefix) => embeddedDeviceLine.startsWith(prefix))
+      ? embeddedDeviceLine
+      : null,
+  };
+}
+
 export function isCongestedControllerSendReportLine(line: string): boolean {
   const match =
     /^WARN bt hid event=send-report status=(\d+) reason=(\d+) report=(\d+)$/u.exec(line.trim());
@@ -251,9 +283,14 @@ function waitForAck(
         return;
       }
 
-      const ack = parseSequencedAck(line);
+      const splitLine = splitSequencedAckAndEmbeddedDeviceLine(line);
+      const ack = parseSequencedAck(splitLine?.ackLine ?? line);
 
       if (ack) {
+        if (splitLine?.embeddedDeviceLine) {
+          options?.onDeviceLine?.(splitLine.embeddedDeviceLine);
+        }
+
         if (ack.sessionId !== expected.sessionId || ack.sequence !== expected.sequence) {
           options?.onDeviceLine?.(
             `WARN ignored ack session=${ack.sessionId} seq=${ack.sequence} expected=${expected.sessionId}:${expected.sequence}`,

@@ -19,6 +19,7 @@ export interface DerivedControllerStatus {
   readyInferredValue: boolean;
   unstableValue: boolean;
   reconnectRecommendedValue: boolean;
+  disconnectedValue: boolean;
   sendReportFailureCount: number;
   lastSendReportStatus: number | null;
   lastSendReportReason: number | null;
@@ -43,9 +44,23 @@ export function shouldReuseExistingControllerConnection(status: {
   connectedValue?: boolean | null;
   authValue?: boolean | null;
   discoverableValue?: boolean | null;
+  disconnectedValue?: boolean | null;
   reconnectRecommendedValue?: boolean | null;
   unstableValue?: boolean | null;
 } | null | undefined): boolean;
+export function shouldMarkControllerDisconnected(
+  previousStatus: {
+    readyValue?: boolean | null;
+  } | null | undefined,
+  nextStatus: {
+    transport?: string | null;
+    profile?: string | null;
+    readyValue?: boolean | null;
+    connectedValue?: boolean | null;
+    authValue?: boolean | null;
+  } | null | undefined,
+): boolean;
+export function asControllerDisconnectedStatus(status: DerivedControllerStatus): DerivedControllerStatus;
 export function deriveControllerStatus(
   lines: Array<string | null | undefined>,
 ): DerivedControllerStatus | null;

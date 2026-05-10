@@ -111,7 +111,7 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.match(
     firmwareSource,
-    /reconnectLastPeerOnRegister_ && hasPeerAddress_[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+    /reconnectLastPeerOnRegister_ && hasPeerAddress_[\s\S]*scheduleLastPeerReconnect\("register-app-last-peer"\)/u,
   );
   assert.doesNotMatch(
     firmwareSource,
