@@ -1322,18 +1322,12 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                          param->send_report.reason == kHidErrCongested;
       readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
-        if (kSuppressRoutineCongestionWarnings) {
-          const bool isRoutineCongestion =
-              param->send_report.reason == kHidErrCongested ||
-              param->send_report.reason == 0;
-          if (!isRoutineCongestion) {
-            Serial.printf(
-                "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
-                param->send_report.status,
-                param->send_report.reason,
-                param->send_report.report_id);
-          }
-        } else {
+        const bool isRoutineCongestion =
+            param->send_report.reason == kHidErrCongested ||
+            param->send_report.reason == 0;
+        const bool shouldLogSendReportWarning =
+            !kSuppressRoutineCongestionWarnings || !isRoutineCongestion;
+        if (shouldLogSendReportWarning) {
           Serial.printf(
               "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
               param->send_report.status,
