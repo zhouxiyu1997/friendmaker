@@ -3,7 +3,7 @@
   "variants": [
     {
       "switchModelId": "switch",
-      "switchModelLabel": "Switch / OLED / V2",
+      "switchModelLabel": "Switch",
       "switchModelDescription": "标准 Switch 固件行为。",
       "environmentId": "esp32dev_wireless",
       "boardId": "esp32dev_wireless",
