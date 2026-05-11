@@ -138,10 +138,6 @@ pio run -e esp32dev_wireless_switch_lite -t upload
    - 当前这块开发板是否存在个体差异
    - 附近是否有太多同时活跃的蓝牙设备
    - 当前开发板是否已经明显发热
-7. 如果按上面步骤仍然实在连接不上，也可以试试 [夸克网盘：friend maker（张老师优化版本）](https://pan.quark.cn/s/08ca5bdebc46)
-
-夸克口令：`/~995f3YSMso~:/`
-
 说明：
 
 - 主测设备在连接建立后通常可以保持稳定
