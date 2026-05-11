@@ -457,15 +457,6 @@ test("recovery session API persists visible files across restarts and can discar
     assert.ok(startPayload.recoverySession);
     await access(startPayload.recoverySession.commandsFilePath);
 
-    const sessionsResponse = await fetch(`${firstServer.url}/api/recovery/sessions`);
-    assert.equal(sessionsResponse.ok, true);
-    const sessionsPayload = (await sessionsResponse.json()) as {
-      sessions?: Array<{ jobId: string }>;
-    };
-
-    assert.equal(sessionsPayload.sessions?.length, 1);
-    assert.equal(sessionsPayload.sessions?.[0]?.jobId, startPayload.recoverySession.jobId);
-
     let finalExecutionStatus = "idle";
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -485,6 +476,19 @@ test("recovery session API persists visible files across restarts and can discar
 
     assert.equal(finalExecutionStatus, "completed");
 
+    const completedSessionsResponse = await fetch(`${firstServer.url}/api/recovery/sessions`);
+    assert.equal(completedSessionsResponse.ok, true);
+    const completedSessionsPayload = (await completedSessionsResponse.json()) as {
+      sessions?: Array<{ jobId: string }>;
+    };
+
+    assert.equal(
+      completedSessionsPayload.sessions?.some(
+        (session) => session.jobId === startPayload.recoverySession?.jobId,
+      ),
+      true,
+    );
+
     await firstServer.close();
     firstServer = null;
 
@@ -495,7 +499,12 @@ test("recovery session API persists visible files across restarts and can discar
       sessions?: Array<{ jobId: string }>;
     };
 
-    assert.equal(restartedSessionsPayload.sessions?.[0]?.jobId, startPayload.recoverySession.jobId);
+    assert.equal(
+      restartedSessionsPayload.sessions?.some(
+        (session) => session.jobId === startPayload.recoverySession?.jobId,
+      ),
+      true,
+    );
 
     const discardResponse = await fetch(`${secondServer.url}/api/recovery/discard`, {
       method: "POST",

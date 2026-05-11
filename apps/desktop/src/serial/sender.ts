@@ -208,6 +208,18 @@ export function isCongestedControllerSendReportLine(line: string): boolean {
   return match[1] !== "0" && match[2] === "8" && match[3] === "48";
 }
 
+export function isDirectControllerInputReportFailureLine(line: string): boolean {
+  const trimmed = line.trim();
+
+  return (
+    /^WARN bt send_report timeout report=48(?:\s|$)/u.test(trimmed) ||
+    /^WARN bt send_report rejected status=\d+ reason=\d+ report=48(?:\s|$)/u.test(trimmed) ||
+    /^WARN bt explicit_input blocked connected=(true|false) paired=(true|false) ready=(true|false)(?:\s|$)/u.test(
+      trimmed,
+    )
+  );
+}
+
 function waitForAck(
   parser: ReadlineParser,
   port: SerialPort,
@@ -286,6 +298,11 @@ function waitForAck(
             ),
           ),
         );
+        return;
+      }
+
+      if (isDirectControllerInputReportFailureLine(line)) {
+        finish(() => reject(new Error("controller input report failed")));
         return;
       }
 

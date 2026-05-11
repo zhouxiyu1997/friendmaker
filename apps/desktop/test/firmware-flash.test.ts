@@ -85,13 +85,22 @@ test("esp32 wireless firmware keeps a 2MB-compatible upload header for generic b
     "utf8",
   );
 
-  assert.match(
-    platformioSource,
-    /\[env:esp32dev_wireless\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB/u,
+  const hasDirectSettingsInWirelessEnv =
+    /\[env:esp32dev_wireless\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB/u.test(
+      platformioSource,
+    );
+  const hasInherited2MbSettings =
+    /\[env:esp32dev_wireless_base\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB[\s\S]*\[env:esp32dev_wireless\][\s\S]*extends\s*=\s*env:esp32dev_wireless_base/u.test(
+      platformioSource,
+    );
+
+  assert.equal(
+    hasDirectSettingsInWirelessEnv || hasInherited2MbSettings,
+    true,
   );
 });
 
-test("controller firmware keeps bluetooth identity stable and waits for host HID open after auth", async () => {
+test("controller firmware keeps bluetooth identity stable while scoping Switch Lite behavior", async () => {
   const firmwareSource = await readFile(
     new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
     "utf8",
@@ -107,7 +116,7 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.match(
     firmwareSource,
-    /shouldReconnectLastPeer =[\s\S]*reconnectLastPeer && hasPeerAddress_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
+    /shouldReconnectLastPeer =[\s\S]*reconnectLastPeer && hasPeerAddress_ && hasReconnectablePeer_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
   );
   assert.match(
     firmwareSource,
@@ -119,35 +128,66 @@ test("controller firmware keeps bluetooth identity stable and waits for host HID
   );
   assert.match(
     firmwareSource,
-    /beginExplicitInput\(\)[\s\S]*inputReportSendEventCount_ < inputReportSubmitCount_[\s\S]*kExplicitInputDrainBudgetMs[\s\S]*inputReportSubmitCount_ = inputReportSendEventCount_/u,
+    /beginExplicitInput\(\)[\s\S]*WARN bt explicit_input blocked connected=%s paired=%s ready=%s[\s\S]*inputReportSendEventCount_ < inputReportSubmitCount_[\s\S]*kExplicitInputDrainBudgetMs[\s\S]*inputReportSubmitCount_ = inputReportSendEventCount_/u,
   );
   assert.match(
     firmwareSource,
-    /repeatCurrentInputReport\([\s\S]*sendCurrentInputReport\(logFailure, false\)/u,
+    /repeatCurrentInputReport\([\s\S]*sendCurrentInputReport\(logFailure, kWaitForExplicitInputSendEvent\)/u,
   );
   assert.match(
     firmwareSource,
-    /esp_bt_sleep_disable\(\)/u,
+    /#if !defined\(SWITCH_LITE\)[\s\S]*kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS \* 4[\s\S]*kWaitForExplicitInputSendEvent = false[\s\S]*#else[\s\S]*kHidCongestionRetryBudgetMs = 300[\s\S]*kWaitForExplicitInputSendEvent = true[\s\S]*kSuppressRoutineCongestionWarnings = true/u,
   );
   assert.match(
     firmwareSource,
-    /vTaskDelay\(pdMS_TO_TICKS\(kSwitchLiteSendTaskStartupDelayMs\)\)[\s\S]*vTaskDelay\(pdMS_TO_TICKS\(kSwitchLiteSendTaskIntervalMs\)\)/u,
+    /#if defined\(SWITCH_LITE\)[\s\S]*esp_bt_sleep_disable\(\)/u,
   );
   assert.match(
     firmwareSource,
-    /kHidCongestionRetryBudgetMs = 300/u,
+    /sendTaskTrampoline[\s\S]*if \(kSendTaskStartupDelayMs > 0\)[\s\S]*if \(kUseFixedSendInterval\) \{[\s\S]*kFixedSendTaskIntervalMs[\s\S]*transport->idleSendIntervalMs\(\)/u,
   );
   assert.match(
     firmwareSource,
-    /if \(data\[9\] == 3\) \{[\s\S]*sendSubcommandReply\(0x21, kReply03, sizeof\(kReply03\), "reply03"\);[\s\S]*markControllerPaired\(\);/u,
+    /if \(data\[9\] == 3\) \{[\s\S]*sendSubcommandReply\(0x21, kReply03, sizeof\(kReply03\), "reply03"\);[\s\S]*if \(kMarkPairedOnSubcommand03\) \{[\s\S]*markControllerPaired\(\);[\s\S]*\}/u,
   );
   assert.match(
     firmwareSource,
-    /const bool isRoutineCongestion =[\s\S]*param->send_report\.reason == 0[\s\S]*if \(!isRoutineCongestion\)/u,
+    /const bool shouldLogSendReportWarning =[\s\S]*!kSuppressRoutineCongestionWarnings \|\| !isRoutineCongestion[\s\S]*if \(shouldLogSendReportWarning\)/u,
   );
   assert.doesNotMatch(
     firmwareSource,
     /else if \(hasPeerAddress_\)[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+  );
+});
+
+test("firmware flasher keeps the Switch model selector and Switch Lite upload mapping", async () => {
+  const pageSource = await readFile(
+    new URL("../src/web/static/index.html", import.meta.url),
+    "utf8",
+  );
+  const appSource = await readFile(
+    new URL("../src/web/static/app.js", import.meta.url),
+    "utf8",
+  );
+  const serverSource = await readFile(
+    new URL("../src/web/server.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(pageSource, /Switch 型号/u);
+  assert.match(appSource, /switchModelId:\s*"switch"/u);
+  assert.match(
+    appSource,
+    /state\.firmwareSwitchModels = Array\.isArray\(payload\.switchModels\) \? payload\.switchModels : \[\]/u,
+  );
+  assert.match(serverSource, /switchModels:\s*SWITCH_MODELS/u);
+  assert.match(
+    serverSource,
+    /const switchModelId = body\.switchModelId[\s\S]*getSwitchModel\(body\.switchModelId\)\.id[\s\S]*: "switch"/u,
+  );
+  assert.match(
+    serverSource,
+    /if \(switchModelId !== "switch_lite"\) \{[\s\S]*return environmentId;[\s\S]*if \(environmentId === "esp32dev_wireless"\) \{[\s\S]*return SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;/u,
   );
 });
 

@@ -13,6 +13,7 @@ import { serializeCommands } from "../src/protocol/serializer.js";
 import {
   getAckTimeoutForCommand,
   isCongestedControllerSendReportLine,
+  isDirectControllerInputReportFailureLine,
 } from "../src/serial/sender.js";
 import { SimulatedAckSender } from "../src/simulator/sender.js";
 import type { BrushSize, DrawingMask, DrawingProfile, Pixel, PixelMap, RawImageData } from "../src/types.js";
@@ -403,6 +404,33 @@ test("congested controller send-report warnings are recognized as execution-fata
   assert.equal(
     isCongestedControllerSendReportLine(
       "INFO bt hid event=send-report status=1 reason=8 report=48",
+    ),
+    false,
+  );
+});
+
+test("direct controller input failure lines are recognized without congestion spam", () => {
+  assert.equal(
+    isDirectControllerInputReportFailureLine(
+      "WARN bt send_report timeout report=48 waited_ms=250 expected=12",
+    ),
+    true,
+  );
+  assert.equal(
+    isDirectControllerInputReportFailureLine(
+      "WARN bt send_report rejected status=1 reason=8 report=48",
+    ),
+    true,
+  );
+  assert.equal(
+    isDirectControllerInputReportFailureLine(
+      "WARN bt explicit_input blocked connected=true paired=true ready=false",
+    ),
+    true,
+  );
+  assert.equal(
+    isDirectControllerInputReportFailureLine(
+      "WARN bt send_report rejected status=1 reason=8 report=33",
     ),
     false,
   );

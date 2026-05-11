@@ -30,9 +30,23 @@ constexpr uint8_t kStickMax = 255;
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
+#if !defined(SWITCH_LITE)
+constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kSendTaskStartupDelayMs = 0;
+constexpr bool kUseFixedSendInterval = false;
+constexpr bool kWaitForExplicitInputSendEvent = false;
+constexpr bool kMarkPairedOnSubcommand03 = false;
+constexpr bool kSuppressRoutineCongestionWarnings = false;
+#else
+// Switch Lite needs a wider retry window during transient L2CAP congestion.
 constexpr uint16_t kHidCongestionRetryBudgetMs = 300;
-constexpr uint16_t kSwitchLiteSendTaskStartupDelayMs = 1000;
-constexpr uint16_t kSwitchLiteSendTaskIntervalMs = 100;
+constexpr uint16_t kSendTaskStartupDelayMs = 1000;
+constexpr bool kUseFixedSendInterval = true;
+constexpr bool kWaitForExplicitInputSendEvent = true;
+constexpr bool kMarkPairedOnSubcommand03 = true;
+constexpr bool kSuppressRoutineCongestionWarnings = true;
+#endif
+constexpr uint16_t kFixedSendTaskIntervalMs = 100;
 constexpr uint16_t kExplicitInputDrainBudgetMs = 100;
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
 constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
@@ -343,10 +357,13 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   }
   bluedroidReady_ = true;
 
-  err = esp_bt_sleep_disable();
-  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-    Serial.printf("WARN bt sleep_disable failed err=%s\n", esp_err_to_name(err));
+#if defined(SWITCH_LITE)
+  // Switch Lite variant: prevent modem sleep to avoid sniff-mode flapping.
+  const esp_err_t sleepErr = esp_bt_sleep_disable();
+  if (!isIgnorableBluetoothError(sleepErr)) {
+    Serial.printf("WARN bt sleep_disable failed err=%s\n", esp_err_to_name(sleepErr));
   }
+#endif
 
   initStep_ = "gap_register";
   err = esp_bt_gap_register_callback(
@@ -631,12 +648,18 @@ uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
 
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
-  vTaskDelay(pdMS_TO_TICKS(kSwitchLiteSendTaskStartupDelayMs));
+  if (kSendTaskStartupDelayMs > 0) {
+    vTaskDelay(pdMS_TO_TICKS(kSendTaskStartupDelayMs));
+  }
   while (true) {
     if (!transport->explicitInputActive_) {
       transport->sendCurrentInputReport(false);
     }
-    vTaskDelay(pdMS_TO_TICKS(kSwitchLiteSendTaskIntervalMs));
+    if (kUseFixedSendInterval) {
+      vTaskDelay(pdMS_TO_TICKS(kFixedSendTaskIntervalMs));
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
+    }
   }
 }
 
@@ -676,7 +699,8 @@ bool ClassicBtControllerTransport::moveDirection(
 }
 
 bool ClassicBtControllerTransport::resetConnection(bool reconnectLastPeer) {
-  const bool shouldReconnectLastPeer = reconnectLastPeer && hasPeerAddress_;
+  const bool shouldReconnectLastPeer =
+      reconnectLastPeer && hasPeerAddress_ && hasReconnectablePeer_;
   Serial.printf(
       "INFO bt reset requested mode=stack-restart reconnect_last_peer=%s\n",
       boolName(shouldReconnectLastPeer));
@@ -1001,19 +1025,25 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
     return false;
   }
 
+  // Before explicit input, align submit/event counters to avoid attributing
+  // earlier idle-send callbacks to the new explicit send window.
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
-    // Let already-queued idle callbacks settle briefly, then realign the
-    // counters so explicit input does not inherit stale send completions.
-    const uint32_t drainStartedAt = millis();
+    uint32_t drainElapsedMs = 0;
+#if defined(SWITCH_LITE)
+    // Switch Lite can report SEND_REPORT_EVT later than expected under transient
+    // congestion, so briefly wait for in-flight idle events before re-aligning.
+    const uint32_t drainStart = millis();
     while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
-           (millis() - drainStartedAt) < kExplicitInputDrainBudgetMs) {
+           (millis() - drainStart) < kExplicitInputDrainBudgetMs) {
       delay(1);
     }
+    drainElapsedMs = millis() - drainStart;
+#endif
     Serial.printf(
         "INFO bt send_report drain submitted=%lu completed=%lu elapsed=%lu\n",
         static_cast<unsigned long>(inputReportSubmitCount_),
         static_cast<unsigned long>(inputReportSendEventCount_),
-        static_cast<unsigned long>(millis() - drainStartedAt));
+        static_cast<unsigned long>(drainElapsedMs));
     inputReportSubmitCount_ = inputReportSendEventCount_;
   }
   return true;
@@ -1033,7 +1063,7 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
   bool loggedCongestionRetry = false;
 
   while (true) {
-    if (!sendCurrentInputReport(logFailure, false)) {
+    if (!sendCurrentInputReport(logFailure, kWaitForExplicitInputSendEvent)) {
       if (shouldRetryAfterTransientSendFailure()) {
         if (congestionStartedAt == 0) {
           congestionStartedAt = millis();
@@ -1186,7 +1216,9 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
   }
   if (data[9] == 3) {
     sendSubcommandReply(0x21, kReply03, sizeof(kReply03), "reply03");
-    markControllerPaired();
+    if (kMarkPairedOnSubcommand03) {
+      markControllerPaired();
+    }
     return;
   }
   if (data[9] == 4) {
@@ -1387,9 +1419,12 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                          param->send_report.reason == kHidErrCongested;
       readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
-        const bool isRoutineCongestion = param->send_report.reason == kHidErrCongested ||
-                                         param->send_report.reason == 0;
-        if (!isRoutineCongestion) {
+        const bool isRoutineCongestion =
+            param->send_report.reason == kHidErrCongested ||
+            param->send_report.reason == 0;
+        const bool shouldLogSendReportWarning =
+            !kSuppressRoutineCongestionWarnings || !isRoutineCongestion;
+        if (shouldLogSendReportWarning) {
           Serial.printf(
               "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
               param->send_report.status,
