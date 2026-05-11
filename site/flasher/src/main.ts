@@ -1,5 +1,6 @@
 import "esp-web-tools/dist/web/install-button.js";
 import { ESPLoader, Transport } from "esptool-js";
+import firmwareVariantConfig from "../shared/firmware-variants.json";
 import "./styles.css";
 
 interface FirmwareManifest {
@@ -27,9 +28,9 @@ interface FirmwareManifest {
 }
 
 type InstallButtonElement = HTMLElement & {
-  manifest?: string;
-  showLog?: boolean;
-  eraseFirst?: boolean;
+  manifest: string | undefined;
+  showLog: boolean | undefined;
+  eraseFirst: boolean | undefined;
 };
 
 interface FlashDetectionResult {
@@ -48,33 +49,29 @@ interface FlashDetectionCardState {
   buttonDisabled: boolean;
 }
 
-type SwitchModelId = "switch" | "switch_lite";
+type FirmwareVariantDefinition = (typeof firmwareVariantConfig.variants)[number];
+type SwitchModelId = FirmwareVariantDefinition["switchModelId"];
 
 interface SwitchModelDefinition {
   id: SwitchModelId;
   label: string;
   description: string;
   manifestPath: string;
+  boardLabel: string;
 }
 
-const SWITCH_MODELS: SwitchModelDefinition[] = [
-  {
-    id: "switch",
-    label: "Switch / OLED / V2",
-    description: "标准 Switch 固件行为。",
-    manifestPath: "./firmware/manifest.json",
-  },
-  {
-    id: "switch_lite",
-    label: "Switch Lite",
-    description:
-      "Switch Lite 对蓝牙 HID 时序更敏感；会切换到启用 SWITCH_LITE 的专用构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
-    manifestPath: "./firmware/manifest.switch_lite.json",
-  },
-];
+const SWITCH_MODELS: SwitchModelDefinition[] = firmwareVariantConfig.variants.map((variant) => ({
+  id: variant.switchModelId,
+  label: variant.switchModelLabel,
+  description: variant.switchModelDescription,
+  manifestPath: `./firmware/${variant.manifestFileName}`,
+  boardLabel: variant.boardLabel,
+}));
 
-const DEFAULT_SWITCH_MODEL_ID: SwitchModelId = "switch";
-const DEFAULT_SWITCH_MODEL = SWITCH_MODELS[0] as SwitchModelDefinition;
+const SWITCH_MODEL_BY_ID = new Map(SWITCH_MODELS.map((model) => [model.id, model]));
+const DEFAULT_SWITCH_MODEL_ID = firmwareVariantConfig.defaultSwitchModelId as SwitchModelId;
+const DEFAULT_SWITCH_MODEL =
+  SWITCH_MODEL_BY_ID.get(DEFAULT_SWITCH_MODEL_ID) ?? SWITCH_MODELS[0]!;
 
 const FLASH_DETECTION_BAUD_RATE = 115200;
 const FLASH_DETECTION_BUTTON_LABEL = "检测当前开发板";
@@ -120,11 +117,18 @@ const els = {
 };
 
 const fallbackDesktopReleaseUrl = els.desktopDownloadLink.href;
+const fallbackDesktopDownloadLabel = els.desktopDownloadLink.textContent ?? "下载 Friend Maker Desktop 最新版";
+const fallbackDesktopStepLabel = els.desktopStepLabel.textContent ?? "Friend Maker Desktop 最新版";
+const fallbackDesktopFlowLabel = els.desktopFlowLabel.textContent ?? "Friend Maker Desktop 最新版";
+const fallbackFlashHint =
+  els.flashHint.textContent ?? "如果刷机后串口重新枚举或临时断开，这是正常现象。下一步请下载桌面版继续使用。";
 let hasFlashDetectionResult = false;
 let selectedSwitchModelId: SwitchModelId = DEFAULT_SWITCH_MODEL_ID;
+let activeManifestLoadRequestId = 0;
+let activeManifestLoadController: AbortController | null = null;
 
 function findSwitchModel(modelId: string): SwitchModelDefinition {
-  return SWITCH_MODELS.find((model) => model.id === modelId) ?? DEFAULT_SWITCH_MODEL;
+  return SWITCH_MODEL_BY_ID.get(modelId as SwitchModelId) ?? DEFAULT_SWITCH_MODEL;
 }
 
 function getSelectedSwitchModel(): SwitchModelDefinition {
@@ -143,6 +147,20 @@ function renderSwitchModelPicker(): void {
 
   els.firmwareSwitchModel.value = selectedSwitchModelId;
   els.firmwareSwitchModelDescription.textContent = getSelectedSwitchModel().description;
+}
+
+function setInstallButtonManifest(manifestPath?: string): void {
+  els.firmwareInstallButton.manifest = manifestPath;
+  els.firmwareInstallButton.showLog = true;
+  els.firmwareInstallButton.eraseFirst = false;
+  els.firmwareInstallButton.toggleAttribute("active", !manifestPath);
+
+  if (manifestPath) {
+    els.firmwareInstallButton.setAttribute("manifest", manifestPath);
+    return;
+  }
+
+  els.firmwareInstallButton.removeAttribute("manifest");
 }
 
 function setCardTone(card: HTMLElement, tone: "idle" | "success" | "warning" | "error"): void {
@@ -393,6 +411,14 @@ function renderDesktopRelease(version: string, desktopReleaseUrl: string): void 
   els.desktopFlowLabel.textContent = desktopLabel;
 }
 
+function renderFallbackDesktopRelease(): void {
+  els.flashHint.textContent = fallbackFlashHint;
+  els.desktopDownloadLink.href = fallbackDesktopReleaseUrl;
+  els.desktopDownloadLink.textContent = fallbackDesktopDownloadLabel;
+  els.desktopStepLabel.textContent = fallbackDesktopStepLabel;
+  els.desktopFlowLabel.textContent = fallbackDesktopFlowLabel;
+}
+
 function renderManifest(manifest: FirmwareManifest, switchModel: SwitchModelDefinition): void {
   els.firmwareVersion.textContent = manifest.version;
   els.firmwareBoardLabel.textContent = manifest.metadata?.label ?? "ESP32-WROOM-32 / ESP-32S";
@@ -416,30 +442,64 @@ function renderManifest(manifest: FirmwareManifest, switchModel: SwitchModelDefi
 
   renderDesktopRelease(manifest.version, manifest.metadata?.desktopReleaseUrl ?? fallbackDesktopReleaseUrl);
   renderBrowserSupport(manifest.version);
-  els.firmwareInstallButton.manifest = switchModel.manifestPath;
-  els.firmwareInstallButton.showLog = true;
-  els.firmwareInstallButton.eraseFirst = false;
+  setInstallButtonManifest(switchModel.manifestPath);
+}
+
+function renderManifestLoading(switchModel: SwitchModelDefinition): void {
+  els.firmwareVersion.textContent = "加载中";
+  els.firmwareBoardLabel.textContent = switchModel.boardLabel;
+  els.firmwareManifestPath.textContent = switchModel.manifestPath;
+  els.firmwareSwitchModelDescription.textContent = switchModel.description;
+  els.firmwarePartsList.innerHTML = "";
+  els.firmwareShaList.innerHTML = "";
+  renderBrowserSupport();
+  renderFallbackDesktopRelease();
+  setInstallButtonManifest();
+}
+
+function renderManifestLoadError(message: string, switchModel: SwitchModelDefinition): void {
+  els.firmwareVersion.textContent = `${message} (${switchModel.manifestPath})`;
+  els.firmwareBoardLabel.textContent = switchModel.boardLabel;
+  els.firmwareManifestPath.textContent = switchModel.manifestPath;
+  els.firmwareSwitchModelDescription.textContent = switchModel.description;
+  els.firmwarePartsList.innerHTML = "";
+  els.firmwareShaList.innerHTML = "";
+  renderBrowserSupport();
+  renderFallbackDesktopRelease();
+  setInstallButtonManifest();
 }
 
 async function loadManifest(): Promise<void> {
   const switchModel = getSelectedSwitchModel();
+  const requestId = ++activeManifestLoadRequestId;
+  activeManifestLoadController?.abort();
+  const controller = new AbortController();
+  activeManifestLoadController = controller;
+  renderManifestLoading(switchModel);
 
   try {
-    const response = await fetch(switchModel.manifestPath);
+    const response = await fetch(switchModel.manifestPath, { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
 
     const manifest = (await response.json()) as FirmwareManifest;
+    if (requestId !== activeManifestLoadRequestId || controller.signal.aborted) {
+      return;
+    }
+
     renderManifest(manifest, switchModel);
   } catch (error) {
+    if (requestId !== activeManifestLoadRequestId || controller.signal.aborted) {
+      return;
+    }
+
     const message = error instanceof Error ? error.message : String(error);
-    els.firmwareVersion.textContent = `${message} (${switchModel.manifestPath})`;
-    els.firmwareBoardLabel.textContent = "-";
-    els.firmwareManifestPath.textContent = switchModel.manifestPath;
-    els.firmwareSwitchModelDescription.textContent = switchModel.description;
-    els.firmwarePartsList.innerHTML = "";
-    els.firmwareShaList.innerHTML = "";
+    renderManifestLoadError(message, switchModel);
+  } finally {
+    if (activeManifestLoadController === controller) {
+      activeManifestLoadController = null;
+    }
   }
 }
 
@@ -450,7 +510,6 @@ async function bootstrap(): Promise<void> {
 
   els.firmwareSwitchModel.addEventListener("change", () => {
     selectedSwitchModelId = findSwitchModel(els.firmwareSwitchModel.value).id;
-    els.firmwareSwitchModelDescription.textContent = getSelectedSwitchModel().description;
     void loadManifest();
   });
 

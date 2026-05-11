@@ -50,9 +50,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install platformio
 
-      - name: Build ESP32 firmware (standard + Switch Lite)
+      - name: Build ESP32 firmware (standard + Switch 2 + Switch Lite)
         run: |
           python -m platformio run -d firmware/esp32 -e esp32dev_wireless
+          python -m platformio run -d firmware/esp32 -e esp32dev_wireless_switch2
           python -m platformio run -d firmware/esp32 -e esp32dev_wireless_switch_lite
 
       - name: Build flasher site
