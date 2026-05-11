@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   formatMissingSelectedUploadPortMessage,
   formatSelectedUploadPortFailureMessage,
+  isEspIdfPythonDependencyFailure,
   isUploadPortFailure,
   refreshFirmwareRootForFlash,
   startWebServer,
@@ -33,6 +34,25 @@ test("summarizePlatformIoFailure prefers the actionable esptool line over the ec
   );
 });
 
+test("summarizePlatformIoFailure surfaces ESP-IDF linker parsing failures", () => {
+  const summary = summarizePlatformIoFailure(
+    [
+      "$ /Users/demo/.friend-maker/tooling/platformio/penv/bin/pio run -e esp32dev_wireless -t upload",
+      "Linking .pio/build/esp32dev_wireless/firmware.elf",
+      "linker script generation failed for /Users/demo/.friend-maker/tooling/platformio/packages/framework-espidf/components/esp_system/ld/esp32/sections.ld.in",
+      "ERROR: failed to parse /Users/demo/.friend-maker/tooling/platformio/packages/framework-espidf/components/esp_phy/linker.lf",
+      "Expected end of text, found 'i'  (at char 0), (line:1, col:1)",
+      "*** [.pio/build/esp32dev_wireless/sections.ld] Error 1",
+    ].join("\n"),
+    1,
+  );
+
+  assert.equal(
+    summary,
+    "linker script generation failed for /Users/demo/.friend-maker/tooling/platformio/packages/framework-espidf/components/esp_system/ld/esp32/sections.ld.in",
+  );
+});
+
 test("isUploadPortFailure recognizes upload-port-specific serial failures", () => {
   assert.equal(
     isUploadPortFailure("could not open port 'COM7': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)"),
@@ -40,6 +60,21 @@ test("isUploadPortFailure recognizes upload-port-specific serial failures", () =
   );
   assert.equal(
     isUploadPortFailure("Compiling .pio/build/esp32dev_wireless/src/main.cpp.o"),
+    false,
+  );
+});
+
+test("isEspIdfPythonDependencyFailure recognizes missing modules and pyparsing linker parsing failures", () => {
+  assert.equal(
+    isEspIdfPythonDependencyFailure("ModuleNotFoundError: No module named 'idf_component_manager'"),
+    true,
+  );
+  assert.equal(
+    isEspIdfPythonDependencyFailure("ERROR: failed to parse /tmp/framework-espidf/components/esp_phy/linker.lf"),
+    true,
+  );
+  assert.equal(
+    isEspIdfPythonDependencyFailure("A fatal error occurred: Failed to connect to ESP32"),
     false,
   );
 });

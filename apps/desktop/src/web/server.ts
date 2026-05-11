@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { generateDrawPlan } from "../app/generateDrawPlan.js";
@@ -566,6 +566,11 @@ interface ExecutionError extends Error {
   session?: SerialSessionSnapshot;
 }
 
+interface PlatformIoFailureError extends LoggedError {
+  exitCode?: number | null;
+  platformIoOutput?: string;
+}
+
 class HttpError extends Error {
   constructor(
     readonly statusCode: number,
@@ -621,6 +626,9 @@ export function summarizePlatformIoFailure(output: string, exitCode: number | nu
     .filter((line) => line.length > 0 && !line.startsWith("$ "));
 
   const priorityPatterns = [
+    /ModuleNotFoundError: No module named '(?:idf_component_manager|kconfiglib|future)'/iu,
+    /linker script generation failed/iu,
+    /failed to parse .*linker\.lf/iu,
     /A fatal error occurred:/iu,
     /Timed out waiting for packet header/iu,
     /Failed to connect/iu,
@@ -631,6 +639,7 @@ export function summarizePlatformIoFailure(output: string, exitCode: number | nu
     /Permission(?:Error| denied)/iu,
     /Access is denied/iu,
     /Resource temporarily unavailable/iu,
+    /^ERROR:/iu,
     /^Error:/iu,
     /^Exception:/iu,
   ];
@@ -643,6 +652,11 @@ export function summarizePlatformIoFailure(output: string, exitCode: number | nu
   }
 
   return lines.at(-1) ?? `PlatformIO exited with code ${String(exitCode ?? "unknown")}`;
+}
+
+export function isEspIdfPythonDependencyFailure(output: string): boolean {
+  return /ModuleNotFoundError: No module named '(?:idf_component_manager|kconfiglib|future)'|linker script generation failed|failed to parse .*linker\.lf|Expected end of text, found 'i'|pyparsing/iu
+    .test(output);
 }
 
 function getFirmwareEnvironment(environmentId: string): (typeof FIRMWARE_ENVIRONMENTS)[number] {
@@ -815,6 +829,13 @@ class FirmwareFlashManager {
       }
 
       this.state.uploadPortPath = selectedPortPath;
+      const compatibility = await webRuntime.toolingManager.ensureManagedPlatformIoCompatibility({
+        platformIoPath,
+        onLine: (line) => this.appendLine(line),
+      });
+      if (compatibility.targets.length > 0 && compatibility.repaired > 0) {
+        await this.clearBuildArtifacts(firmwareRoot);
+      }
 
       try {
         await this.runPlatformIoUpload(environment.id, selectedPortPath);
@@ -823,6 +844,18 @@ class FirmwareFlashManager {
       } catch (error) {
         if (this.cancelRequested) {
           throw error;
+        }
+
+        if (
+          await this.retryAfterManagedPlatformIoRepair(error, {
+            environmentId: environment.id,
+            firmwareRoot,
+            platformIoPath,
+            selectedPortPath,
+          })
+        ) {
+          this.finish("completed", null);
+          return;
         }
 
         const message = error instanceof Error ? error.message : String(error);
@@ -861,6 +894,52 @@ class FirmwareFlashManager {
       this.appendLine(`WARN failed to refresh serial ports before flashing: ${message}`);
       return [];
     }
+  }
+
+  private async clearBuildArtifacts(firmwareRoot: string): Promise<void> {
+    await rm(path.join(firmwareRoot, ".pio", "build"), { recursive: true, force: true });
+    this.appendLine("INFO cleared PlatformIO build cache after dependency repair");
+  }
+
+  private async retryAfterManagedPlatformIoRepair(
+    error: unknown,
+    options: {
+      environmentId: FirmwareUploadEnvironmentId;
+      firmwareRoot: string;
+      platformIoPath: string;
+      selectedPortPath: string;
+    },
+  ): Promise<boolean> {
+    const output =
+      error instanceof Error && "platformIoOutput" in error && typeof error.platformIoOutput === "string"
+        ? error.platformIoOutput
+        : error instanceof Error
+          ? error.message
+          : String(error);
+
+    if (!isEspIdfPythonDependencyFailure(output)) {
+      return false;
+    }
+
+    if (!webRuntime.toolingManager.isAppManagedPlatformIo(options.platformIoPath)) {
+      return false;
+    }
+
+    this.appendLine("WARN detected managed ESP-IDF Python dependency mismatch; attempting auto-repair");
+    const compatibility = await webRuntime.toolingManager.ensureManagedPlatformIoCompatibility({
+      platformIoPath: options.platformIoPath,
+      onLine: (line) => this.appendLine(line),
+    });
+
+    if (compatibility.targets.length === 0) {
+      this.appendLine("WARN auto-repair skipped because no managed PlatformIO Python virtualenvs were found");
+      return false;
+    }
+
+    await this.clearBuildArtifacts(options.firmwareRoot);
+    this.appendLine("INFO retrying firmware flash after PlatformIO Python repair");
+    await this.runPlatformIoUpload(options.environmentId, options.selectedPortPath);
+    return true;
   }
 
   private async runPlatformIoUpload(
@@ -964,7 +1043,10 @@ class FirmwareFlashManager {
         }
 
         const message = summarizePlatformIoFailure(output, exitCode);
-        finish(() => reject(markLogged(new Error(message))));
+        const failure = markLogged(new Error(message)) as PlatformIoFailureError;
+        failure.exitCode = exitCode;
+        failure.platformIoOutput = output;
+        finish(() => reject(failure));
       });
 
       this.timeoutTimer = setTimeout(() => {

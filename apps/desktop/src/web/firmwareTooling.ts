@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -14,6 +14,17 @@ const PLATFORMIO_INSTALLER_SHA256 = "068d5dca983b22ed36a00dea7d42e58b646f0ac4958
 const PLATFORMIO_INSTALLER_URL =
   `https://raw.githubusercontent.com/platformio/platformio-core-installer/${PLATFORMIO_INSTALLER_COMMIT}/get-platformio.py`;
 const MAX_INSTALL_LOG_LINES = 400;
+const PLATFORMIO_REQUIRED_PYPARSING_VERSION = "2.2.0";
+const PLATFORMIO_REQUIRED_PIP_PACKAGES = [
+  "idf-component-manager",
+  "kconfiglib",
+  "future",
+] as const;
+const PLATFORMIO_REQUIRED_PYTHON_MODULES = [
+  "idf_component_manager",
+  "kconfiglib",
+  "future",
+] as const;
 
 type ToolingSource = "saved" | "app-local" | "env" | "home" | "path";
 type InstallStatus = "idle" | "running" | "completed" | "failed";
@@ -75,6 +86,23 @@ export interface FirmwareToolingInfo {
   platformIo: ToolingExecutableStatus;
   python: PythonToolingStatus;
   install: ToolingInstallSnapshot;
+}
+
+interface PlatformIoPythonTarget {
+  kind: "penv" | "espidf";
+  label: string;
+  pythonPath: string;
+}
+
+interface PlatformIoPythonDependencyStatus {
+  missingModules: string[];
+  pyparsingVersion: string | null;
+}
+
+interface PlatformIoCompatibilityResult {
+  checked: number;
+  repaired: number;
+  targets: string[];
 }
 
 interface ResolvedExecutable extends ToolingExecutableStatus {
@@ -180,6 +208,156 @@ function getPythonCandidates(config: ToolingConfig, appLocalPythonRoot: string):
     path.join(appLocalPythonRoot, "python", "bin", "python"),
     path.join(appLocalPythonRoot, "python", "python.exe"),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function getVirtualEnvPythonCandidates(virtualEnvRoot: string): string[] {
+  return process.platform === "win32"
+    ? [path.join(virtualEnvRoot, "Scripts", "python.exe")]
+    : [
+        path.join(virtualEnvRoot, "bin", "python3"),
+        path.join(virtualEnvRoot, "bin", "python"),
+      ];
+}
+
+function getVirtualEnvPythonPath(virtualEnvRoot: string): string | null {
+  return getVirtualEnvPythonCandidates(virtualEnvRoot).find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function getPlatformIoVirtualEnvRoot(platformIoPath: string): string | null {
+  const executableName = path.basename(platformIoPath).toLowerCase();
+  if (
+    executableName !== "pio" &&
+    executableName !== "pio.exe" &&
+    executableName !== "platformio" &&
+    executableName !== "platformio.exe"
+  ) {
+    return null;
+  }
+
+  const executableDir = path.dirname(platformIoPath);
+  const virtualEnvDirName = path.basename(executableDir).toLowerCase();
+  if (virtualEnvDirName !== "bin" && virtualEnvDirName !== "scripts") {
+    return null;
+  }
+
+  return path.dirname(executableDir);
+}
+
+export async function collectPlatformIoPythonTargets(platformIoPath: string): Promise<PlatformIoPythonTarget[]> {
+  const virtualEnvRoot = getPlatformIoVirtualEnvRoot(platformIoPath);
+  if (!virtualEnvRoot) {
+    return [];
+  }
+
+  const targets: PlatformIoPythonTarget[] = [];
+  const penvPython = getVirtualEnvPythonPath(virtualEnvRoot);
+  if (penvPython) {
+    targets.push({
+      kind: "penv",
+      label: "PlatformIO penv",
+      pythonPath: penvPython,
+    });
+  }
+
+  let entries: string[] = [];
+  try {
+    entries = (await readdir(virtualEnvRoot))
+      .filter((entry) => entry.startsWith(".espidf-"))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    entries = [];
+  }
+
+  for (const entry of entries) {
+    const pythonPath = getVirtualEnvPythonPath(path.join(virtualEnvRoot, entry));
+    if (!pythonPath) {
+      continue;
+    }
+
+    targets.push({
+      kind: "espidf",
+      label: entry,
+      pythonPath,
+    });
+  }
+
+  return targets;
+}
+
+export function parsePlatformIoPythonDependencyStatus(
+  rawStatus: string,
+): PlatformIoPythonDependencyStatus | null {
+  try {
+    const parsed = JSON.parse(rawStatus) as {
+      missingModules?: unknown;
+      pyparsingVersion?: unknown;
+    };
+    if (!Array.isArray(parsed.missingModules)) {
+      return null;
+    }
+
+    return {
+      missingModules: parsed.missingModules.filter((value): value is string => typeof value === "string"),
+      pyparsingVersion:
+        typeof parsed.pyparsingVersion === "string" && parsed.pyparsingVersion.length > 0
+          ? parsed.pyparsingVersion
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function inspectPlatformIoPythonDependencies(
+  pythonPath: string,
+): PlatformIoPythonDependencyStatus | null {
+  const checkCode = [
+    "import importlib.util",
+    "import json",
+    "missing = []",
+    `for module in ${JSON.stringify([...PLATFORMIO_REQUIRED_PYTHON_MODULES, "pyparsing"])}:`,
+    "    if importlib.util.find_spec(module) is None:",
+    "        missing.append(module)",
+    "pyparsing_version = None",
+    "if 'pyparsing' not in missing:",
+    "    import pyparsing",
+    "    pyparsing_version = getattr(pyparsing, '__version__', None)",
+    "print(json.dumps({'missingModules': missing, 'pyparsingVersion': pyparsing_version}))",
+  ].join("\n");
+  const result = spawnSync(pythonPath, ["-c", checkCode], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  return parsePlatformIoPythonDependencyStatus(result.stdout.trim());
+}
+
+function isPlatformIoPythonCompatibilityReady(status: PlatformIoPythonDependencyStatus | null): boolean {
+  return (
+    status !== null &&
+    status.missingModules.length === 0 &&
+    status.pyparsingVersion === PLATFORMIO_REQUIRED_PYPARSING_VERSION
+  );
+}
+
+function formatPlatformIoPythonDependencyStatus(status: PlatformIoPythonDependencyStatus | null): string {
+  if (!status) {
+    return "status unavailable";
+  }
+
+  const details: string[] = [];
+  if (status.missingModules.length > 0) {
+    details.push(`missing=${status.missingModules.join(",")}`);
+  }
+  if (status.pyparsingVersion !== PLATFORMIO_REQUIRED_PYPARSING_VERSION) {
+    details.push(`pyparsing=${status.pyparsingVersion ?? "missing"}`);
+  }
+
+  return details.join(" ") || "ready";
 }
 
 async function sha256File(filePath: string): Promise<string> {
@@ -349,6 +527,81 @@ export class FirmwareToolingManager {
     };
   }
 
+  isAppManagedPlatformIo(platformIoPath: string): boolean {
+    return (
+      platformIoPath === this.platformIoCoreDir ||
+      platformIoPath.startsWith(`${this.platformIoCoreDir}${path.sep}`)
+    );
+  }
+
+  async ensureManagedPlatformIoCompatibility(options: {
+    platformIoPath: string;
+    onLine?: (line: string) => void;
+  }): Promise<PlatformIoCompatibilityResult> {
+    if (!this.isAppManagedPlatformIo(options.platformIoPath)) {
+      return {
+        checked: 0,
+        repaired: 0,
+        targets: [],
+      };
+    }
+
+    const targets = await collectPlatformIoPythonTargets(options.platformIoPath);
+    const result: PlatformIoCompatibilityResult = {
+      checked: 0,
+      repaired: 0,
+      targets: targets.map((target) => target.pythonPath),
+    };
+
+    if (targets.length === 0) {
+      options.onLine?.("PlatformIO Python compatibility: no managed virtualenv targets found yet.");
+      return result;
+    }
+
+    for (const target of targets) {
+      result.checked += 1;
+      const status = inspectPlatformIoPythonDependencies(target.pythonPath);
+      if (isPlatformIoPythonCompatibilityReady(status)) {
+        options.onLine?.(`PlatformIO Python compatibility ready: ${target.label}`);
+        continue;
+      }
+
+      options.onLine?.(
+        `Repairing PlatformIO Python compatibility for ${target.label} (${formatPlatformIoPythonDependencyStatus(status)})...`,
+      );
+      await runProcess(
+        target.pythonPath,
+        [
+          "-m",
+          "pip",
+          "install",
+          "--disable-pip-version-check",
+          "--no-input",
+          "--upgrade",
+          ...PLATFORMIO_REQUIRED_PIP_PACKAGES,
+          `pyparsing==${PLATFORMIO_REQUIRED_PYPARSING_VERSION}`,
+        ],
+        options.onLine
+          ? {
+              onLine: options.onLine,
+            }
+          : {},
+      );
+
+      const verifiedStatus = inspectPlatformIoPythonDependencies(target.pythonPath);
+      if (!isPlatformIoPythonCompatibilityReady(verifiedStatus)) {
+        throw new Error(
+          `PlatformIO Python compatibility repair did not converge for ${target.label}: ${formatPlatformIoPythonDependencyStatus(verifiedStatus)}`,
+        );
+      }
+
+      result.repaired += 1;
+      options.onLine?.(`PlatformIO Python compatibility repaired: ${target.label}`);
+    }
+
+    return result;
+  }
+
   async startInstall(options: { allowPythonDownload?: boolean }): Promise<ToolingInstallSnapshot> {
     if (this.installState.status === "running") {
       return this.getInstallStatus();
@@ -475,6 +728,10 @@ export class FirmwareToolingManager {
         platformioCoreDir: this.platformIoCoreDir,
         pythonExe: pythonPath,
         ...(python.source === "app-local" ? { pythonRoot: this.pythonRoot } : {}),
+      });
+      await this.ensureManagedPlatformIoCompatibility({
+        platformIoPath: platformIo.path,
+        onLine: (line) => this.appendInstallLine(line),
       });
       this.finishInstall("completed", platformIo.path);
     } catch (error) {
