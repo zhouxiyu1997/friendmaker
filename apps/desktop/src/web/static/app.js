@@ -3080,9 +3080,9 @@ function syncStudioUi() {
     : "当前不会自动扣背景；如果素材是白底或棋盘格假透明图，建议开启。";
   const brushShapeHint =
     normalizeBrushShapeValue(state.studio.brushShape) === "square"
-      ? `当前预设是 ${selectedBrushPresetLabel}；开始绘制时设备会先按 X、X 进入笔刷页，再从默认的 7 像素圆点笔刷自动切到这个方块像素笔刷。进入绘画页后不要再手动改笔刷，也不要再移动页面。`
+      ? `当前预设是 ${selectedBrushPresetLabel}；开始绘制时设备会先按 X、X 进入笔刷页，再从默认的 7 像素圆点笔刷自动切到这个方块像素笔刷，并连按三次 A 完成选中和返回画布。进入绘画页后不要再手动改笔刷，也不要再移动页面。`
       : state.studio.brushSize === 1
-        ? "当前预设是 1 像素圆形像素笔刷；开始绘制时设备会自动打开笔刷页并切换到这一档。"
+        ? "当前预设是 1 像素圆形像素笔刷；开始绘制时设备会自动打开笔刷页，切换到这一档后再连按两次 A 返回画布。"
         : `当前选的是 ${state.studio.brushSize} 号圆形像素笔刷；这一档暂不支持生成或执行，请切回方块像素笔刷或使用 1 号笔。`;
   const templateHint =
     state.studio.templateId === "none"
@@ -3202,10 +3202,10 @@ function syncStudioUi() {
 
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
-      ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，再从画布中心继续翻译成方向键移动与 A 绘制。`
+      ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布，再从画布中心继续翻译成方向键移动与 A 绘制。`
       : generatedProfile.colorMode === "official"
-        ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。请先保持右侧 9 个槽位默认颜色不变；开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，再按这组默认槽位状态去配置内置 7x12 色盘并继续绘制。`
-        : `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 也会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}；随后它会分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制，这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
+        ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。请先保持右侧 9 个槽位默认颜色不变；开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布，再按这组默认槽位状态去配置内置 7x12 色盘并继续绘制。`
+        : `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 也会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后它会分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制，这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
   renderStudioConnectionStatus();
 }
 
