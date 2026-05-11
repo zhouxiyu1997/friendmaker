@@ -113,6 +113,8 @@ This README includes both Simplified Chinese and English sections. Use the butto
 - `macOS`：安装 `.dmg` 后直接启动 `Friend Maker`
 - `Windows x64`：运行 `.exe` 安装包后直接启动 `Friend Maker`
 - 首次进入 `刷入固件` 页时，如果提示缺少 `PlatformIO`，点击 `准备 PlatformIO`
+- `刷入固件` 页现在会先让你选择 `Switch 型号`：`Switch`、`Switch 2`、`Switch Lite`
+- `Switch 2 / Switch Lite` 当前只给主线 `ESP32-WROOM-32 / ESP-32S` 提供专用固件；如果你的板子更接近 `NodeMCU-32S`，继续优先使用标准 `Switch` 固件
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要 `稳定联网`
 - 如果应用提示缺少 `Python`，允许它下载一个供 `Friend Maker` 使用的本地运行环境即可
 - `Windows` 下如果 `PlatformIO` 已就绪但没有串口，可在应用里优先安装 `CP210x` 驱动，再尝试 `CH340/CH341`
@@ -139,7 +141,15 @@ npm run ui:dev
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
+
+# 标准 Switch / OLED / V2
 pio run -e esp32dev_wireless -t upload
+
+# Switch 2（仅限 ESP32-WROOM-32 / ESP-32S）
+pio run -e esp32dev_wireless_switch2 -t upload
+
+# Switch Lite（仅限 ESP32-WROOM-32 / ESP-32S）
+pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
 如果 `pio` 不在 `PATH` 里，请改用完整路径：

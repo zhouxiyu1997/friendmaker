@@ -1,6 +1,6 @@
 {
   "name": "switch-auto-draw",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "main": "dist/apps/desktop/src/electron/main.js",
@@ -8,6 +8,8 @@
     "dev": "tsx apps/desktop/src/index.ts",
     "ui:dev": "tsx apps/desktop/src/web/server.ts",
     "test:desktop": "node --import tsx --test apps/desktop/test/*.test.ts",
+    "ci:local": "bash scripts/ci-local.sh",
+    "ci:local:quick": "bash scripts/ci-local.sh --skip-firmware",
     "start:mac": "bash scripts/macos-launch.sh",
     "build": "tsc -p tsconfig.json && node scripts/copy-web-static.mjs",
     "check": "tsc -p tsconfig.json --noEmit",

@@ -167,14 +167,26 @@ Notes:
 
 After entering `Firmware Flash`, use this order:
 
-1. Choose the target environment
-2. Confirm the serial port
-3. Click `Build and Flash Firmware`
+1. Choose the `Switch model`
+2. Choose the target environment
+3. Confirm the serial port
+4. Click `Build and Flash Firmware`
+
+The firmware flow now splits `Switch` flashing into 3 models:
+
+- `Switch`: standard `Switch / OLED / V2`
+- `Switch 2`: uses a more conservative Bluetooth HID timing profile and sends an extra `virtual cable` request after authentication
+- `Switch Lite`: uses the dedicated `SWITCH_LITE` build to improve pairing and input stability
 
 Current recommended environments:
 
 - `esp32dev_wireless`: default recommendation for common `ESP32-WROOM-32 / ESP-32S`
 - `nodemcu_32s_wireless`: if the board is clearly labeled `NodeMCU-32S`, you can switch to this one
+
+Extra notes:
+
+- If you choose `Switch 2` or `Switch Lite`, the current supported hardware path is the mainline `ESP32-WROOM-32 / ESP-32S`
+- `NodeMCU-32S`-style boards should still stay on the standard `Switch` firmware path for now
 
 This page can also directly handle:
 
@@ -197,7 +209,15 @@ If you are in the repo workflow, or just want to confirm `PlatformIO` by itself,
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
+
+# Standard Switch / OLED / V2
 pio run -e esp32dev_wireless -t upload
+
+# Switch 2 (ESP32-WROOM-32 / ESP-32S only)
+pio run -e esp32dev_wireless_switch2 -t upload
+
+# Switch Lite (ESP32-WROOM-32 / ESP-32S only)
+pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
 If `pio` is not in `PATH`, use the full path instead:
@@ -209,7 +229,15 @@ If `pio` is not in `PATH`, use the full path instead:
 
 ```powershell
 cd C:\path\to\friendmaker\firmware\esp32
+
+# Standard Switch / OLED / V2
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
+
+# Switch 2 (ESP32-WROOM-32 / ESP-32S only)
+$env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless_switch2 -t upload --upload-port COM3
+
+# Switch Lite (ESP32-WROOM-32 / ESP-32S only)
+$env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless_switch_lite -t upload --upload-port COM3
 ```
 
 ## 5. Controller test

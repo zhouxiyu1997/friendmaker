@@ -1,0 +1,32 @@
+{
+  "defaultSwitchModelId": "switch",
+  "variants": [
+    {
+      "switchModelId": "switch",
+      "switchModelLabel": "Switch",
+      "switchModelDescription": "标准 Switch 固件行为。",
+      "environmentId": "esp32dev_wireless",
+      "boardId": "esp32dev_wireless",
+      "boardLabel": "ESP32-WROOM-32 / ESP-32S",
+      "manifestFileName": "manifest.json"
+    },
+    {
+      "switchModelId": "switch2",
+      "switchModelLabel": "Switch 2",
+      "switchModelDescription": "Switch 2 目前走更保守的 Bluetooth Classic HID 时序，并在认证成功后主动补发 virtual cable 请求。",
+      "environmentId": "esp32dev_wireless_switch2",
+      "boardId": "esp32dev_wireless",
+      "boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch 2 模式）",
+      "manifestFileName": "manifest.switch2.json"
+    },
+    {
+      "switchModelId": "switch_lite",
+      "switchModelLabel": "Switch Lite",
+      "switchModelDescription": "Switch Lite 对蓝牙 HID 时序更敏感；此模式会切换到启用 SWITCH_LITE 的专用构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
+      "environmentId": "esp32dev_wireless_switch_lite",
+      "boardId": "esp32dev_wireless",
+      "boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch Lite 模式）",
+      "manifestFileName": "manifest.switch_lite.json"
+    }
+  ]
+}

@@ -49,10 +49,10 @@
           <section class="panel">
             <div class="panel-head">
               <h2>固件版本</h2>
-              <p>这里展示当前站点提供的固件发布信息，可在标准 Switch 与 Switch Lite 模式间切换。</p>
+              <p>这里展示当前站点提供的固件发布信息，可在 Switch、Switch 2 与 Switch Lite 间切换。</p>
             </div>
             <div class="field-row">
-              <label for="firmware-switch-model">目标机型</label>
+              <label for="firmware-switch-model">Switch 型号</label>
               <select id="firmware-switch-model"></select>
             </div>
             <p id="firmware-switch-model-description" class="field-help"></p>
@@ -79,45 +79,6 @@
               <ul id="firmware-sha-list" class="simple-list mono-list"></ul>
             </div>
           </section>
-        </section>
-
-        <section class="panel wide-panel">
-          <div class="panel-head">
-            <h2>先测一下 Flash 容量</h2>
-            <p>这个检测只会读取芯片与 SPI flash 信息，不会擦除固件，也不会改写 Flash 内容。</p>
-          </div>
-          <div id="flash-detect-card" class="status-card status-idle">
-            <span id="flash-detect-pill" class="status-pill">待检测</span>
-            <strong id="flash-detect-title" class="status-title">还没有读取开发板信息</strong>
-            <p id="flash-detect-detail" class="status-detail">
-              点击下方按钮后，浏览器会请求串口权限，然后尝试进入 bootloader 读取当前板子的 Flash 容量。
-            </p>
-          </div>
-          <div class="button-row">
-            <button id="flash-detect-button" class="secondary" type="button">检测当前开发板</button>
-          </div>
-          <dl class="meta-list">
-            <div class="meta-row">
-              <dt>Chip</dt>
-              <dd id="flash-detect-chip">-</dd>
-            </div>
-            <div class="meta-row">
-              <dt>Flash</dt>
-              <dd id="flash-detect-size">-</dd>
-            </div>
-            <div class="meta-row">
-              <dt>Flash ID</dt>
-              <dd id="flash-detect-id">-</dd>
-            </div>
-            <div class="meta-row">
-              <dt>USB</dt>
-              <dd id="flash-detect-port">-</dd>
-            </div>
-          </dl>
-          <p class="hint">
-            如果开发板没能自动进入 bootloader，请按住 <code>BOOT</code> 再重新点击检测。
-            如果串口正被桌面版、串口监视器或其他网页占用，也需要先关闭它们。
-          </p>
         </section>
 
         <section class="panel wide-panel">
@@ -155,21 +116,6 @@
               <li>下载并打开 <code id="desktop-step-label">Friend Maker Desktop 最新版</code></li>
               <li>在桌面版里继续连接板子、配对手柄并开始绘画</li>
             </ol>
-            <div class="callout callout-warning">
-              <strong>连接提示</strong>
-              <p>
-                蓝牙连接手柄通常需要等待 <code>1-2 分钟</code>，请先耐心等待一会儿。
-                如果确实一直连不上，请到
-                <a
-                  href="https://github.com/zhouxiyu1997/friendmaker/blob/main/README.md"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  README
-                </a>
-                里查找“张老师优化版”再试。
-              </p>
-            </div>
           </section>
 
           <section class="panel">

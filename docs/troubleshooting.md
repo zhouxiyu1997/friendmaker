@@ -93,19 +93,29 @@ python -m pip install --user --upgrade platformio
 
 1. 关闭所有串口监视器和串口工具
 2. 回到应用里重新点击 `刷新串口`
-3. 确认目标环境：
-   - 常见板子优先用 `esp32dev_wireless`
-   - 明确写着 `NodeMCU-32S` 的板子可以改用 `nodemcu_32s_wireless`
+3. 确认刷机选择：
+   - 常见 `ESP32-WROOM-32 / ESP-32S` 先选 `Switch` + `esp32dev_wireless`
+   - 目标主机是 `Switch 2` 时，改选 `Switch 2`
+   - 目标主机是 `Switch Lite` 时，改选 `Switch Lite`
+   - 明确写着 `NodeMCU-32S` 的板子可以改用 `nodemcu_32s_wireless`，但当前仍优先走标准 `Switch` 固件
 4. 再次点击 `编译并刷入固件`
 5. 如果板子进不去下载模式，按住实体板上的 `BOOT` 键，再重新刷入
-6. 如果桌面端里反复刷写失败，并且你手上是主线 `ESP32-WROOM-32 / ESP-32S`，也可以改用 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个网页刷机站，用桌面版 `Chrome / Edge` 直接刷固件
+6. 如果桌面端里反复刷写失败，并且你手上是主线 `ESP32-WROOM-32 / ESP-32S`，也可以改用 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个网页刷机站，用桌面版 `Chrome / Edge` 直接刷固件；网页端也提供 `Switch`、`Switch 2`、`Switch Lite` 3 个型号选项
 7. 如果网页刷机站也不方便使用，或你想继续确认本地固件链路，再改用命令行手动刷入，确认固件链路本身是否正常
 
 手动刷入命令：
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
+
+# 标准 Switch / OLED / V2
 pio run -e esp32dev_wireless -t upload
+
+# Switch 2（仅限 ESP32-WROOM-32 / ESP-32S）
+pio run -e esp32dev_wireless_switch2 -t upload
+
+# Switch Lite（仅限 ESP32-WROOM-32 / ESP-32S）
+pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
 如果 `pio` 不在 `PATH` 里，请改用完整路径，参考：[快速上手](user-trial-guide.md)。
@@ -128,10 +138,6 @@ pio run -e esp32dev_wireless -t upload
    - 当前这块开发板是否存在个体差异
    - 附近是否有太多同时活跃的蓝牙设备
    - 当前开发板是否已经明显发热
-7. 如果按上面步骤仍然实在连接不上，也可以试试 [夸克网盘：friend maker（张老师优化版本）](https://pan.quark.cn/s/08ca5bdebc46)
-
-夸克口令：`/~995f3YSMso~:/`
-
 说明：
 
 - 主测设备在连接建立后通常可以保持稳定
