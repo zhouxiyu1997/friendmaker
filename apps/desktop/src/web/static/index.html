@@ -108,425 +108,453 @@
             <span class="page-step">3. 检查预览后开始绘制</span>
           </div>
         </section>
-        <main class="grid">
-          <section class="panel panel-form">
-            <div class="panel-head">
-              <h2>输入</h2>
-              <p>导入图片，设定单色、官方色或自定义多色（自动量化）参数，然后发送到 ESP32 开始绘制。</p>
-            </div>
-
-            <label class="file-drop" for="image-input">
-              <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
-              <span class="file-title">导入图片</span>
-              <span class="file-meta" id="file-label">支持 PNG / JPG / WEBP / SVG</span>
-            </label>
-
-            <div id="studio-connection-card" class="studio-connection-card studio-connection-warning">
-              <div class="studio-connection-copy">
-                <span id="studio-connection-pill" class="status-pill">需要测试</span>
-                <strong id="studio-connection-title" class="status-title">需要先进行手柄测试</strong>
-                <p id="studio-connection-detail" class="status-detail">
-                  当前还没有确认开发板已经连上 Switch。开始绘制前，请先到“手柄测试”页完成连接。
-                </p>
-              </div>
-              <button id="studio-open-controller-button" class="ghost" type="button">前往手柄测试</button>
-            </div>
-
-            <div class="execution-box mono-note-box">
-              <div class="panel-head compact">
-                <h2>绘制模式</h2>
-                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；自定义多色模式会先自动量化颜色，再按批次写入 9 个自定义色槽。现在也可以给画布套用异形图纸模板，模板外区域会直接裁掉。当前版本在生成页只开放方块像素笔刷；开始绘制后设备会先按两次 X 打开笔刷页，再从默认的 7 像素圆点笔刷自动切到这里选中的预设，并再按三次 A 回到画布，随后等待约 3 秒再继续。</p>
-              </div>
-
-              <p class="hint" id="studio-mode-hint">
-                深色像素会绘制，浅色像素会保留为空白背景，不需要切换调色板。
-              </p>
-            </div>
-
-            <div class="field-grid studio-settings-grid">
-              <label>
-                <span>画布尺寸（固定）</span>
-                <select id="size-select">
-                  <option value="256" selected>256x256</option>
-                </select>
-              </label>
-
-              <div class="brush-picker-card">
-                <div class="panel-head compact">
-                  <h2>像素画笔</h2>
-                  <p>进入脚本生成页时只需要在这里选一次。开始绘制或恢复绘制时，设备会自动连按两次 X 打开笔刷页，并从默认的 7 像素圆点笔刷切到对应的方块像素画笔；选中后还会再按三次 A 回到画布，并额外等待约 3 秒。</p>
+        <main class="studio-layout">
+          <section class="studio-workbench">
+            <div class="studio-preview-column">
+              <section class="panel panel-preview panel-preview-workbench">
+                <div class="panel-head">
+                  <h2>预览与调节</h2>
+                  <p>边看结果边调参数，确认后再开始绘制。</p>
                 </div>
 
-                <div class="brush-picker-layout brush-picker-layout-single">
-                  <section class="brush-picker-family" aria-label="方块像素画笔">
-                    <div class="brush-picker-family-head">
-                      <strong>方块像素</strong>
-                      <small>当前开放</small>
-                    </div>
-                    <div class="brush-picker-grid">
-                      <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="1">
-                        <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="1" aria-hidden="true"></span>
-                        <span class="brush-option-label">1 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="3">
-                        <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="3" aria-hidden="true"></span>
-                        <span class="brush-option-label">3 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="7">
-                        <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="7" aria-hidden="true"></span>
-                        <span class="brush-option-label">7 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="13">
-                        <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="13" aria-hidden="true"></span>
-                        <span class="brush-option-label">13 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="19">
-                        <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="19" aria-hidden="true"></span>
-                        <span class="brush-option-label">19 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="27">
-                        <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="27" aria-hidden="true"></span>
-                        <span class="brush-option-label">27 像素</span>
-                      </button>
-                    </div>
-                  </section>
-
-                  <section class="brush-picker-family brush-picker-family-reserved" aria-label="圆形像素画笔（预留）">
-                    <div class="brush-picker-family-head">
-                      <strong>圆形像素</strong>
-                      <small>预留中，暂不可选</small>
-                    </div>
-                    <div class="brush-picker-grid">
-                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
-                        <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="1" aria-hidden="true"></span>
-                        <span class="brush-option-label">1 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
-                        <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="3" aria-hidden="true"></span>
-                        <span class="brush-option-label">3 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
-                        <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="7" aria-hidden="true"></span>
-                        <span class="brush-option-label">7 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
-                        <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="13" aria-hidden="true"></span>
-                        <span class="brush-option-label">13 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
-                        <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="19" aria-hidden="true"></span>
-                        <span class="brush-option-label">19 像素</span>
-                      </button>
-                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
-                        <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="27" aria-hidden="true"></span>
-                        <span class="brush-option-label">27 像素</span>
-                      </button>
-                    </div>
-                  </section>
-                </div>
-
-                <div class="hidden">
-                  <label>
-                    <span>画笔大小</span>
-                    <select id="brush-size-select">
-                      <option value="1">1</option>
-                      <option value="3" selected>3</option>
-                      <option value="7">7</option>
-                      <option value="13">13</option>
-                      <option value="19">19</option>
-                      <option value="27">27</option>
-                    </select>
+                <div class="preview-tools">
+                  <label class="checkbox-card" for="auto-remove-background-checkbox">
+                    <input id="auto-remove-background-checkbox" type="checkbox" />
+                    <span class="checkbox-copy">
+                      <strong>自动扣背景</strong>
+                    </span>
                   </label>
 
-                  <label>
-                    <span>笔刷形状</span>
-                    <select id="brush-shape-select">
-                      <option value="square" selected>方形笔刷</option>
-                      <option value="round">圆形笔刷</option>
+                  <label class="preview-select-card">
+                    <span>辅助线</span>
+                    <select id="preview-guide-select">
+                      <option value="none" selected>关闭</option>
+                      <option value="quad">2*2</option>
+                      <option value="quarter">4*4</option>
+                      <option value="eighth">16*16</option>
                     </select>
                   </label>
                 </div>
-              </div>
 
-              <label>
-                <span>绘制模式</span>
-                <select id="color-mode-select">
-                  <option value="mono" selected>单色绘制</option>
-                  <option value="palette">自定义多色</option>
-                  <option value="official">官方色绘制</option>
-                </select>
-              </label>
+                <section class="preview-adjustments" aria-label="预览调节参数">
+                  <label class="range-row">
+                    <span id="threshold-label" class="range-label-copy">阈值</span>
+                    <input id="threshold-range" type="range" min="0" max="255" value="128" />
+                    <span class="range-number-group range-number-group-static">
+                      <strong id="threshold-value" class="range-number-display">128</strong>
+                      <span class="range-unit">/255</span>
+                    </span>
+                  </label>
 
-              <label>
-                <span>色阶数量</span>
-                <select id="color-count-select">
-                  <option value="8">8 色</option>
-                  <option value="9">9 色</option>
-                  <option value="16">16 色</option>
-                  <option value="18">18 色</option>
-                  <option value="24">24 色</option>
-                  <option value="32" selected>32 色</option>
-                  <option value="64">64 色</option>
-                  <option value="84">84 色</option>
-                  <option value="128">128 色</option>
-                </select>
-              </label>
+                  <label class="range-row">
+                    <span class="range-label-copy">缩放</span>
+                    <input id="scale-range" type="range" min="25" max="200" step="1" value="100" />
+                    <span class="range-number-group">
+                      <input
+                        id="scale-input"
+                        class="range-number-input"
+                        type="number"
+                        min="25"
+                        max="200"
+                        step="1"
+                        value="100"
+                      />
+                      <span class="range-unit">%</span>
+                    </span>
+                  </label>
+
+                  <label class="range-row">
+                    <span class="range-label-copy">横向</span>
+                    <input id="offset-x-range" type="range" min="-100" max="100" step="1" value="0" />
+                    <span class="range-number-group">
+                      <input
+                        id="offset-x-input"
+                        class="range-number-input"
+                        type="number"
+                        min="-100"
+                        max="100"
+                        step="1"
+                        value="0"
+                      />
+                      <span class="range-unit">%</span>
+                    </span>
+                  </label>
+
+                  <label class="range-row">
+                    <span class="range-label-copy">纵向</span>
+                    <input id="offset-y-range" type="range" min="-100" max="100" step="1" value="0" />
+                    <span class="range-number-group">
+                      <input
+                        id="offset-y-input"
+                        class="range-number-input"
+                        type="number"
+                        min="-100"
+                        max="100"
+                        step="1"
+                        value="0"
+                      />
+                      <span class="range-unit">%</span>
+                    </span>
+                  </label>
+                </section>
+
+                <div class="preview-frame">
+                  <div id="preview-canvas" class="preview-canvas" data-guide="none">
+                    <img id="preview-image" alt="生成预览" />
+                    <img id="preview-template-overlay" alt="" aria-hidden="true" />
+                    <div class="preview-guide" aria-hidden="true"></div>
+                    <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
+                  </div>
+                </div>
+
+                <div class="preview-meta-strip">
+                  <div class="preview-meta-card">
+                    <span>画布范围</span>
+                    <strong id="stat-canvas-size">256x256</strong>
+                    <small id="stat-canvas-range">x: 0-255 · y: 0-255</small>
+                  </div>
+                  <div class="preview-meta-card">
+                    <span>图片尺寸</span>
+                    <strong id="stat-image-size">-</strong>
+                    <small id="stat-image-scale">-</small>
+                  </div>
+                  <div class="preview-meta-card">
+                    <span>图片位置</span>
+                    <strong id="stat-image-origin">-</strong>
+                    <small id="stat-image-range">-</small>
+                  </div>
+                </div>
+
+                <div class="stat-strip">
+                  <div class="stat-card">
+                    <span>颜色</span>
+                    <strong id="stat-colors">-</strong>
+                  </div>
+                  <div class="stat-card">
+                    <span>像素</span>
+                    <strong id="stat-pixels">-</strong>
+                  </div>
+                  <div class="stat-card">
+                    <span>命令数</span>
+                    <strong id="stat-commands">-</strong>
+                  </div>
+                  <div class="stat-card">
+                    <span>预计耗时</span>
+                    <strong id="stat-runtime">-</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section id="official-palette-panel" class="panel panel-official-palette hidden">
+                <div class="panel-head">
+                  <h2>当前预览用色</h2>
+                  <p id="official-palette-summary">
+                    这里会显示程序当前使用的颜色集合，并高亮或完整列出这张图实际量化到的颜色。
+                  </p>
+                </div>
+
+                <div id="official-palette-grid" class="official-palette-grid"></div>
+              </section>
             </div>
 
-            <div class="template-picker-card">
-              <div class="panel-head compact">
-                <h2>图纸模板</h2>
-                <p>选择后，预览会裁掉模板外区域；边缘格子只要和模板有重叠也会保留绘制，这样大画笔能把可见边缘填满。不选时保持当前正方形画布行为。</p>
-              </div>
-
-              <div class="field-grid template-picker-grid">
-                <label>
-                  <span>模板分类</span>
-                  <select id="template-category-select">
-                    <option value="all" selected>全部模板</option>
-                  </select>
-                </label>
-
-                <label>
-                  <span>当前模板</span>
-                  <select id="template-select">
-                    <option value="none" selected>无模板（正方形）</option>
-                  </select>
-                </label>
-              </div>
-
-              <div class="template-preview-card">
-                <div class="template-preview-thumb">
-                  <img id="template-preview-image" alt="当前图纸模板预览" />
+            <div class="studio-control-column">
+              <section class="panel studio-control-panel">
+                <div class="panel-head">
+                  <h2>控制与执行</h2>
+                  <p>首屏完成导图、参数配置和执行准备。</p>
                 </div>
-                <div class="template-preview-copy">
-                  <strong id="template-preview-label">无模板（正方形）</strong>
-                  <small>模板缩略图只用于确认当前选中项；真正的裁剪会在生成预览和绘制命令时一起生效。</small>
-                </div>
-              </div>
+
+                <section class="studio-group" aria-labelledby="studio-upload-heading">
+                  <div class="panel-head compact">
+                    <h2 id="studio-upload-heading">导入与连接</h2>
+                    <p>先导图，再确认开发板已经通过手柄测试。</p>
+                  </div>
+
+                  <label class="file-drop" for="image-input">
+                    <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
+                    <span class="file-title">导入图片</span>
+                    <span class="file-meta" id="file-label">支持 PNG / JPG / WEBP / SVG 文件</span>
+                  </label>
+
+                  <div id="studio-connection-card" class="studio-connection-card studio-connection-warning">
+                    <div class="studio-connection-copy">
+                      <span id="studio-connection-pill" class="status-pill">需要测试</span>
+                      <strong id="studio-connection-title" class="status-title">需要先进行手柄测试</strong>
+                      <p id="studio-connection-detail" class="status-detail">
+                        开始绘制前，请先到“手柄测试”页确认开发板已经连上 Switch。
+                      </p>
+                    </div>
+                    <button id="studio-open-controller-button" class="ghost" type="button">前往手柄测试</button>
+                  </div>
+                </section>
+
+                <section class="studio-group" aria-labelledby="studio-mode-heading">
+                  <div class="panel-head compact">
+                    <h2 id="studio-mode-heading">模式与工具</h2>
+                    <p>固定使用 256x256 画布；在这里决定模式、色数和像素笔刷。</p>
+                  </div>
+
+                  <div class="field-grid studio-settings-grid">
+                    <label>
+                      <span>画布尺寸（固定）</span>
+                      <select id="size-select">
+                        <option value="256" selected>256x256</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>绘制模式</span>
+                      <select id="color-mode-select">
+                        <option value="mono" selected>单色绘制</option>
+                        <option value="palette">自定义多色</option>
+                        <option value="official">官方色绘制</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>色阶数量</span>
+                      <select id="color-count-select">
+                        <option value="8">8 色</option>
+                        <option value="9">9 色</option>
+                        <option value="16">16 色</option>
+                        <option value="18">18 色</option>
+                        <option value="24">24 色</option>
+                        <option value="32" selected>32 色</option>
+                        <option value="64">64 色</option>
+                        <option value="84">84 色</option>
+                        <option value="128">128 色</option>
+                      </select>
+                    </label>
+
+                    <div class="brush-picker-card">
+                      <div class="panel-head compact">
+                        <h2>像素画笔</h2>
+                        <p>开始或恢复时，设备会自动切到这里选中的像素笔刷。</p>
+                      </div>
+
+                      <div class="brush-picker-layout brush-picker-layout-single">
+                        <section class="brush-picker-family" aria-label="方块像素画笔">
+                          <div class="brush-picker-family-head">
+                            <strong>方块像素</strong>
+                            <small>当前开放</small>
+                          </div>
+                          <div class="brush-picker-grid">
+                            <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="1">
+                              <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="1" aria-hidden="true"></span>
+                              <span class="brush-option-label">1 像素</span>
+                            </button>
+                            <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="3">
+                              <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="3" aria-hidden="true"></span>
+                              <span class="brush-option-label">3 像素</span>
+                            </button>
+                            <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="7">
+                              <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="7" aria-hidden="true"></span>
+                              <span class="brush-option-label">7 像素</span>
+                            </button>
+                            <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="13">
+                              <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="13" aria-hidden="true"></span>
+                              <span class="brush-option-label">13 像素</span>
+                            </button>
+                            <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="19">
+                              <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="19" aria-hidden="true"></span>
+                              <span class="brush-option-label">19 像素</span>
+                            </button>
+                            <button type="button" class="brush-option-button" data-brush-shape-option="square" data-brush-size-option="27">
+                              <span class="brush-option-icon brush-option-icon-square" data-brush-visual-size="27" aria-hidden="true"></span>
+                              <span class="brush-option-label">27 像素</span>
+                            </button>
+                          </div>
+                        </section>
+
+                        <section class="brush-picker-family brush-picker-family-reserved" aria-label="圆形像素画笔（预留）">
+                          <div class="brush-picker-family-head">
+                            <strong>圆形像素</strong>
+                            <small>暂不可选</small>
+                          </div>
+                          <p class="brush-picker-reserved-note">圆形像素笔刷仍在预留中，当前生成页只开放方块像素笔刷。</p>
+                        </section>
+                      </div>
+
+                      <div class="hidden">
+                        <label>
+                          <span>画笔大小</span>
+                          <select id="brush-size-select">
+                            <option value="1">1</option>
+                            <option value="3" selected>3</option>
+                            <option value="7">7</option>
+                            <option value="13">13</option>
+                            <option value="19">19</option>
+                            <option value="27">27</option>
+                          </select>
+                        </label>
+
+                        <label>
+                          <span>笔刷形状</span>
+                          <select id="brush-shape-select">
+                            <option value="square" selected>方形笔刷</option>
+                            <option value="round">圆形笔刷</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="studio-group" aria-labelledby="studio-template-heading">
+                  <div class="panel-head compact">
+                    <h2 id="studio-template-heading">模板设置</h2>
+                    <p>模板会直接影响预览裁切和最终命令。</p>
+                  </div>
+
+                  <div class="template-picker-card">
+                    <p class="hint studio-inline-hint">模板外区域会直接裁掉；边缘格子仍会保留。</p>
+
+                    <div class="field-grid template-picker-grid">
+                      <label>
+                        <span>模板分类</span>
+                        <select id="template-category-select">
+                          <option value="all" selected>全部模板</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        <span>当前模板</span>
+                        <select id="template-select">
+                          <option value="none" selected>无模板（正方形）</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div class="template-preview-card">
+                      <div class="template-preview-thumb">
+                        <img id="template-preview-image" alt="当前图纸模板预览" />
+                      </div>
+                      <div class="template-preview-copy">
+                        <strong id="template-preview-label">无模板（正方形）</strong>
+                        <small>这里只用于确认当前模板；真正裁切会同步作用到预览和脚本。</small>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="studio-group" aria-labelledby="studio-execution-heading">
+                  <div class="panel-head compact">
+                    <h2 id="studio-execution-heading">执行操作</h2>
+                    <p>串口和手柄准备好后，就能直接发送当前脚本。</p>
+                  </div>
+
+                  <div class="execution-box">
+                    <div class="field-grid execution-grid">
+                      <label>
+                        <span>串口设备</span>
+                        <select id="studio-port-select">
+                          <option value="">未检测到串口</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div class="action-row slim">
+                      <button id="refresh-ports-button" class="ghost" type="button">刷新串口</button>
+                    </div>
+
+                    <p class="hint" id="execution-hint" aria-live="polite">请选择串口设备，连接手柄后即可直接开始绘制。</p>
+
+                    <div class="action-row">
+                      <button id="quick-start-button" class="primary">一键开始绘制</button>
+                      <button id="generate-button" class="ghost">仅生成命令</button>
+                      <button id="execute-button" class="ghost" disabled>执行现有脚本</button>
+                    </div>
+
+                    <div class="action-row slim">
+                      <button id="pause-execution-button" class="ghost" type="button" disabled>暂停绘制</button>
+                      <button id="resume-execution-button" class="ghost" type="button" disabled>继续绘制</button>
+                      <button id="stop-execution-button" class="ghost" type="button" disabled>中断并保存恢复点</button>
+                    </div>
+
+                    <p class="hint">暂停或中断会在当前命令完成后生效。</p>
+                    <p class="hint" id="studio-execution-status" aria-live="polite">当前未开始绘制。</p>
+                    <section id="execution-emergency-panel" class="execution-emergency hidden" aria-label="应急操作">
+                      <p class="hint">只有“正在中断绘制”长时间不结束时，才使用下面的应急按钮。</p>
+                      <button id="reset-execution-button" class="ghost danger" type="button" disabled>强制清除卡住状态</button>
+                    </section>
+                  </div>
+                </section>
+
+                <section class="studio-group studio-info-group" aria-labelledby="studio-notes-heading">
+                  <div class="panel-head compact">
+                    <h2 id="studio-notes-heading">说明与提醒</h2>
+                    <p>把当前模式、模板、笔刷和执行提醒集中到一起。</p>
+                  </div>
+
+                  <div id="studio-mode-hint" class="studio-summary-grid" aria-live="polite">
+                    <article class="studio-summary-card">
+                      <span>当前模式</span>
+                      <p id="studio-summary-mode">单色绘制，只保留深色像素。</p>
+                    </article>
+                    <article class="studio-summary-card">
+                      <span>当前模板</span>
+                      <p id="studio-summary-template">无模板，使用完整正方形画布。</p>
+                    </article>
+                    <article class="studio-summary-card">
+                      <span>缩放与位置</span>
+                      <p id="studio-summary-transform">缩放 100%，位置居中。</p>
+                    </article>
+                    <article class="studio-summary-card">
+                      <span>当前笔刷</span>
+                      <p id="studio-summary-brush">使用 3 像素方块像素笔刷。</p>
+                    </article>
+                    <article class="studio-summary-card">
+                      <span>背景处理</span>
+                      <p id="studio-summary-background">未开启自动扣背景。</p>
+                    </article>
+                  </div>
+
+                  <div class="studio-note-list">
+                    <p class="hint">开始前确认 Switch 已回到默认画布。</p>
+                    <p class="hint">绘制开始后，不要手动切笔刷或移动页面。</p>
+                    <p class="hint">恢复任务会保存在下方，异常后可继续。</p>
+                  </div>
+                </section>
+              </section>
             </div>
+          </section>
 
-            <label class="range-row">
-              <span id="threshold-label">单色阈值</span>
-              <input id="threshold-range" type="range" min="0" max="255" value="128" />
-              <strong id="threshold-value">128</strong>
-            </label>
-
-            <label class="range-row">
-              <span>导入缩放</span>
-              <input id="scale-range" type="range" min="25" max="200" step="1" value="100" />
-              <span class="range-number-group">
-                <input
-                  id="scale-input"
-                  class="range-number-input"
-                  type="number"
-                  min="25"
-                  max="200"
-                  step="1"
-                  value="100"
-                />
-                <span class="range-unit">%</span>
-              </span>
-            </label>
-
-            <label class="range-row">
-              <span>横向位置</span>
-              <input id="offset-x-range" type="range" min="-100" max="100" step="1" value="0" />
-              <span class="range-number-group">
-                <input
-                  id="offset-x-input"
-                  class="range-number-input"
-                  type="number"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  value="0"
-                />
-                <span class="range-unit">%</span>
-              </span>
-            </label>
-
-            <label class="range-row">
-              <span>纵向位置</span>
-              <input id="offset-y-range" type="range" min="-100" max="100" step="1" value="0" />
-              <span class="range-number-group">
-                <input
-                  id="offset-y-input"
-                  class="range-number-input"
-                  type="number"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  value="0"
-                />
-                <span class="range-unit">%</span>
-              </span>
-            </label>
-
-            <div class="execution-box">
-              <div class="panel-head compact">
-                <h2>执行</h2>
-                <p>手柄连接完成后，这里会直接把脚本发送到 ESP32 串口设备。进入绘画页后不要再手动改笔刷，也不要再移动页面；开始绘制时设备会先按两次 X 打开笔刷页，再自己切到脚本预设的像素画笔，并补三次 A 回到画布，随后等待约 3 秒。</p>
+          <section class="studio-secondary-grid">
+            <section class="panel panel-script">
+              <div class="panel-head">
+                <h2>脚本</h2>
+                <p>这里会显示当前可直接发送给设备的动作脚本。官方色和自定义多色模式都会额外插入色盘配置命令。</p>
               </div>
 
-              <div class="field-grid execution-grid">
-                <label>
-                  <span>串口设备</span>
-                  <select id="studio-port-select">
-                    <option value="">未检测到串口</option>
-                  </select>
-                </label>
-              </div>
+              <textarea id="commands-output" class="code-block" spellcheck="false" placeholder="生成后会在这里显示命令脚本"></textarea>
 
               <div class="action-row slim">
-                <button id="refresh-ports-button" class="ghost" type="button">刷新串口</button>
+                <button id="copy-button" class="ghost" disabled>复制脚本</button>
+                <button id="download-button" class="ghost" disabled>下载脚本</button>
               </div>
-
-              <p class="hint" id="execution-hint">请选择串口设备，连接手柄后即可直接开始绘制。</p>
-              <p class="hint">安全时序模式会默认启用；请先刷入最新固件。执行前只需要确认已经重新进入绘画页并停在默认画布状态；从开始切笔刷到整段绘制结束，都不要再手动碰手柄或页面。</p>
-            </div>
-
-            <div class="action-row">
-              <button id="quick-start-button" class="primary">一键开始绘制</button>
-              <button id="generate-button" class="ghost">仅生成命令</button>
-              <button id="execute-button" class="ghost" disabled>执行现有脚本</button>
-            </div>
-
-            <div class="action-row slim">
-              <button id="pause-execution-button" class="ghost" type="button" disabled>暂停绘制</button>
-              <button id="resume-execution-button" class="ghost" type="button" disabled>继续绘制</button>
-              <button id="stop-execution-button" class="ghost" type="button" disabled>中断并保存恢复点</button>
-            </div>
-
-            <p class="hint">暂停绘制和中断并保存恢复点都会在当前命令完成后生效。如果你点了暂停后看到 Switch 还会继续动一下，这是正常现象；它会先把当前命令跑完。</p>
-            <p class="hint" id="studio-execution-status">当前未开始绘制。</p>
-            <section id="execution-emergency-panel" class="execution-emergency hidden" aria-label="应急操作">
-              <p class="hint">
-                如果“正在中断绘制”持续很久没有结束，说明当前会话可能卡住了。只有这种情况下，才使用下面的应急按钮强制清除卡住状态。
-              </p>
-              <button id="reset-execution-button" class="ghost danger" type="button" disabled>强制清除卡住状态</button>
             </section>
 
-            <section class="recovery-panel" aria-label="恢复任务">
-              <div class="panel-head compact">
+            <section class="panel panel-log">
+              <div class="panel-head">
+                <h2>执行日志</h2>
+                <p>这里会显示模拟器日志，或者串口设备返回的状态信息。</p>
+              </div>
+
+              <div class="action-row slim log-toolbar">
+                <button id="studio-clear-log-button" class="ghost" type="button">清空日志</button>
+              </div>
+
+              <pre id="log-output" class="log-output" data-empty-log="等待生成命令...">等待生成命令...</pre>
+            </section>
+
+            <section class="panel recovery-panel" aria-label="恢复任务">
+              <div class="panel-head">
                 <h2>恢复任务</h2>
-                <p>中断或异常后，会在本地保存脚本和恢复点。请先在 Switch 里保存当前画作，再手动重新进入绘画页；恢复开始后设备也会自动按两次 X 打开笔刷页，并切回保存任务对应的像素画笔，再按三次 A 回到画布，随后等待约 3 秒。</p>
+                <p>中断或异常后，这里会保留本地恢复点。继续前，请先在 Switch 里保存当前画作并重新进入绘画页。</p>
               </div>
               <p class="hint" id="recovery-empty-state">当前没有可恢复任务。</p>
               <div id="recovery-session-list" class="recovery-session-list"></div>
             </section>
-          </section>
-
-          <section class="panel panel-preview">
-            <div class="panel-head">
-              <h2>预览</h2>
-              <p>这里显示像素化结果、模板裁剪效果和关键统计信息。</p>
-            </div>
-
-            <div class="preview-tools">
-              <label class="checkbox-card" for="auto-remove-background-checkbox">
-                <input id="auto-remove-background-checkbox" type="checkbox" />
-                <span class="checkbox-copy">
-                  <strong>自动扣背景</strong>
-                  <small>适合白底、浅灰底、棋盘格假透明图。真正带透明通道的 PNG 不需要开启。</small>
-                </span>
-              </label>
-
-              <label class="preview-select-card">
-                <span>辅助线</span>
-                <select id="preview-guide-select">
-                  <option value="none" selected>关闭</option>
-                  <option value="quad">2*2</option>
-                  <option value="quarter">4*4</option>
-                  <option value="eighth">16*16</option>
-                </select>
-                <small>只用于预览里辅助对齐，不影响最终生成。</small>
-              </label>
-            </div>
-
-            <div class="preview-frame">
-              <div id="preview-canvas" class="preview-canvas" data-guide="none">
-                <img id="preview-image" alt="生成预览" />
-                <img id="preview-template-overlay" alt="" aria-hidden="true" />
-                <div class="preview-guide" aria-hidden="true"></div>
-                <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
-              </div>
-            </div>
-
-            <div class="preview-meta-strip">
-              <div class="preview-meta-card">
-                <span>画布范围</span>
-                <strong id="stat-canvas-size">256x256</strong>
-                <small id="stat-canvas-range">x: 0-255 · y: 0-255</small>
-              </div>
-              <div class="preview-meta-card">
-                <span>图片尺寸</span>
-                <strong id="stat-image-size">-</strong>
-                <small id="stat-image-scale">-</small>
-              </div>
-              <div class="preview-meta-card">
-                <span>图片位置</span>
-                <strong id="stat-image-origin">-</strong>
-                <small id="stat-image-range">-</small>
-              </div>
-            </div>
-
-            <div class="stat-strip">
-              <div class="stat-card">
-                <span>颜色</span>
-                <strong id="stat-colors">-</strong>
-              </div>
-              <div class="stat-card">
-                <span>像素</span>
-                <strong id="stat-pixels">-</strong>
-              </div>
-              <div class="stat-card">
-                <span>命令数</span>
-                <strong id="stat-commands">-</strong>
-              </div>
-              <div class="stat-card">
-                <span>预计耗时</span>
-                <strong id="stat-runtime">-</strong>
-              </div>
-            </div>
-          </section>
-
-          <section id="official-palette-panel" class="panel panel-official-palette hidden">
-            <div class="panel-head">
-              <h2>当前预览用色</h2>
-              <p id="official-palette-summary">
-                这里会显示程序当前使用的颜色集合，并高亮或完整列出这张图实际量化到的颜色。
-              </p>
-            </div>
-
-            <div id="official-palette-grid" class="official-palette-grid"></div>
-          </section>
-
-          <section class="panel panel-script">
-            <div class="panel-head">
-              <h2>脚本</h2>
-              <p>这是当前协议下可直接发送给设备的动作脚本。官方色绘制和自定义多色（自动量化）都会额外插入色盘配置命令。</p>
-            </div>
-
-            <textarea id="commands-output" class="code-block" spellcheck="false" placeholder="生成后会在这里显示命令脚本"></textarea>
-
-            <div class="action-row slim">
-              <button id="copy-button" class="ghost" disabled>复制脚本</button>
-              <button id="download-button" class="ghost" disabled>下载脚本</button>
-            </div>
-          </section>
-
-          <section class="panel panel-log">
-            <div class="panel-head">
-              <h2>执行日志</h2>
-              <p>这里会显示模拟器日志，或者串口设备返回的状态信息。</p>
-            </div>
-
-            <div class="action-row slim log-toolbar">
-              <button id="studio-clear-log-button" class="ghost" type="button">清空日志</button>
-            </div>
-
-            <pre id="log-output" class="log-output" data-empty-log="等待生成命令...">等待生成命令...</pre>
           </section>
         </main>
       </section>
@@ -748,83 +776,85 @@
             </div>
           </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <h2>连接状态</h2>
-              <p>把开发板是否可发现、是否认证、是否真正连上手柄这几步单独可视化出来。</p>
-            </div>
-
-            <div id="controller-status-card" class="firmware-status-card firmware-status-idle controller-status-card">
-              <span id="controller-status-pill" class="status-pill">待连接</span>
-              <strong id="controller-status-title" class="status-title">等待连接手柄</strong>
-              <p id="controller-status-detail" class="status-detail">
-                点击“连接手柄”后，这里会显示当前蓝牙发现、认证、连接和报告发送状态。
-              </p>
-
-              <div class="controller-health-grid">
-                <div class="controller-health-item">
-                  <span>可发现</span>
-                  <strong id="controller-health-discoverable">未知</strong>
-                </div>
-                <div class="controller-health-item">
-                  <span>已认证</span>
-                  <strong id="controller-health-auth">未知</strong>
-                </div>
-                <div class="controller-health-item">
-                  <span>已连接</span>
-                  <strong id="controller-health-connected">未知</strong>
-                </div>
-                <div class="controller-health-item">
-                  <span>已配对</span>
-                  <strong id="controller-health-paired">未知</strong>
-                </div>
-                <div class="controller-health-item">
-                  <span>可发送</span>
-                  <strong id="controller-health-ready">未知</strong>
-                </div>
+          <div class="controller-side-column">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>连接状态</h2>
+                <p>把开发板是否可发现、是否认证、是否真正连上手柄这几步单独可视化出来。</p>
               </div>
 
-              <dl class="firmware-meta-list controller-meta-list">
-                <div class="firmware-meta-row">
-                  <dt>传输层</dt>
-                  <dd id="controller-status-transport">-</dd>
-                </div>
-                <div class="firmware-meta-row">
-                  <dt>配置</dt>
-                  <dd id="controller-status-profile">-</dd>
-                </div>
-                <div class="firmware-meta-row">
-                  <dt>最近主机</dt>
-                  <dd id="controller-status-peer">-</dd>
-                </div>
-                <div class="firmware-meta-row">
-                  <dt>初始化步骤</dt>
-                  <dd id="controller-status-init-step">-</dd>
-                </div>
-                <div class="firmware-meta-row">
-                  <dt>初始化结果</dt>
-                  <dd id="controller-status-init-error">-</dd>
-                </div>
-                <div class="firmware-meta-row">
-                  <dt>最近更新</dt>
-                  <dd id="controller-status-time">-</dd>
-                </div>
-              </dl>
-            </div>
-          </section>
+              <div id="controller-status-card" class="firmware-status-card firmware-status-idle controller-status-card">
+                <span id="controller-status-pill" class="status-pill">待连接</span>
+                <strong id="controller-status-title" class="status-title">等待连接手柄</strong>
+                <p id="controller-status-detail" class="status-detail">
+                  点击“连接手柄”后，这里会显示当前蓝牙发现、认证、连接和报告发送状态。
+                </p>
 
-          <section class="panel controller-log-panel">
-            <div class="panel-head">
-              <h2>测试日志</h2>
-              <p>这里会显示每次按钮测试或自定义命令的返回内容。</p>
-            </div>
+                <div class="controller-health-grid">
+                  <div class="controller-health-item">
+                    <span>可发现</span>
+                    <strong id="controller-health-discoverable">未知</strong>
+                  </div>
+                  <div class="controller-health-item">
+                    <span>已认证</span>
+                    <strong id="controller-health-auth">未知</strong>
+                  </div>
+                  <div class="controller-health-item">
+                    <span>已连接</span>
+                    <strong id="controller-health-connected">未知</strong>
+                  </div>
+                  <div class="controller-health-item">
+                    <span>已配对</span>
+                    <strong id="controller-health-paired">未知</strong>
+                  </div>
+                  <div class="controller-health-item">
+                    <span>可发送</span>
+                    <strong id="controller-health-ready">未知</strong>
+                  </div>
+                </div>
 
-            <div class="action-row slim log-toolbar">
-              <button id="controller-clear-log-button" class="ghost" type="button">清空日志</button>
-            </div>
+                <dl class="firmware-meta-list controller-meta-list">
+                  <div class="firmware-meta-row">
+                    <dt>传输层</dt>
+                    <dd id="controller-status-transport">-</dd>
+                  </div>
+                  <div class="firmware-meta-row">
+                    <dt>配置</dt>
+                    <dd id="controller-status-profile">-</dd>
+                  </div>
+                  <div class="firmware-meta-row">
+                    <dt>最近主机</dt>
+                    <dd id="controller-status-peer">-</dd>
+                  </div>
+                  <div class="firmware-meta-row">
+                    <dt>初始化步骤</dt>
+                    <dd id="controller-status-init-step">-</dd>
+                  </div>
+                  <div class="firmware-meta-row">
+                    <dt>初始化结果</dt>
+                    <dd id="controller-status-init-error">-</dd>
+                  </div>
+                  <div class="firmware-meta-row">
+                    <dt>最近更新</dt>
+                    <dd id="controller-status-time">-</dd>
+                  </div>
+                </dl>
+              </div>
+            </section>
 
-            <pre id="controller-log-output" class="log-output" data-empty-log="等待开始测试...">等待开始测试...</pre>
-          </section>
+            <section class="panel controller-log-panel">
+              <div class="panel-head">
+                <h2>测试日志</h2>
+                <p>这里会显示每次按钮测试或自定义命令的返回内容。</p>
+              </div>
+
+              <div class="action-row slim log-toolbar">
+                <button id="controller-clear-log-button" class="ghost" type="button">清空日志</button>
+              </div>
+
+              <pre id="controller-log-output" class="log-output" data-empty-log="等待开始测试...">等待开始测试...</pre>
+            </section>
+          </div>
         </main>
       </section>
 

@@ -229,6 +229,11 @@ const els = {
   studioConnectionDetail: document.getElementById("studio-connection-detail"),
   studioOpenControllerButton: document.getElementById("studio-open-controller-button"),
   studioModeHint: document.getElementById("studio-mode-hint"),
+  studioSummaryMode: document.getElementById("studio-summary-mode"),
+  studioSummaryTemplate: document.getElementById("studio-summary-template"),
+  studioSummaryTransform: document.getElementById("studio-summary-transform"),
+  studioSummaryBrush: document.getElementById("studio-summary-brush"),
+  studioSummaryBackground: document.getElementById("studio-summary-background"),
   sizeSelect: document.getElementById("size-select"),
   brushSizeSelect: document.getElementById("brush-size-select"),
   brushShapeSelect: document.getElementById("brush-shape-select"),
@@ -2859,22 +2864,22 @@ function renderStudioConnectionStatus() {
 
   let tone = "idle";
   let pill = "可先生成";
-  let title = "可以先生成黑白脚本";
-  let detail = "生成预览和脚本不依赖手柄连接。真正发送到开发板前，再去完成一次手柄测试即可。";
+  let title = "可以先生成脚本";
+  let detail = "预览和脚本生成不依赖手柄；真正发送前再做一次手柄测试即可。";
 
   if (ready) {
     tone = "success";
     pill = "已连接";
-    title = "手柄已连接，可以开始绘制";
-    detail = `当前开发板已经处于可发送状态，可以把绘制脚本发到 ${state.selectedPortPath || "串口设备"}。`;
+    title = "手柄已就绪，可以开始绘制";
+    detail = `当前开发板已经可发送，可以把绘制脚本发到 ${state.selectedPortPath || "串口设备"}。`;
   } else {
     tone = "warning";
     pill = "需要测试";
     title = "需要先进行手柄测试";
     detail =
       connected || auth || discoverable
-        ? "开发板已经开始和 Switch 握手，但还没有到“已就绪”。请先到“手柄测试”页把连接跑通。"
-        : "当前还没有确认开发板已经连上 Switch。开始绘制前，请先到“手柄测试”页完成连接。";
+        ? "开发板已经开始和 Switch 握手，但还没到“已就绪”。请先到“手柄测试”页把连接跑通。"
+        : "开始绘制前，请先到“手柄测试”页确认开发板已经连上 Switch。";
   }
 
   els.studioConnectionCard.className = `studio-connection-card studio-connection-${tone}`;
@@ -3075,40 +3080,41 @@ function syncStudioUi() {
   els.colorModeSelect.value = state.studio.colorMode;
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
-  const backgroundHint = state.studio.removeBackground
-    ? "已开启自动扣背景，会优先去掉白底、浅灰底和棋盘格假透明背景。"
-    : "当前不会自动扣背景；如果素材是白底或棋盘格假透明图，建议开启。";
-  const brushShapeHint =
+  const backgroundSummary = state.studio.removeBackground
+    ? "已开启自动扣背景，会优先去掉白底和假透明底。"
+    : "未开启自动扣背景；白底图建议打开。";
+  const brushSummary =
     normalizeBrushShapeValue(state.studio.brushShape) === "square"
-      ? `当前预设是 ${selectedBrushPresetLabel}；开始绘制时设备会先按 X、X 进入笔刷页，再从默认的 7 像素圆点笔刷自动切到这个方块像素笔刷，并连按三次 A 完成选中和返回画布；回到画布后还会额外等待约 3 秒再继续。进入绘画页后不要再手动改笔刷，也不要再移动页面。`
+      ? `使用 ${selectedBrushPresetLabel}。开始或恢复时会自动切到这一档。`
       : state.studio.brushSize === 1
-        ? "当前预设是 1 像素圆形像素笔刷；开始绘制时设备会自动打开笔刷页，切换到这一档后再连按三次 A 返回画布，并等待约 3 秒再继续。"
-        : `当前选的是 ${state.studio.brushSize} 号圆形像素笔刷；这一档暂不支持生成或执行，请切回方块像素笔刷或使用 1 号笔。`;
-  const templateHint =
+        ? "使用 1 像素圆形像素笔刷；开始或恢复时会自动切到这一档。"
+        : `当前选的是 ${state.studio.brushSize} 号圆形像素笔刷，这一档暂不支持生成或执行。`;
+  const templateSummary =
     state.studio.templateId === "none"
-      ? "当前使用正方形画布，不会额外裁掉模板外区域。"
-      : `当前模板是“${state.studio.templateLabel}”，纯模板外区域不会显示；边缘格子只要碰到模板，也会保留绘制来填满可见边缘。`;
-  const scaleHint = `当前导入缩放是 ${state.studio.imageScalePercent}%，100% 表示完整放进画布。`;
-  const positionHint = describeImagePosition(
+      ? "无模板，使用完整正方形画布。"
+      : `已选“${state.studio.templateLabel}”，模板外区域会被裁掉。`;
+  const transformSummary = `缩放 ${state.studio.imageScalePercent}%；${describeImagePosition(
     state.studio.imageOffsetXPercent,
     state.studio.imageOffsetYPercent,
-  );
-  if (state.studio.colorMode === "mono") {
-    els.studioModeHint.textContent =
-      unsupportedSelectedBrush
-        ? `${brushShapeHint}${templateHint}${scaleHint}${positionHint}${backgroundHint}`
-        : `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${selectedBrushPresetLabel}和画布中心起步生成脚本。${templateHint}${scaleHint}${positionHint}${brushShapeHint}${backgroundHint}`;
-  } else if (state.studio.colorMode === "official") {
-    els.studioModeHint.textContent =
-      unsupportedSelectedBrush
-        ? `${brushShapeHint}${templateHint}${scaleHint}${positionHint}${backgroundHint}`
-        : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${selectedBrushPresetLabel}生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${brushShapeHint}${backgroundHint}`;
-  } else {
-    els.studioModeHint.textContent =
-      unsupportedSelectedBrush
-        ? `${brushShapeHint}${templateHint}${scaleHint}${positionHint}${backgroundHint}`
-        : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}开始前建议先确认手柄链路和 timing 已经稳定；对颜色数量较多或结构较复杂的图片，可以先生成预览再正式开始。${brushShapeHint}${backgroundHint}`;
-  }
+    false,
+  )}。`;
+  const modeSummary =
+    state.studio.colorMode === "mono"
+      ? unsupportedSelectedBrush
+        ? "单色绘制已选中，但当前笔刷组合暂不支持生成。"
+        : `单色绘制，只保留深色像素。阈值 ${els.thresholdRange.value}。`
+      : state.studio.colorMode === "official"
+        ? unsupportedSelectedBrush
+          ? "官方色绘制已选中，但当前笔刷组合暂不支持生成。"
+          : `官方色绘制，会压到 ${state.studio.colorCount} 个官方色。`
+        : unsupportedSelectedBrush
+          ? "自定义多色已选中，但当前笔刷组合暂不支持生成。"
+          : `自定义多色，会自动量化到最多 ${state.studio.colorCount} 色。`;
+  els.studioSummaryMode.textContent = modeSummary;
+  els.studioSummaryTemplate.textContent = templateSummary;
+  els.studioSummaryTransform.textContent = transformSummary;
+  els.studioSummaryBrush.textContent = brushSummary;
+  els.studioSummaryBackground.textContent = backgroundSummary;
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
   els.sizeSelect.disabled = state.studio.busy || executionActive;
@@ -3166,7 +3172,7 @@ function syncStudioUi() {
   }
 
   if (!hasImage) {
-    els.executionHint.textContent = "请先导入一张图片，然后可以直接点“一键开始绘制”。";
+    els.executionHint.textContent = "请先导入图片；预览确认后，就可以直接点“一键开始绘制”。";
     renderStudioConnectionStatus();
     return;
   }
@@ -3182,30 +3188,30 @@ function syncStudioUi() {
 
   if (!state.ports.length) {
     els.executionHint.textContent =
-      "还没有检测到串口设备。请确认使用可传输数据的 USB 线、重新插拔 ESP32；在刷入固件页确认 PlatformIO 就绪后可安装 CP210x 或 CH340/CH341 驱动。";
+      "还没检测到串口设备。请确认数据线、重新插拔 ESP32，必要时去刷入固件页处理驱动。";
     renderStudioConnectionStatus();
     return;
   }
 
   if (!hasPort) {
-    els.executionHint.textContent = "请先选择一个串口设备。";
+    els.executionHint.textContent = "已检测到串口设备，请先选中当前开发板。";
     renderStudioConnectionStatus();
     return;
   }
 
   if (!controllerReady) {
     els.executionHint.textContent =
-      "串口设备已经选好，但手柄还没到“已就绪”。请先去“手柄测试”页完成连接。";
+      "串口已经选好，但手柄还没到“已就绪”。请先去“手柄测试”页完成连接。";
     renderStudioConnectionStatus();
     return;
   }
 
   els.executionHint.textContent =
     state.studio.colorMode === "mono"
-      ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再从画布中心继续翻译成方向键移动与 A 绘制。`
+      ? `可以开始：当前会把 256x256 单色脚本发送到 ${state.selectedPortPath}。确认 Switch 已回到默认画布后，点“一键开始绘制”。`
       : generatedProfile.colorMode === "official"
-        ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。请先保持右侧 9 个槽位默认颜色不变；开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再按这组默认槽位状态去配置内置 7x12 色盘并继续绘制。`
-        : `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 也会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制，这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
+        ? `可以开始：当前会把官方色脚本发送到 ${state.selectedPortPath}。先确认 9 个默认槽位没有被改动，再点“一键开始绘制”。`
+        : `可以开始：当前会把自动量化多色脚本发送到 ${state.selectedPortPath}。建议先看一遍预览和“当前预览用色”，再点“一键开始绘制”。`;
   renderStudioConnectionStatus();
 }
 
