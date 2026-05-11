@@ -4,3 +4,7 @@
 FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/*.*)
 
 idf_component_register(SRCS ${app_sources})
+
+if(SWITCH_LITE)
+	target_compile_definitions(${COMPONENT_LIB} PRIVATE SWITCH_LITE=1)
+endif()

@@ -30,7 +30,20 @@ constexpr uint8_t kStickMax = 255;
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
+#if !defined(SWITCH_LITE)
 constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kSendTaskStartupDelayMs = 0;
+constexpr bool kUseFixedSendInterval = false;
+constexpr bool kMarkPairedOnSubcommand03 = false;
+constexpr bool kSuppressRoutineCongestionWarnings = false;
+#else
+// Switch Lite needs a wider retry window during transient L2CAP congestion.
+constexpr uint16_t kHidCongestionRetryBudgetMs = 300;
+constexpr uint16_t kSendTaskStartupDelayMs = 1000;
+constexpr bool kUseFixedSendInterval = true;
+constexpr bool kMarkPairedOnSubcommand03 = true;
+constexpr bool kSuppressRoutineCongestionWarnings = true;
+#endif
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
 constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
 constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
@@ -340,6 +353,11 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   }
   bluedroidReady_ = true;
 
+#if defined(SWITCH_LITE)
+  // Switch Lite variant: prevent modem sleep to avoid sniff-mode flapping.
+  esp_bt_sleep_disable();
+#endif
+
   initStep_ = "gap_register";
   err = esp_bt_gap_register_callback(
       reinterpret_cast<esp_bt_gap_cb_t>(&ClassicBtControllerTransport::onGapEvent));
@@ -623,11 +641,18 @@ uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
 
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
+  if (kSendTaskStartupDelayMs > 0) {
+    vTaskDelay(pdMS_TO_TICKS(kSendTaskStartupDelayMs));
+  }
   while (true) {
     if (!transport->explicitInputActive_) {
       transport->sendCurrentInputReport(false);
     }
-    vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
+    if (kUseFixedSendInterval) {
+      vTaskDelay(pdMS_TO_TICKS(100));
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(transport->idleSendIntervalMs()));
+    }
   }
 }
 
@@ -914,11 +939,27 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
   }
 
   xSemaphoreTakeRecursive(inputReportSendMutex_, portMAX_DELAY);
+
+  // Before explicit input, align submit/event counters to avoid attributing
+  // earlier idle-send callbacks to the new explicit send window.
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
+    uint32_t drainElapsedMs = 0;
+#if defined(SWITCH_LITE)
+    // Switch Lite can report SEND_REPORT_EVT later than expected under transient
+    // congestion, so briefly wait for in-flight idle events before re-aligning.
+    const uint32_t drainStart = millis();
+    while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
+           (millis() - drainStart) < 100) {
+      delay(1);
+    }
+    drainElapsedMs = millis() - drainStart;
+#endif
     Serial.printf(
-        "INFO bt send_report drain skipped submitted=%lu completed=%lu\n",
-        static_cast<unsigned long>(inputReportSubmitCount_),
-        static_cast<unsigned long>(inputReportSendEventCount_));
+      "INFO bt send_report drain submitted=%lu completed=%lu elapsed=%lu\n",
+      static_cast<unsigned long>(inputReportSubmitCount_),
+      static_cast<unsigned long>(inputReportSendEventCount_),
+      static_cast<unsigned long>(drainElapsedMs));
+    // Align to actual event count after drain (or immediate skip on standard build).
     inputReportSubmitCount_ = inputReportSendEventCount_;
   }
   return true;
@@ -1090,6 +1131,9 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
   }
   if (data[9] == 3) {
     sendSubcommandReply(0x21, kReply03, sizeof(kReply03), "reply03");
+    if (kMarkPairedOnSubcommand03) {
+      markControllerPaired();
+    }
     return;
   }
   if (data[9] == 4) {
@@ -1278,11 +1322,18 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
                          param->send_report.reason == kHidErrCongested;
       readyForReports_ = isHidReportChannelOpen();
       if (param->send_report.status != ESP_HIDD_SUCCESS) {
-        Serial.printf(
-            "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
-            param->send_report.status,
-            param->send_report.reason,
-            param->send_report.report_id);
+        const bool isRoutineCongestion =
+            param->send_report.reason == kHidErrCongested ||
+            param->send_report.reason == 0;
+        const bool shouldLogSendReportWarning =
+            !kSuppressRoutineCongestionWarnings || !isRoutineCongestion;
+        if (shouldLogSendReportWarning) {
+          Serial.printf(
+              "WARN bt hid event=send-report status=%d reason=%u report=%u\n",
+              param->send_report.status,
+              param->send_report.reason,
+              param->send_report.report_id);
+        }
       }
       break;
     case ESP_HIDD_GET_REPORT_EVT:

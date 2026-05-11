@@ -85,9 +85,18 @@ test("esp32 wireless firmware keeps a 2MB-compatible upload header for generic b
     "utf8",
   );
 
-  assert.match(
-    platformioSource,
-    /\[env:esp32dev_wireless\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB/u,
+  const hasDirectSettingsInWirelessEnv =
+    /\[env:esp32dev_wireless\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB/u.test(
+      platformioSource,
+    );
+  const hasInherited2MbSettings =
+    /\[env:esp32dev_wireless_base\][\s\S]*board_build\.esp-idf\.sdkconfig_path\s*=\s*sdkconfig\.esp32dev_wireless[\s\S]*board_upload\.flash_size\s*=\s*2MB[\s\S]*\[env:esp32dev_wireless\][\s\S]*extends\s*=\s*env:esp32dev_wireless_base/u.test(
+      platformioSource,
+    );
+
+  assert.equal(
+    hasDirectSettingsInWirelessEnv || hasInherited2MbSettings,
+    true,
   );
 });
 

@@ -170,7 +170,25 @@ const FIRMWARE_ENVIRONMENTS = [
   },
 ] as const;
 
+const SWITCH_MODELS = [
+  {
+    id: "switch",
+    label: "Switch / OLED / V2",
+    description: "标准 Switch 固件行为。",
+    recommended: true,
+  },
+  {
+    id: "switch_lite",
+    label: "Switch Lite",
+    description: "Switch Lite 对蓝牙 HID 时序更敏感；此模式会切换到启用 SWITCH_LITE 的专用构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
+    recommended: false,
+  },
+] as const;
+
 type FirmwareEnvironmentId = (typeof FIRMWARE_ENVIRONMENTS)[number]["id"];
+type SwitchModelId = (typeof SWITCH_MODELS)[number]["id"];
+const SWITCH_LITE_UPLOAD_ENVIRONMENT_ID = "esp32dev_wireless_switch_lite" as const;
+type FirmwareUploadEnvironmentId = FirmwareEnvironmentId | typeof SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
 const VALID_BRUSH_SIZES = new Set([1, 3, 7, 13, 19, 27] as const);
 type ExecutionTarget = "simulate" | "serial";
 type ExecutionStatus = "idle" | "running" | "paused" | "stopping" | "completed" | "failed" | "stopped";
@@ -449,7 +467,7 @@ interface FirmwareFlashSnapshot {
   startedAt: number | null;
   finishedAt: number | null;
   error: string | null;
-  environmentId: FirmwareEnvironmentId | null;
+  environmentId: FirmwareUploadEnvironmentId | null;
   environmentLabel: string | null;
   selectedPortPath: string | null;
   uploadPortPath: string | null;
@@ -549,6 +567,31 @@ function getFirmwareEnvironment(environmentId: string): (typeof FIRMWARE_ENVIRON
   return environment;
 }
 
+function getSwitchModel(switchModelId: string): (typeof SWITCH_MODELS)[number] {
+  const model = SWITCH_MODELS.find((item) => item.id === switchModelId);
+
+  if (!model) {
+    throw new Error(`Unsupported switch model: ${switchModelId}`);
+  }
+
+  return model;
+}
+
+function resolveFirmwareUploadEnvironment(
+  environmentId: FirmwareEnvironmentId,
+  switchModelId: SwitchModelId,
+): FirmwareUploadEnvironmentId {
+  if (switchModelId !== "switch_lite") {
+    return environmentId;
+  }
+
+  if (environmentId === "esp32dev_wireless") {
+    return SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
+  }
+
+  throw new Error("Switch Lite 目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
+}
+
 class FirmwareFlashManager {
   private state: FirmwareFlashSnapshot = createIdleFirmwareFlashState();
   private child: ReturnType<typeof spawn> | null = null;
@@ -565,14 +608,20 @@ class FirmwareFlashManager {
   }
 
   async start(options: {
-    environmentId: FirmwareEnvironmentId;
+    environmentId: FirmwareUploadEnvironmentId;
     portPath: string;
   }): Promise<FirmwareFlashSnapshot> {
     if (this.state.status === "running") {
       throw new Error("A firmware flash is already running.");
     }
 
-    const environment = getFirmwareEnvironment(options.environmentId);
+    const environment = {
+      id: options.environmentId,
+      label:
+        options.environmentId === SWITCH_LITE_UPLOAD_ENVIRONMENT_ID
+          ? "ESP32-WROOM-32 / ESP-32S（Switch Lite）"
+          : getFirmwareEnvironment(options.environmentId).label,
+    };
     const selectedPortPath = preferSerialPath(options.portPath);
     const session = await serialSessionManager.disconnect();
 
@@ -630,7 +679,7 @@ class FirmwareFlashManager {
   }
 
   private async runFlash(
-    environment: (typeof FIRMWARE_ENVIRONMENTS)[number],
+    environment: { id: FirmwareUploadEnvironmentId, label: string },
     selectedPortPath: string,
   ): Promise<void> {
     try {
@@ -712,7 +761,7 @@ class FirmwareFlashManager {
   }
 
   private async runPlatformIoUpload(
-    environmentId: FirmwareEnvironmentId,
+    environmentId: FirmwareUploadEnvironmentId,
     uploadPortPath: string | null,
   ): Promise<void> {
     const platformIoPath = this.state.platformIoPath;
@@ -1459,6 +1508,7 @@ async function handleFirmwareInfo(response: ServerResponse): Promise<void> {
     python: tooling.python,
     install: tooling.install,
     flash: webRuntime.flashManager.getStatus(),
+    switchModels: SWITCH_MODELS,
     environments: FIRMWARE_ENVIRONMENTS,
   });
 }
@@ -1529,6 +1579,7 @@ async function handleFirmwareFlash(
   response: ServerResponse,
 ): Promise<void> {
   const body = (await readJsonBody(request)) as {
+    switchModelId?: SwitchModelId;
     environmentId?: FirmwareEnvironmentId;
     portPath?: string;
   };
@@ -1538,6 +1589,12 @@ async function handleFirmwareFlash(
       throw new Error("Missing environmentId.");
     }
 
+    const environmentId = getFirmwareEnvironment(body.environmentId).id;
+    const switchModelId = body.switchModelId
+      ? getSwitchModel(body.switchModelId).id
+      : "switch";
+    const resolvedEnvironmentId = resolveFirmwareUploadEnvironment(environmentId, switchModelId);
+
     if (!body.portPath) {
       throw new Error("Missing portPath.");
     }
@@ -1545,7 +1602,7 @@ async function handleFirmwareFlash(
     json(response, 202, {
       success: true,
       flash: await webRuntime.flashManager.start({
-        environmentId: body.environmentId,
+        environmentId: resolvedEnvironmentId,
         portPath: body.portPath,
       }),
       session: serialSessionManager.snapshot(),
