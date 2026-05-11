@@ -93,19 +93,29 @@ Recommended order:
 
 1. Close every serial monitor and serial tool
 2. Go back to the app and click `Refresh Ports`
-3. Confirm the target environment:
-   - use `esp32dev_wireless` first for most common boards
-   - switch to `nodemcu_32s_wireless` if your board is clearly labeled `NodeMCU-32S`
+3. Confirm the flashing selection:
+   - for common `ESP32-WROOM-32 / ESP-32S`, start with `Switch` + `esp32dev_wireless`
+   - if the target console is `Switch 2`, switch the model to `Switch 2`
+   - if the target console is `Switch Lite`, switch the model to `Switch Lite`
+   - if your board is clearly labeled `NodeMCU-32S`, you can switch to `nodemcu_32s_wireless`, but it should still stay on the standard `Switch` firmware path for now
 4. Click `Build and Flash Firmware` again
 5. If the board does not enter download mode, hold the physical `BOOT` button and try flashing again
-6. If the desktop flow keeps failing, and your board is the mainline `ESP32-WROOM-32 / ESP-32S`, you can also switch to [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) and flash directly from desktop `Chrome / Edge`
+6. If the desktop flow keeps failing, and your board is the mainline `ESP32-WROOM-32 / ESP-32S`, you can also switch to [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) and flash directly from desktop `Chrome / Edge`; the web flasher also exposes `Switch`, `Switch 2`, and `Switch Lite` as separate model options
 7. If the web flasher is not an option, or you still want to confirm the local firmware path itself, switch to manual command-line flashing
 
 Manual flash command:
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
+
+# Standard Switch / OLED / V2
 pio run -e esp32dev_wireless -t upload
+
+# Switch 2 (ESP32-WROOM-32 / ESP-32S only)
+pio run -e esp32dev_wireless_switch2 -t upload
+
+# Switch Lite (ESP32-WROOM-32 / ESP-32S only)
+pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
 If `pio` is not in `PATH`, use the full path form described in [Quick Start](user-trial-guide.md).

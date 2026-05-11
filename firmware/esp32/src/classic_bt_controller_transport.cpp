@@ -42,6 +42,7 @@ constexpr bool kWaitForExplicitInputDrain = true;
 constexpr bool kMarkPairedOnSubcommand03 = true;
 constexpr bool kSuppressRoutineCongestionWarnings = true;
 constexpr bool kDisableBluetoothModemSleep = true;
+constexpr bool kAttemptVirtualCableOnAuthComplete = false;
 constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
 constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
 constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
