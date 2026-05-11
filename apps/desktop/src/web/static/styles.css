@@ -474,6 +474,10 @@ body {
   margin-top: 14px;
 }
 
+.brush-picker-layout-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .brush-picker-family {
   display: grid;
   gap: 12px;
@@ -497,9 +501,19 @@ body {
 }
 
 .brush-picker-family-reserved {
-  visibility: hidden;
-  pointer-events: none;
-  user-select: none;
+  padding: 16px;
+  border: 1px dashed rgba(19, 34, 56, 0.16);
+  border-radius: 20px;
+  background: rgba(19, 34, 56, 0.03);
+}
+
+.brush-picker-family-reserved .brush-option-button {
+  background: rgba(255, 255, 255, 0.56);
+  box-shadow: none;
+}
+
+.brush-picker-family-reserved .brush-option-icon {
+  opacity: 0.76;
 }
 
 .brush-picker-grid {
@@ -1925,10 +1939,6 @@ input[type="range"]:focus-visible,
   .brush-picker-layout,
   .brush-picker-grid {
     grid-template-columns: 1fr;
-  }
-
-  .brush-picker-family-reserved {
-    display: none;
   }
 
   .template-picker-grid,

@@ -157,7 +157,7 @@
                   <p>进入脚本生成页时只需要在这里选一次。开始绘制或恢复绘制时，设备会自动连按两次 X 打开笔刷页，并从默认的 7 像素圆点笔刷切到对应的方块像素画笔。</p>
                 </div>
 
-                <div class="brush-picker-layout">
+                <div class="brush-picker-layout brush-picker-layout-single">
                   <section class="brush-picker-family" aria-label="方块像素画笔">
                     <div class="brush-picker-family-head">
                       <strong>方块像素</strong>
@@ -191,33 +191,33 @@
                     </div>
                   </section>
 
-                  <section class="brush-picker-family brush-picker-family-reserved" aria-hidden="true">
+                  <section class="brush-picker-family brush-picker-family-reserved" aria-label="圆形像素画笔（预留）">
                     <div class="brush-picker-family-head">
                       <strong>圆形像素</strong>
-                      <small>预留中</small>
+                      <small>预留中，暂不可选</small>
                     </div>
                     <div class="brush-picker-grid">
-                      <button type="button" class="brush-option-button" tabindex="-1">
+                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
                         <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="1" aria-hidden="true"></span>
                         <span class="brush-option-label">1 像素</span>
                       </button>
-                      <button type="button" class="brush-option-button" tabindex="-1">
+                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
                         <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="3" aria-hidden="true"></span>
                         <span class="brush-option-label">3 像素</span>
                       </button>
-                      <button type="button" class="brush-option-button" tabindex="-1">
+                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
                         <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="7" aria-hidden="true"></span>
                         <span class="brush-option-label">7 像素</span>
                       </button>
-                      <button type="button" class="brush-option-button" tabindex="-1">
+                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
                         <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="13" aria-hidden="true"></span>
                         <span class="brush-option-label">13 像素</span>
                       </button>
-                      <button type="button" class="brush-option-button" tabindex="-1">
+                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
                         <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="19" aria-hidden="true"></span>
                         <span class="brush-option-label">19 像素</span>
                       </button>
-                      <button type="button" class="brush-option-button" tabindex="-1">
+                      <button type="button" class="brush-option-button" disabled aria-disabled="true" tabindex="-1">
                         <span class="brush-option-icon brush-option-icon-round" data-brush-visual-size="27" aria-hidden="true"></span>
                         <span class="brush-option-label">27 像素</span>
                       </button>
