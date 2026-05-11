@@ -8,7 +8,7 @@ import {
   buildRecoveryExecutionPlan,
   deriveResumeProgress,
 } from "../src/app/recovery.js";
-import { generateScanlinePlan } from "../src/path/scanline.js";
+import { estimateRuntimeMs, generateScanlinePlan } from "../src/path/scanline.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import { SimulatedAckSender } from "../src/simulator/sender.js";
 import { startWebServer } from "../src/web/server.js";
@@ -533,7 +533,15 @@ test("recovery session API persists visible files across restarts and can discar
     assert.ok(startPayload.recoverySession);
     await access(startPayload.recoverySession.commandsFilePath);
 
-    const finalExecutionStatus = await waitForExecutionStatus(firstServer.url, "completed");
+    const completionTimeoutMs = Math.max(
+      6_000,
+      estimateRuntimeMs(scanlinePlan.commands, profile) + 2_000,
+    );
+    const finalExecutionStatus = await waitForExecutionStatus(
+      firstServer.url,
+      "completed",
+      completionTimeoutMs,
+    );
     assert.equal(finalExecutionStatus, "completed");
 
     const completedSessionsResponse = await fetch(`${firstServer.url}/api/recovery/sessions`);
