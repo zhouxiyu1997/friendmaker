@@ -180,6 +180,7 @@ test("/api/generate rejects unsupported round large-brush requests", async (t) =
   });
 
   assert.equal(response.ok, false);
+  assert.equal(response.status, 400);
   const payload = (await response.json()) as { error?: string };
   assert.match(payload.error ?? "", /圆形/u);
   assert.match(payload.error ?? "", /暂不支持/u);

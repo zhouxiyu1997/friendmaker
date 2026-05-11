@@ -1,7 +1,10 @@
+import sharp from "sharp";
+
 import type { DrawingMask, DrawingProfile, PixelMap, PixelizationResult, RgbColor } from "../types.js";
 import { createBrushGrid } from "../brushGrid.js";
 import { colorDistanceSquared, parseHexColor } from "../utils/colors.js";
-import type { ImageSource } from "./loadImage.js";
+import type { RawImageData } from "../types.js";
+import { loadImage, type ImageSource } from "./loadImage.js";
 import {
   applyDrawingMask,
   createDrawingMaskCoverageMap,
@@ -17,6 +20,31 @@ interface PixelColorUsage {
   colorHex: string;
   rgb: RgbColor;
   count: number;
+}
+
+async function readRawImage(imageSource: ImageSource): Promise<RawImageData> {
+  const { data, info } = await loadImage(imageSource)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    width: info.width,
+    height: info.height,
+    channels: info.channels,
+    data,
+  };
+}
+
+async function encodeRawImageAsPng(image: RawImageData): Promise<Buffer> {
+  return sharp(image.data, {
+    raw: {
+      width: image.width,
+      height: image.height,
+      channels: image.channels as 1 | 2 | 3 | 4,
+    },
+  })
+    .png()
+    .toBuffer();
 }
 
 function collapsePixelMapForBrush(
@@ -251,9 +279,12 @@ export async function pixelizeImage(
       ? { offsetYPercent: options.imageOffsetYPercent }
       : {}),
   };
-  const resizedImage = await resizeImage(imageSource, resizeOptions);
-  const backgroundAdjustedImage = options?.removeBackground ? autoRemoveBackground(resizedImage) : resizedImage;
-  const maskedImage = applyDrawingMask(backgroundAdjustedImage, options?.drawingMask ?? null);
+  const resizeSource =
+    options?.removeBackground === true
+      ? await encodeRawImageAsPng(autoRemoveBackground(await readRawImage(imageSource)))
+      : imageSource;
+  const resizedImage = await resizeImage(resizeSource, resizeOptions);
+  const maskedImage = applyDrawingMask(resizedImage, options?.drawingMask ?? null);
   const drawingMaskCoverageMap = createDrawingMaskCoverageMap(options?.drawingMask ?? null, grid);
 
   const fullPixelMap = quantizePixels(maskedImage, {

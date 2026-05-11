@@ -267,6 +267,7 @@ test("large brush centered blocks use grid origin instead of top-left bias", asy
 });
 
 test("auto background removal still works when the placed image does not touch the canvas edge", async () => {
+  const profile = makeProfile({ canvasWidth: 10, canvasHeight: 10, brushSize: 1 });
   const foreground = await solidPng(1, 1, { r: 0, g: 0, b: 0, alpha: 255 });
   const source = await sharp({
     create: {
@@ -279,18 +280,43 @@ test("auto background removal still works when the placed image does not touch t
     .composite([{ input: foreground, left: 2, top: 2 }])
     .png()
     .toBuffer();
-  const placed = await resizeImage(source, {
-    width: 10,
-    height: 10,
-    resizeMode: "contain",
-    scalePercent: 50,
+  const pixelized = await pixelizeImage(source, profile, {
+    imageScalePercent: 50,
+    removeBackground: true,
   });
-  const cutout = autoRemoveBackground(placed);
 
-  assert.equal(rawAlphaAt(placed, 0, 0), 0);
-  assert.equal(rawAlphaAt(placed, 3, 3), 255);
-  assert.equal(rawAlphaAt(cutout, 3, 3), 0);
-  assert.equal(rawAlphaAt(cutout, 5, 5), 255);
+  assert.equal(pixelized.pixelMap[3]?.[3]?.alpha, 0);
+  assert.equal(pixelized.pixelMap[5]?.[5]?.alpha, 255);
+  assert.equal(
+    pixelized.pixelMap.flatMap((row) => row).filter((pixel) => pixel.alpha > 0 && pixel.colorIndex >= 0).length,
+    1,
+  );
+});
+
+test("auto background removal keeps already transparent assets intact", async () => {
+  const foreground = await solidPng(3, 3, { r: 255, g: 255, b: 255, alpha: 255 });
+  const source = await sharp({
+    create: {
+      width: 5,
+      height: 5,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{ input: foreground, left: 1, top: 1 }])
+    .png()
+    .toBuffer();
+  const loaded = await resizeImage(source, {
+    width: 5,
+    height: 5,
+    resizeMode: "contain",
+  });
+  const cutout = autoRemoveBackground(loaded);
+
+  assert.equal(rawAlphaAt(cutout, 1, 1), 255);
+  assert.equal(rawAlphaAt(cutout, 2, 2), 255);
+  assert.equal(rawAlphaAt(cutout, 3, 3), 255);
+  assert.equal(rawAlphaAt(cutout, 0, 0), 0);
 });
 
 test("drawing mask clears pixels outside the template and bounds follow the masked shape", async () => {

@@ -8,13 +8,6 @@ const MIN_EDGE_SAMPLE_COUNT = 8;
 const MIN_EDGE_SAMPLE_RATIO = 0.08;
 const COLOR_MATCH_THRESHOLD = 3_600;
 
-interface OpaqueBounds {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
 function getOffset(image: RawImageData, x: number, y: number): number {
   return (y * image.width + x) * image.channels;
 }
@@ -49,38 +42,7 @@ function shouldKeepAsBackgroundCandidate(color: RgbColor, ratio: number): boolea
   return ratio >= 0.3;
 }
 
-function findOpaqueBounds(image: RawImageData): OpaqueBounds | null {
-  let left = image.width;
-  let top = image.height;
-  let right = -1;
-  let bottom = -1;
-
-  for (let y = 0; y < image.height; y += 1) {
-    for (let x = 0; x < image.width; x += 1) {
-      const pixel = readPixel(image, x, y);
-
-      if (pixel.alpha <= TRANSPARENCY_ALPHA_THRESHOLD) {
-        continue;
-      }
-
-      left = Math.min(left, x);
-      top = Math.min(top, y);
-      right = Math.max(right, x);
-      bottom = Math.max(bottom, y);
-    }
-  }
-
-  if (right < left || bottom < top) {
-    return null;
-  }
-
-  return { left, top, right, bottom };
-}
-
-function collectPerimeterPixels(
-  image: RawImageData,
-  bounds: OpaqueBounds,
-): Array<{ x: number; y: number; rgb: RgbColor; alpha: number }> {
+function collectEdgePixels(image: RawImageData): Array<{ x: number; y: number; rgb: RgbColor; alpha: number }> {
   const samples: Array<{ x: number; y: number; rgb: RgbColor; alpha: number }> = [];
   const visited = new Set<string>();
   const pushSample = (x: number, y: number) => {
@@ -94,25 +56,21 @@ function collectPerimeterPixels(
     samples.push({ x, y, rgb: pixel.rgb, alpha: pixel.alpha });
   };
 
-  for (let x = bounds.left; x <= bounds.right; x += 1) {
-    pushSample(x, bounds.top);
-    pushSample(x, bounds.bottom);
+  for (let x = 0; x < image.width; x += 1) {
+    pushSample(x, 0);
+    pushSample(x, image.height - 1);
   }
 
-  for (let y = bounds.top; y <= bounds.bottom; y += 1) {
-    pushSample(bounds.left, y);
-    pushSample(bounds.right, y);
+  for (let y = 0; y < image.height; y += 1) {
+    pushSample(0, y);
+    pushSample(image.width - 1, y);
   }
 
   return samples;
 }
 
-function detectBackgroundSwatches(image: RawImageData, bounds: OpaqueBounds | null): RgbColor[] {
-  if (!bounds) {
-    return [];
-  }
-
-  const edgePixels = collectPerimeterPixels(image, bounds).filter(
+function detectBackgroundSwatches(image: RawImageData): RgbColor[] {
+  const edgePixels = collectEdgePixels(image).filter(
     (pixel) => pixel.alpha > TRANSPARENCY_ALPHA_THRESHOLD,
   );
 
@@ -175,10 +133,9 @@ function isBackgroundLike(color: RgbColor, swatches: RgbColor[]): boolean {
 }
 
 export function autoRemoveBackground(image: RawImageData): RawImageData {
-  const bounds = findOpaqueBounds(image);
-  const swatches = detectBackgroundSwatches(image, bounds);
+  const swatches = detectBackgroundSwatches(image);
 
-  if (!bounds || swatches.length === 0 || image.width === 0 || image.height === 0) {
+  if (swatches.length === 0 || image.width === 0 || image.height === 0) {
     return image;
   }
 
@@ -209,14 +166,14 @@ export function autoRemoveBackground(image: RawImageData): RawImageData {
     }
   };
 
-  for (let x = bounds.left; x <= bounds.right; x += 1) {
-    tryQueue(x, bounds.top);
-    tryQueue(x, bounds.bottom);
+  for (let x = 0; x < image.width; x += 1) {
+    tryQueue(x, 0);
+    tryQueue(x, image.height - 1);
   }
 
-  for (let y = bounds.top; y <= bounds.bottom; y += 1) {
-    tryQueue(bounds.left, y);
-    tryQueue(bounds.right, y);
+  for (let y = 0; y < image.height; y += 1) {
+    tryQueue(0, y);
+    tryQueue(image.width - 1, y);
   }
 
   while (head < queue.length) {

@@ -1112,7 +1112,7 @@ function assertSupportedBrushSelection(
   const message = getUnsupportedBrushShapeMessage(normalizedBrushShape, normalizedBrushSize);
 
   if (message) {
-    throw new Error(message);
+    throw new HttpError(400, message);
   }
 }
 
