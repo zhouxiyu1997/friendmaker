@@ -81,6 +81,32 @@ function makeRecoveryProfileSummary(profile: DrawingProfile) {
   };
 }
 
+async function waitForExecutionStatus(
+  serverUrl: string,
+  expectedStatus: string,
+  timeoutMs = 2_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus = "idle";
+
+  while (Date.now() <= deadline) {
+    const statusResponse = await fetch(`${serverUrl}/api/execution/status`);
+    const statusPayload = (await statusResponse.json()) as {
+      execution?: { status?: string };
+    };
+
+    lastStatus = statusPayload.execution?.status ?? lastStatus;
+
+    if (lastStatus === expectedStatus) {
+      return lastStatus;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  return lastStatus;
+}
+
 test("mono resume segments keep the first draw command when the segment already starts at center", () => {
   const profile = makeProfile({
     canvasWidth: 5,
@@ -457,23 +483,7 @@ test("recovery session API persists visible files across restarts and can discar
     assert.ok(startPayload.recoverySession);
     await access(startPayload.recoverySession.commandsFilePath);
 
-    let finalExecutionStatus = "idle";
-
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const statusResponse = await fetch(`${firstServer.url}/api/execution/status`);
-      const statusPayload = (await statusResponse.json()) as {
-        execution?: { status?: string };
-      };
-
-      finalExecutionStatus = statusPayload.execution?.status ?? finalExecutionStatus;
-
-      if (finalExecutionStatus === "completed") {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-
+    const finalExecutionStatus = await waitForExecutionStatus(firstServer.url, "completed");
     assert.equal(finalExecutionStatus, "completed");
 
     const completedSessionsResponse = await fetch(`${firstServer.url}/api/recovery/sessions`);
