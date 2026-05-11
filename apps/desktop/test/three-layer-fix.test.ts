@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import sharp from "sharp";
@@ -11,6 +12,12 @@ import { renderPreviewToBuffer } from "../src/image/renderPreview.js";
 import { generateScanlineCommands } from "../src/path/scanline.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import {
+  SERIAL_OPEN_BOOT_TIMEOUT_MS,
+  SERIAL_OPEN_CONTROL_LINE_SETTLE_MS,
+  SERIAL_OPEN_POST_BOOT_SETTLE_MS,
+  SERIAL_OPEN_READY_PROBE_TIMEOUT_MS,
+  SERIAL_OPEN_RESET_DETECT_WINDOW_MS,
+  SERIAL_OPEN_RESET_PULSE_MS,
   getAckTimeoutForCommand,
   isCongestedControllerSendReportLine,
   isDirectControllerInputReportFailureLine,
@@ -359,6 +366,49 @@ test("dynamic timeouts follow CFG INPUT timing", () => {
   assert.equal(getAckTimeoutForCommand("M 3 0", 500, timing), 1600);
   assert.equal(getAckTimeoutForCommand("L 3 0", 500, timing), 1800);
   assert.equal(getAckTimeoutForCommand("H", 500, timing), 4700);
+});
+
+test("serial sender probes fresh ESP32 serial sessions before first sequenced command", async () => {
+  const senderSource = await readFile(
+    new URL("../src/serial/sender.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(SERIAL_OPEN_RESET_DETECT_WINDOW_MS, 400);
+  assert.equal(SERIAL_OPEN_BOOT_TIMEOUT_MS, 10_000);
+  assert.equal(SERIAL_OPEN_POST_BOOT_SETTLE_MS, 250);
+  assert.equal(SERIAL_OPEN_CONTROL_LINE_SETTLE_MS, 150);
+  assert.equal(SERIAL_OPEN_READY_PROBE_TIMEOUT_MS, 3_000);
+  assert.equal(SERIAL_OPEN_RESET_PULSE_MS, 120);
+  assert.match(
+    senderSource,
+    /const parser = port\.pipe\(new ReadlineParser\(\{ delimiter: "\\n" \}\)\)[\s\S]*await setPortSignals\(port, \{ dtr: false, rts: false, brk: false \}\)[\s\S]*INFO serial_session=signals dtr=false rts=false wait_ms=\$\{SERIAL_OPEN_CONTROL_LINE_SETTLE_MS\}[\s\S]*INFO serial_session=stabilizing detect_ms=\$\{SERIAL_OPEN_RESET_DETECT_WINDOW_MS\} boot_timeout_ms=\$\{SERIAL_OPEN_BOOT_TIMEOUT_MS\}[\s\S]*await stabilizeFreshSerialSession\(parser, port, onDeviceLine\)[\s\S]*await probeFreshSerialSession\(parser, port, onDeviceLine\)/u,
+  );
+  assert.match(
+    senderSource,
+    /INFO serial_session=probe phase=\$\{phase\} command=I timeout_ms=\$\{SERIAL_OPEN_READY_PROBE_TIMEOUT_MS\}[\s\S]*await writeLine\(port, "I"\)[\s\S]*WARN serial_session=probe_timeout phase=\$\{phase\} timeout_ms=\$\{SERIAL_OPEN_READY_PROBE_TIMEOUT_MS\}[\s\S]*INFO serial_session=probe_ready phase=\$\{phase\}/u,
+  );
+  assert.match(
+    senderSource,
+    /if \(!sawActivity && elapsedMs >= SERIAL_OPEN_RESET_DETECT_WINDOW_MS\)[\s\S]*if \(sawBoot && idleMs >= SERIAL_OPEN_POST_BOOT_SETTLE_MS\)[\s\S]*WARN serial_session=stabilize_timeout boot_seen=false wait_ms=\$\{SERIAL_OPEN_BOOT_TIMEOUT_MS\}/u,
+  );
+  assert.match(
+    senderSource,
+    /async function pulseRunModeReset\(port: SerialPort, onDeviceLine\?: \(line: string\) => void\): Promise<void> \{[\s\S]*await setPortSignals\(port, \{ dtr: false, rts: true, brk: false \}\)[\s\S]*INFO serial_session=reset_pulse dtr=false rts=true wait_ms=\$\{SERIAL_OPEN_RESET_PULSE_MS\}[\s\S]*INFO serial_session=reset_release dtr=false rts=false wait_ms=\$\{SERIAL_OPEN_CONTROL_LINE_SETTLE_MS\}/u,
+  );
+  assert.equal(
+    senderSource.includes('private parserDataHandler: ((rawLine: string | Buffer) => void) | null = null;'),
+    true,
+  );
+  assert.equal(senderSource.includes("private passiveDeviceLines: string[] = [];"), true);
+  assert.equal(
+    senderSource.includes("private flushPassiveDeviceLines(onDeviceLine?: (line: string) => void): void {"),
+    true,
+  );
+  assert.equal(senderSource.includes("pendingLines.forEach((line) => onDeviceLine(line));"), true);
+  assert.equal(senderSource.includes("this.attachParserDataHandler(parser);"), true);
+  assert.equal(senderSource.includes("this.flushPassiveDeviceLines(options.onDeviceLine);"), true);
+  assert.equal(senderSource.includes("this.beginForegroundDeviceLineCapture();"), true);
 });
 
 test("palette-config commands get enough timeout for calibrated custom colors", () => {

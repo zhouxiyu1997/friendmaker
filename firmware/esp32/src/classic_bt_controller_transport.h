@@ -37,6 +37,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool beginExplicitInput();
   void endExplicitInput();
   void resetInputReportTracking();
+  bool clearBondedPeerDevices();
   bool clearPersistedPeerAddress();
   void markControllerPaired();
   bool sendSubcommandReply(uint8_t reportId, const uint8_t *data, size_t length, const char *label);

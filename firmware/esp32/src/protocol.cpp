@@ -394,7 +394,7 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     }
 
     Serial.printf(
-        "INFO action=bt-reset reconnect_last_peer=%s\n",
+        "INFO action=bt-reset requested_reconnect_last_peer=%s\n",
         reconnectLastPeer ? "true" : "false");
     return true;
   }

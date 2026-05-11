@@ -173,9 +173,16 @@ const FIRMWARE_ENVIRONMENTS = [
 const SWITCH_MODELS = [
   {
     id: "switch",
-    label: "Switch / OLED / V2",
+    label: "Switch",
     description: "标准 Switch 固件行为。",
     recommended: true,
+  },
+  {
+    id: "switch2",
+    label: "Switch 2",
+    description:
+      "Switch 2 目前走更保守的 Bluetooth Classic HID 时序，并在认证成功后主动补发 virtual cable 请求。",
+    recommended: false,
   },
   {
     id: "switch_lite",
@@ -188,7 +195,11 @@ const SWITCH_MODELS = [
 type FirmwareEnvironmentId = (typeof FIRMWARE_ENVIRONMENTS)[number]["id"];
 type SwitchModelId = (typeof SWITCH_MODELS)[number]["id"];
 const SWITCH_LITE_UPLOAD_ENVIRONMENT_ID = "esp32dev_wireless_switch_lite" as const;
-type FirmwareUploadEnvironmentId = FirmwareEnvironmentId | typeof SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
+const SWITCH_2_UPLOAD_ENVIRONMENT_ID = "esp32dev_wireless_switch2" as const;
+type FirmwareUploadEnvironmentId =
+  | FirmwareEnvironmentId
+  | typeof SWITCH_LITE_UPLOAD_ENVIRONMENT_ID
+  | typeof SWITCH_2_UPLOAD_ENVIRONMENT_ID;
 const VALID_BRUSH_SIZES = new Set([1, 3, 7, 13, 19, 27] as const);
 type ExecutionTarget = "simulate" | "serial";
 type ExecutionStatus = "idle" | "running" | "paused" | "stopping" | "completed" | "failed" | "stopped";
@@ -581,15 +592,33 @@ function resolveFirmwareUploadEnvironment(
   environmentId: FirmwareEnvironmentId,
   switchModelId: SwitchModelId,
 ): FirmwareUploadEnvironmentId {
-  if (switchModelId !== "switch_lite") {
-    return environmentId;
+  switch (switchModelId) {
+    case "switch":
+      return environmentId;
+    case "switch2":
+      if (environmentId === "esp32dev_wireless") {
+        return SWITCH_2_UPLOAD_ENVIRONMENT_ID;
+      }
+      throw new Error("Switch 2 目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
+    case "switch_lite":
+      if (environmentId === "esp32dev_wireless") {
+        return SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
+      }
+      throw new Error("Switch Lite 目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
   }
 
-  if (environmentId === "esp32dev_wireless") {
-    return SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
-  }
+  return environmentId;
+}
 
-  throw new Error("Switch Lite 目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
+function getFirmwareUploadEnvironmentLabel(environmentId: FirmwareUploadEnvironmentId): string {
+  switch (environmentId) {
+    case SWITCH_2_UPLOAD_ENVIRONMENT_ID:
+      return "ESP32-WROOM-32 / ESP-32S（Switch 2）";
+    case SWITCH_LITE_UPLOAD_ENVIRONMENT_ID:
+      return "ESP32-WROOM-32 / ESP-32S（Switch Lite）";
+    default:
+      return getFirmwareEnvironment(environmentId).label;
+  }
 }
 
 class FirmwareFlashManager {
@@ -617,10 +646,7 @@ class FirmwareFlashManager {
 
     const environment = {
       id: options.environmentId,
-      label:
-        options.environmentId === SWITCH_LITE_UPLOAD_ENVIRONMENT_ID
-          ? "ESP32-WROOM-32 / ESP-32S（Switch Lite）"
-          : getFirmwareEnvironment(options.environmentId).label,
+      label: getFirmwareUploadEnvironmentLabel(options.environmentId),
     };
     const selectedPortPath = preferSerialPath(options.portPath);
     const session = await serialSessionManager.disconnect();

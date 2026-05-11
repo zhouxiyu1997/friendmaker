@@ -1,6 +1,7 @@
 #include "classic_bt_controller_transport.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "config.h"
@@ -30,28 +31,54 @@ constexpr uint8_t kStickMax = 255;
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
 constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
-#if !defined(SWITCH_LITE)
-constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
-constexpr uint16_t kSendTaskStartupDelayMs = 0;
-constexpr bool kUseFixedSendInterval = false;
-constexpr bool kWaitForExplicitInputSendEvent = false;
-constexpr bool kMarkPairedOnSubcommand03 = false;
-constexpr bool kSuppressRoutineCongestionWarnings = false;
-#else
+#if defined(SWITCH_LITE)
+constexpr const char *kBluetoothTimingProfile = "switch-lite";
 // Switch Lite needs a wider retry window during transient L2CAP congestion.
 constexpr uint16_t kHidCongestionRetryBudgetMs = 300;
 constexpr uint16_t kSendTaskStartupDelayMs = 1000;
 constexpr bool kUseFixedSendInterval = true;
 constexpr bool kWaitForExplicitInputSendEvent = true;
+constexpr bool kWaitForExplicitInputDrain = true;
 constexpr bool kMarkPairedOnSubcommand03 = true;
 constexpr bool kSuppressRoutineCongestionWarnings = true;
+constexpr bool kDisableBluetoothModemSleep = true;
+constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
+constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
+constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
+#elif defined(SWITCH_2)
+constexpr const char *kBluetoothTimingProfile = "switch2";
+// Switch 2 is still under characterization, so keep its idle/report cadence
+// conservative until we understand its Classic BT pairing behavior better.
+constexpr uint16_t kHidCongestionRetryBudgetMs = 800;
+constexpr uint16_t kSendTaskStartupDelayMs = 1000;
+constexpr bool kUseFixedSendInterval = true;
+constexpr bool kWaitForExplicitInputSendEvent = true;
+constexpr bool kWaitForExplicitInputDrain = true;
+constexpr bool kMarkPairedOnSubcommand03 = true;
+constexpr bool kSuppressRoutineCongestionWarnings = true;
+constexpr bool kDisableBluetoothModemSleep = true;
+constexpr bool kAttemptVirtualCableOnAuthComplete = true;
+constexpr uint16_t kIdlePrePairingReportIntervalMs = 60;
+constexpr uint16_t kIdleCongestedReportIntervalMs = 120;
+constexpr uint16_t kIdleConnectedReportIntervalMs = 30;
+#else
+constexpr const char *kBluetoothTimingProfile = "switch";
+constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kSendTaskStartupDelayMs = 0;
+constexpr bool kUseFixedSendInterval = false;
+constexpr bool kWaitForExplicitInputSendEvent = false;
+constexpr bool kWaitForExplicitInputDrain = false;
+constexpr bool kMarkPairedOnSubcommand03 = false;
+constexpr bool kSuppressRoutineCongestionWarnings = false;
+constexpr bool kDisableBluetoothModemSleep = false;
+constexpr bool kAttemptVirtualCableOnAuthComplete = false;
+constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
+constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
+constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
 #endif
 constexpr uint16_t kFixedSendTaskIntervalMs = 100;
 constexpr uint16_t kExplicitInputDrainBudgetMs = 100;
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
-constexpr uint16_t kIdlePrePairingReportIntervalMs = 30;
-constexpr uint16_t kIdleCongestedReportIntervalMs = 45;
-constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -357,13 +384,14 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   }
   bluedroidReady_ = true;
 
-#if defined(SWITCH_LITE)
-  // Switch Lite variant: prevent modem sleep to avoid sniff-mode flapping.
-  const esp_err_t sleepErr = esp_bt_sleep_disable();
-  if (!isIgnorableBluetoothError(sleepErr)) {
-    Serial.printf("WARN bt sleep_disable failed err=%s\n", esp_err_to_name(sleepErr));
+  if (kDisableBluetoothModemSleep) {
+    // Prevent modem sleep on the more timing-sensitive controller variants so
+    // the host does not bounce between discoverable and reconnectable states.
+    const esp_err_t sleepErr = esp_bt_sleep_disable();
+    if (!isIgnorableBluetoothError(sleepErr)) {
+      Serial.printf("WARN bt sleep_disable failed err=%s\n", esp_err_to_name(sleepErr));
+    }
   }
-#endif
 
   initStep_ = "gap_register";
   err = esp_bt_gap_register_callback(
@@ -730,6 +758,10 @@ bool ClassicBtControllerTransport::clearStoredPeer() {
     std::memcpy(previousPeerAddress, lastPeerAddress_, sizeof(previousPeerAddress));
   }
 
+  if (!clearBondedPeerDevices()) {
+    return false;
+  }
+
   if (!clearPersistedPeerAddress()) {
     return false;
   }
@@ -747,6 +779,60 @@ bool ClassicBtControllerTransport::clearStoredPeer() {
     Serial.println("INFO bt cleared_peer=none");
   }
 
+  return true;
+}
+
+bool ClassicBtControllerTransport::clearBondedPeerDevices() {
+  if (!gapReady_) {
+    Serial.println("WARN bt clear_bonds failed gap_ready=false");
+    return false;
+  }
+
+  const int bondCount = esp_bt_gap_get_bond_device_num();
+  if (bondCount <= 0) {
+    Serial.println("INFO bt cleared_bonds=0");
+    return true;
+  }
+
+  auto *bondedDevices = reinterpret_cast<esp_bd_addr_t *>(
+      std::calloc(static_cast<size_t>(bondCount), sizeof(esp_bd_addr_t)));
+  if (bondedDevices == nullptr) {
+    Serial.printf("WARN bt clear_bonds alloc failed count=%d\n", bondCount);
+    return false;
+  }
+
+  int listCount = bondCount;
+  esp_err_t err = esp_bt_gap_get_bond_device_list(&listCount, bondedDevices);
+  if (err != ESP_OK) {
+    std::free(bondedDevices);
+    Serial.printf("WARN bt clear_bonds list failed err=%s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  bool removedAllBonds = true;
+  for (int index = 0; index < listCount; ++index) {
+    err = esp_bt_gap_remove_bond_device(bondedDevices[index]);
+    if (err != ESP_OK) {
+      removedAllBonds = false;
+      Serial.printf(
+          "WARN bt clear_bonds remove failed peer=%s err=%s\n",
+          formatBluetoothAddress(bondedDevices[index]).c_str(),
+          esp_err_to_name(err));
+      continue;
+    }
+
+    Serial.printf(
+        "INFO bt cleared_bond=%s\n",
+        formatBluetoothAddress(bondedDevices[index]).c_str());
+  }
+
+  std::free(bondedDevices);
+
+  if (!removedAllBonds) {
+    return false;
+  }
+
+  Serial.printf("INFO bt cleared_bonds=%d\n", listCount);
   return true;
 }
 
@@ -805,6 +891,8 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
 void ClassicBtControllerTransport::printStatus(Print &output) const {
   output.println("INFO bt_mode=classic-bt-hid");
   output.println("INFO bt_profile=uartswitchcon-pro-controller");
+  output.print("INFO bt_timing_profile=");
+  output.println(kBluetoothTimingProfile);
   output.print("INFO bt_stack_started=");
   output.println(boolName(stackStarted_));
   output.print("INFO bt_bluedroid_ready=");
@@ -1029,16 +1117,16 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
   // earlier idle-send callbacks to the new explicit send window.
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
     uint32_t drainElapsedMs = 0;
-#if defined(SWITCH_LITE)
-    // Switch Lite can report SEND_REPORT_EVT later than expected under transient
-    // congestion, so briefly wait for in-flight idle events before re-aligning.
-    const uint32_t drainStart = millis();
-    while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
-           (millis() - drainStart) < kExplicitInputDrainBudgetMs) {
-      delay(1);
+    if (kWaitForExplicitInputDrain) {
+      // The more conservative profiles can report SEND_REPORT_EVT later than
+      // expected under transient congestion, so briefly wait before re-aligning.
+      const uint32_t drainStart = millis();
+      while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
+             (millis() - drainStart) < kExplicitInputDrainBudgetMs) {
+        delay(1);
+      }
+      drainElapsedMs = millis() - drainStart;
     }
-    drainElapsedMs = millis() - drainStart;
-#endif
     Serial.printf(
         "INFO bt send_report drain submitted=%lu completed=%lu elapsed=%lu\n",
         static_cast<unsigned long>(inputReportSubmitCount_),
@@ -1274,11 +1362,13 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
   auto *param = reinterpret_cast<esp_bt_gap_cb_param_t *>(rawParam);
 
   switch (gapEvent) {
-    case ESP_BT_GAP_AUTH_CMPL_EVT:
+    case ESP_BT_GAP_AUTH_CMPL_EVT: {
       authComplete_ = param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS;
+      const String peerAddress = formatBluetoothAddress(param->auth_cmpl.bda);
       Serial.printf(
-          "INFO bt auth status=%d device=\"%s\"\n",
+          "INFO bt auth status=%d peer=%s device=\"%s\"\n",
           param->auth_cmpl.stat,
+          peerAddress.c_str(),
           reinterpret_cast<const char *>(param->auth_cmpl.device_name));
       if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
         const bool samePeer =
@@ -1289,11 +1379,74 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
         if (!samePeer) {
           hasReconnectablePeer_ = false;
         }
-        // Let Switch initiate the HID control channel after authentication.
-        // Proactively opening a virtual cable here can race with the host's own
-        // incoming CTRL connection and trigger invalid-state rejects.
+        if (kAttemptVirtualCableOnAuthComplete) {
+          // Switch 2 repeatedly authenticates then drops ACL without opening HID,
+          // so proactively request the virtual cable after auth succeeds.
+          attemptVirtualCablePlug(param->auth_cmpl.bda, "auth-complete");
+        }
       }
       break;
+    }
+    case ESP_BT_GAP_PIN_REQ_EVT: {
+      const uint8_t pinLength = param->pin_req.min_16_digit ? 16 : 4;
+      esp_bt_pin_code_t pinCode = {};
+      if (pinLength == 4) {
+        pinCode[0] = '0';
+        pinCode[1] = '0';
+        pinCode[2] = '0';
+        pinCode[3] = '0';
+      }
+      const String peerAddress = formatBluetoothAddress(param->pin_req.bda);
+      Serial.printf(
+          "INFO bt pin-request peer=%s min_16_digit=%s pin_len=%u\n",
+          peerAddress.c_str(),
+          boolName(param->pin_req.min_16_digit),
+          static_cast<unsigned>(pinLength));
+      const esp_err_t replyErr =
+          esp_bt_gap_pin_reply(param->pin_req.bda, true, pinLength, pinCode);
+      if (replyErr != ESP_OK) {
+        Serial.printf(
+            "WARN bt pin-reply failed peer=%s err=%s\n",
+            peerAddress.c_str(),
+            esp_err_to_name(replyErr));
+      } else {
+        Serial.printf(
+            "INFO bt pin-reply peer=%s accepted=true pin_len=%u\n",
+            peerAddress.c_str(),
+            static_cast<unsigned>(pinLength));
+      }
+      break;
+    }
+    case ESP_BT_GAP_CFM_REQ_EVT: {
+      const String peerAddress = formatBluetoothAddress(param->cfm_req.bda);
+      Serial.printf(
+          "INFO bt confirm-request peer=%s value=%lu\n",
+          peerAddress.c_str(),
+          static_cast<unsigned long>(param->cfm_req.num_val));
+      const esp_err_t replyErr = esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+      if (replyErr != ESP_OK) {
+        Serial.printf(
+            "WARN bt confirm-reply failed peer=%s err=%s\n",
+            peerAddress.c_str(),
+            esp_err_to_name(replyErr));
+      } else {
+        Serial.printf("INFO bt confirm-reply peer=%s accepted=true\n", peerAddress.c_str());
+      }
+      break;
+    }
+    case ESP_BT_GAP_KEY_NOTIF_EVT: {
+      const String peerAddress = formatBluetoothAddress(param->key_notif.bda);
+      Serial.printf(
+          "INFO bt passkey-notify peer=%s value=%lu\n",
+          peerAddress.c_str(),
+          static_cast<unsigned long>(param->key_notif.passkey));
+      break;
+    }
+    case ESP_BT_GAP_KEY_REQ_EVT: {
+      const String peerAddress = formatBluetoothAddress(param->key_req.bda);
+      Serial.printf("INFO bt passkey-request peer=%s\n", peerAddress.c_str());
+      break;
+    }
     case ESP_BT_GAP_MODE_CHG_EVT:
       Serial.printf("INFO bt mode-change mode=%u\n", param->mode_chg.mode);
       break;
@@ -1581,6 +1734,7 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(uint16_t durationMs,
   return false;
 }
 void ClassicBtControllerTransport::resetInputReportTracking() {}
+bool ClassicBtControllerTransport::clearBondedPeerDevices() { return false; }
 bool ClassicBtControllerTransport::clearPersistedPeerAddress() { return false; }
 void ClassicBtControllerTransport::markControllerPaired() {}
 bool ClassicBtControllerTransport::sendSubcommandReply(

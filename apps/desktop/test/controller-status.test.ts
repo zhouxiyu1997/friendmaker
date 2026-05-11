@@ -175,7 +175,7 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*BT RESET LAST-PEER[\s\S]*自动恢复手柄连接/u,
+    /state\.controller\.status\.reconnectRecommendedValue === true[\s\S]*const shouldReconnectLastPeer = shouldPreferLastPeerResetOnAutoRecovery\(\);[\s\S]*\? \["BT RESET LAST-PEER", "I"\][\s\S]*: \["BT RESET", "I"\][\s\S]*自动恢复手柄连接/u,
   );
 
   assert.match(
@@ -185,12 +185,12 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
-    /function shouldPreferLastPeerResetAfterTimeout\(status = state\.controller\.status\)[\s\S]*status\.peerReconnectableValue === true[\s\S]*status\.connectedValue === true \|\| status\.authValue === true/u,
+    /function shouldPreferLastPeerResetOnAutoRecovery\(status = state\.controller\.status\)[\s\S]*status &&[\s\S]*status\.peer !== "-"\s*&&[\s\S]*status\.peerReconnectableValue === true/u,
   );
 
   assert.match(
     appSource,
-    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*const shouldReconnectLastPeer = shouldPreferLastPeerResetAfterTimeout\(\);[\s\S]*\? \["BT RESET LAST-PEER", "I"\][\s\S]*: \["BT RESET", "I"\][\s\S]*自动恢复手柄连接/u,
+    /controllerStatusTimeoutRecoveryAttempted = true[\s\S]*const shouldReconnectLastPeer = shouldPreferLastPeerResetOnAutoRecovery\(\);[\s\S]*\? \["BT RESET LAST-PEER", "I"\][\s\S]*: \["BT RESET", "I"\][\s\S]*自动恢复手柄连接/u,
   );
 
   assert.match(
@@ -205,6 +205,29 @@ test("controller status updates also resync the controller action buttons", asyn
 
   assert.match(
     appSource,
+    /import\s*\{\s*deriveControllerStatus,\s*normalizeControllerDeviceLines,\s*shouldReuseExistingControllerConnection,\s*\}\s*from "\.\/controllerStatus\.js";/u,
+  );
+
+  assert.match(
+    appSource,
+    /const CONTROLLER_STATUS_DIAGNOSTIC_LINE_PATTERNS = \[[\s\S]*INFO bt pin-request[\s\S]*INFO bt confirm-request[\s\S]*INFO bt hid event=\(\?:open\|close\|vc-unplug\)[\s\S]*WARN bt /u,
+  );
+
+  assert.doesNotMatch(appSource, /const CONTROLLER_STATUS_DIAGNOSTIC_LINE_PATTERNS = \[[\s\S]*INFO bt auth status=/u);
+  assert.doesNotMatch(appSource, /const CONTROLLER_STATUS_DIAGNOSTIC_LINE_PATTERNS = \[[\s\S]*INFO bt acl-connect /u);
+
+  assert.match(
+    appSource,
+    /function appendControllerStatusDiagnosticLines\(lines\) \{[\s\S]*normalizeControllerDeviceLines\(lines \?\? \[\]\)\.filter\([\s\S]*appendLog\(els\.controllerLogOutput, `\[device\] \$\{line\}`\)/u,
+  );
+
+  assert.match(
+    appSource,
     /if \(payload\?\.lines\) \{[\s\S]*updateControllerStatusFromLines\(payload\.lines\);[\s\S]*\} else \{[\s\S]*await requestControllerStatus\(\);[\s\S]*\}/u,
+  );
+
+  assert.match(
+    appSource,
+    /updateControllerStatusFromLines\(payload\.lines \?\? \[\]\);[\s\S]*appendControllerStatusDiagnosticLines\(payload\.lines\);/u,
   );
 });

@@ -1,5 +1,6 @@
 import {
   deriveControllerStatus,
+  normalizeControllerDeviceLines,
   shouldReuseExistingControllerConnection,
 } from "./controllerStatus.js";
 import {
@@ -377,6 +378,15 @@ let studioPreviewBoundsRequestSerial = 0;
 const studioTemplateOverlayCache = new Map();
 const CONTROLLER_STATUS_POLL_INTERVAL_MS = 1_000;
 const CONTROLLER_STATUS_POLL_WINDOW_MS = 45_000;
+const CONTROLLER_STATUS_DIAGNOSTIC_LINE_PATTERNS = [
+  /^INFO bt pin-request /u,
+  /^INFO bt pin-reply /u,
+  /^INFO bt confirm-request /u,
+  /^INFO bt confirm-reply /u,
+  /^INFO bt passkey-(?:notify|request)/u,
+  /^INFO bt hid event=(?:open|close|vc-unplug) /u,
+  /^WARN bt /u,
+];
 
 const STUDIO_IMAGE_SCALE_LIMITS = {
   min: 25,
@@ -2495,6 +2505,24 @@ function updateControllerStatusFromLines(lines) {
   setControllerStatus(status);
 }
 
+function shouldLogControllerStatusDiagnosticLine(line) {
+  const normalizedLine = typeof line === "string" ? line.trim() : "";
+
+  if (normalizedLine.length === 0) {
+    return false;
+  }
+
+  return CONTROLLER_STATUS_DIAGNOSTIC_LINE_PATTERNS.some((pattern) => pattern.test(normalizedLine));
+}
+
+function appendControllerStatusDiagnosticLines(lines) {
+  const diagnosticLines = normalizeControllerDeviceLines(lines ?? []).filter(
+    shouldLogControllerStatusDiagnosticLine,
+  );
+
+  diagnosticLines.forEach((line) => appendLog(els.controllerLogOutput, `[device] ${line}`));
+}
+
 function isControllerReadyForStudio() {
   return state.controller.status.readyValue === true;
 }
@@ -2518,16 +2546,12 @@ function isControllerConnectionStillInProgress(status = state.controller.status)
   );
 }
 
-function shouldPreferLastPeerResetAfterTimeout(status = state.controller.status) {
-  if (!status || status.peer === "-") {
-    return false;
-  }
-
-  if (status.peerReconnectableValue === true) {
-    return true;
-  }
-
-  return status.connectedValue === true || status.authValue === true;
+function shouldPreferLastPeerResetOnAutoRecovery(status = state.controller.status) {
+  return Boolean(
+    status &&
+      status.peer !== "-" &&
+      status.peerReconnectableValue === true,
+  );
 }
 
 async function handleControllerStatusPollTimeout() {
@@ -2538,7 +2562,7 @@ async function handleControllerStatusPollTimeout() {
     !controllerStatusTimeoutRecoveryAttempted
   ) {
     controllerStatusTimeoutRecoveryAttempted = true;
-    const shouldReconnectLastPeer = shouldPreferLastPeerResetAfterTimeout();
+    const shouldReconnectLastPeer = shouldPreferLastPeerResetOnAutoRecovery();
     const recoveryCommands = shouldReconnectLastPeer
       ? ["BT RESET LAST-PEER", "I"]
       : ["BT RESET", "I"];
@@ -2612,6 +2636,7 @@ async function requestControllerStatus({ logErrors = false } = {}) {
     }
 
     updateControllerStatusFromLines(payload.lines ?? []);
+    appendControllerStatusDiagnosticLines(payload.lines);
     return true;
   } catch (error) {
     if (logErrors) {
@@ -2659,19 +2684,24 @@ async function pollControllerStatus() {
 
     if (!state.controller.autoReconnectAttempted) {
       state.controller.autoReconnectAttempted = true;
+      const shouldReconnectLastPeer = shouldPreferLastPeerResetOnAutoRecovery();
+      const recoveryCommands = shouldReconnectLastPeer
+        ? ["BT RESET LAST-PEER", "I"]
+        : ["BT RESET", "I"];
       appendLog(
         els.controllerLogOutput,
-        "检测到手柄已经连上但报告通道持续拥塞，自动重置蓝牙并重试一次。",
+        shouldReconnectLastPeer
+          ? "检测到手柄已经连上但报告通道持续拥塞，自动重置蓝牙并优先尝试恢复上次主机连接。"
+          : "检测到手柄已经连上但报告通道持续拥塞，自动重置蓝牙并重试一次。",
       );
       setControllerPendingStatus({
         title: "正在自动恢复手柄连接",
-        detail: "检测到当前连接容易立刻断联，正在重置蓝牙并重新进入可发现状态。",
+        detail: shouldReconnectLastPeer
+          ? "检测到当前连接容易立刻断联，正在重置蓝牙并优先恢复上次保存的主机连接。"
+          : "检测到当前连接容易立刻断联，正在重置蓝牙并重新进入可发现状态。",
       });
 
-      const payload = await runControllerCommands(
-        ["BT RESET LAST-PEER", "I"],
-        "自动恢复手柄连接",
-      );
+      const payload = await runControllerCommands(recoveryCommands, "自动恢复手柄连接");
 
       if (payload) {
         startControllerStatusPolling();

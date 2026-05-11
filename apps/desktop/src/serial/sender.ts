@@ -18,6 +18,13 @@ import type { ProgressUpdate, SenderControls } from "../types.js";
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
 const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
+export const SERIAL_OPEN_RESET_DETECT_WINDOW_MS = 400;
+export const SERIAL_OPEN_BOOT_TIMEOUT_MS = 10_000;
+export const SERIAL_OPEN_POST_BOOT_SETTLE_MS = 250;
+export const SERIAL_OPEN_CONTROL_LINE_SETTLE_MS = 150;
+export const SERIAL_OPEN_READY_PROBE_TIMEOUT_MS = 3_000;
+export const SERIAL_OPEN_RESET_PULSE_MS = 120;
+const PASSIVE_DEVICE_LINE_BUFFER_LIMIT = 200;
 const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
 const COLOR_PALETTE_SLOT_COUNT = 9;
 const COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
@@ -495,14 +502,214 @@ function writeLine(port: SerialPort, line: string): Promise<void> {
   });
 }
 
-function openPort(port: SerialPort): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (port.isOpen) {
-      resolve();
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isUnsequencedAckLine(line: string): boolean {
+  return line === "OK" || line === "ERR" || line.startsWith("OK ") || line.startsWith("ERR ");
+}
+
+function isPassiveDeviceLine(line: string): boolean {
+  return !parseSequencedAck(line) && !isUnsequencedAckLine(line);
+}
+
+async function stabilizeFreshSerialSession(
+  parser: ReadlineParser,
+  port: SerialPort,
+  onDeviceLine?: (line: string) => void,
+): Promise<void> {
+  const startedAt = Date.now();
+  let sawActivity = false;
+  let sawBoot = false;
+  let lastActivityAt = startedAt;
+
+  const onData = (rawLine: string | Buffer) => {
+    const line = sanitizeDeviceLine(rawLine);
+
+    if (!line) {
       return;
     }
 
-    port.open((error) => {
+    sawActivity = true;
+    lastActivityAt = Date.now();
+    if (line.startsWith("BOOT ")) {
+      sawBoot = true;
+    }
+    onDeviceLine?.(line);
+  };
+
+  parser.on("data", onData);
+
+  try {
+    while (port.isOpen) {
+      const elapsedMs = Date.now() - startedAt;
+      const idleMs = Date.now() - lastActivityAt;
+
+      if (!sawActivity && elapsedMs >= SERIAL_OPEN_RESET_DETECT_WINDOW_MS) {
+        return;
+      }
+
+      if (sawBoot && idleMs >= SERIAL_OPEN_POST_BOOT_SETTLE_MS) {
+        return;
+      }
+
+      if (sawActivity && !sawBoot && elapsedMs >= SERIAL_OPEN_BOOT_TIMEOUT_MS) {
+        onDeviceLine?.(
+          `WARN serial_session=stabilize_timeout boot_seen=false wait_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
+        );
+        return;
+      }
+
+      await delay(25);
+    }
+
+    throw new Error("Serial session is not open.");
+  } finally {
+    parser.off("data", onData);
+  }
+}
+
+async function waitForReadinessProbeAck(
+  parser: ReadlineParser,
+  port: SerialPort,
+  timeoutMs: number,
+  onDeviceLine?: (line: string) => void,
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    if (!port.isOpen) {
+      reject(new Error("Serial session is not open."));
+      return;
+    }
+
+    let settled = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const timeoutId = setTimeout(() => {
+      finish(() => resolve(false));
+    }, timeoutMs);
+
+    const onData = (rawLine: string | Buffer) => {
+      const line = sanitizeDeviceLine(rawLine);
+
+      if (!line) {
+        return;
+      }
+
+      const ack = parseSequencedAck(line);
+
+      if (ack) {
+        onDeviceLine?.(`WARN ignored readiness ack session=${ack.sessionId} seq=${ack.sequence}`);
+        finish(() => resolve(true));
+        return;
+      }
+
+      if (isUnsequencedAckLine(line)) {
+        finish(() => resolve(true));
+        return;
+      }
+
+      onDeviceLine?.(line);
+    };
+
+    const onClose = () => {
+      finish(() => reject(new Error("Serial session is not open.")));
+    };
+
+    const onError = (error: Error) => {
+      finish(() => reject(error));
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      parser.off("data", onData);
+      port.off("close", onClose);
+      port.off("error", onError);
+    };
+
+    parser.on("data", onData);
+    port.on("close", onClose);
+    port.on("error", onError);
+  });
+}
+
+async function pulseRunModeReset(port: SerialPort, onDeviceLine?: (line: string) => void): Promise<void> {
+  await setPortSignals(port, { dtr: false, rts: true, brk: false });
+  onDeviceLine?.(`INFO serial_session=reset_pulse dtr=false rts=true wait_ms=${SERIAL_OPEN_RESET_PULSE_MS}`);
+  await delay(SERIAL_OPEN_RESET_PULSE_MS);
+  await setPortSignals(port, { dtr: false, rts: false, brk: false });
+  onDeviceLine?.(
+    `INFO serial_session=reset_release dtr=false rts=false wait_ms=${SERIAL_OPEN_CONTROL_LINE_SETTLE_MS}`,
+  );
+  await delay(SERIAL_OPEN_CONTROL_LINE_SETTLE_MS);
+}
+
+async function probeFreshSerialSession(
+  parser: ReadlineParser,
+  port: SerialPort,
+  onDeviceLine?: (line: string) => void,
+): Promise<void> {
+  const attemptProbe = async (phase: "initial" | "post-reset"): Promise<boolean> => {
+    onDeviceLine?.(
+      `INFO serial_session=probe phase=${phase} command=I timeout_ms=${SERIAL_OPEN_READY_PROBE_TIMEOUT_MS}`,
+    );
+    await writeLine(port, "I");
+    const ready = await waitForReadinessProbeAck(
+      parser,
+      port,
+      SERIAL_OPEN_READY_PROBE_TIMEOUT_MS,
+      onDeviceLine,
+    );
+
+    if (!ready) {
+      onDeviceLine?.(
+        `WARN serial_session=probe_timeout phase=${phase} timeout_ms=${SERIAL_OPEN_READY_PROBE_TIMEOUT_MS}`,
+      );
+      return false;
+    }
+
+    onDeviceLine?.(`INFO serial_session=probe_ready phase=${phase}`);
+    return true;
+  };
+
+  if (await attemptProbe("initial")) {
+    return;
+  }
+
+  await pulseRunModeReset(port, onDeviceLine);
+  onDeviceLine?.(
+    `INFO serial_session=stabilizing detect_ms=${SERIAL_OPEN_RESET_DETECT_WINDOW_MS} boot_timeout_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
+  );
+  await stabilizeFreshSerialSession(parser, port, onDeviceLine);
+
+  if (await attemptProbe("post-reset")) {
+    return;
+  }
+
+  throw new Error(
+    `Serial session did not become ready after ${SERIAL_OPEN_READY_PROBE_TIMEOUT_MS * 2}ms.`,
+  );
+}
+
+function setPortSignals(
+  port: SerialPort,
+  options: {
+    dtr?: boolean;
+    rts?: boolean;
+    brk?: boolean;
+  },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    port.set(options, (error) => {
       if (error) {
         reject(error);
         return;
@@ -513,14 +720,14 @@ function openPort(port: SerialPort): Promise<void> {
   });
 }
 
-function flushPort(port: SerialPort): Promise<void> {
+function openPort(port: SerialPort): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (!port.isOpen) {
+    if (port.isOpen) {
       resolve();
       return;
     }
 
-    port.flush((error) => {
+    port.open((error) => {
       if (error) {
         reject(error);
         return;
@@ -563,6 +770,9 @@ export class SerialCommandSession {
   private closingPromise: Promise<void> | null = null;
   private portErrorHandler: ((error: Error) => void) | null = null;
   private portCloseHandler: (() => void) | null = null;
+  private parserDataHandler: ((rawLine: string | Buffer) => void) | null = null;
+  private foregroundDeviceLineCaptureDepth = 0;
+  private passiveDeviceLines: string[] = [];
 
   constructor(path: string, baudRate: number) {
     this.portPath = preferSerialPath(path);
@@ -603,20 +813,35 @@ export class SerialCommandSession {
         throw new Error("Serial session is not open.");
       }
 
+      const parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
+      this.parser = parser;
+      this.attachParserDataHandler(parser);
+      onDeviceLine?.(`INFO serial_session=open port=${this.portPath} baud=${this.baudRate}`);
       try {
-        await flushPort(port);
+        await setPortSignals(port, { dtr: false, rts: false, brk: false });
+        onDeviceLine?.(
+          `INFO serial_session=signals dtr=false rts=false wait_ms=${SERIAL_OPEN_CONTROL_LINE_SETTLE_MS}`,
+        );
+        await delay(SERIAL_OPEN_CONTROL_LINE_SETTLE_MS);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        onDeviceLine?.(`WARN serial_flush_failed reason=${message}`);
+        onDeviceLine?.(`WARN serial_session=signals_failed reason=${message}`);
+      }
+      onDeviceLine?.(
+        `INFO serial_session=stabilizing detect_ms=${SERIAL_OPEN_RESET_DETECT_WINDOW_MS} boot_timeout_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
+      );
+      this.beginForegroundDeviceLineCapture();
+      try {
+        await stabilizeFreshSerialSession(parser, port, onDeviceLine);
+        await probeFreshSerialSession(parser, port, onDeviceLine);
+      } finally {
+        this.endForegroundDeviceLineCapture();
       }
 
       if (this.port !== port || !port.isOpen) {
         throw new Error("Serial session is not open.");
       }
-
-      this.parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
       this.lastUsedAtValue = Date.now();
-      onDeviceLine?.(`INFO serial_session=open port=${this.portPath} baud=${this.baudRate}`);
     })();
     this.openingPromise = openingPromise;
 
@@ -624,6 +849,11 @@ export class SerialCommandSession {
       await openingPromise;
     } catch (error) {
       if (this.port === port) {
+        if (this.parser) {
+          this.detachParserDataHandler(this.parser);
+        }
+        this.passiveDeviceLines = [];
+        this.foregroundDeviceLineCaptureDepth = 0;
         this.port = null;
         this.parser = null;
       }
@@ -666,6 +896,11 @@ export class SerialCommandSession {
         }
       } finally {
         this.detachPortLifecycleHandlers(port);
+        if (this.parser) {
+          this.detachParserDataHandler(this.parser);
+        }
+        this.passiveDeviceLines = [];
+        this.foregroundDeviceLineCaptureDepth = 0;
 
         if (this.port === port) {
           this.port = null;
@@ -697,6 +932,11 @@ export class SerialCommandSession {
     };
     this.portCloseHandler = () => {
       if (this.port === port) {
+        if (this.parser) {
+          this.detachParserDataHandler(this.parser);
+        }
+        this.passiveDeviceLines = [];
+        this.foregroundDeviceLineCaptureDepth = 0;
         this.port = null;
         this.parser = null;
         this.openingPromise = null;
@@ -721,6 +961,54 @@ export class SerialCommandSession {
     }
   }
 
+  private attachParserDataHandler(parser: ReadlineParser): void {
+    this.parserDataHandler = (rawLine: string | Buffer) => {
+      if (this.foregroundDeviceLineCaptureDepth > 0) {
+        return;
+      }
+
+      const line = sanitizeDeviceLine(rawLine);
+
+      if (!line || !isPassiveDeviceLine(line)) {
+        return;
+      }
+
+      this.passiveDeviceLines.push(line);
+
+      if (this.passiveDeviceLines.length > PASSIVE_DEVICE_LINE_BUFFER_LIMIT) {
+        this.passiveDeviceLines.splice(0, this.passiveDeviceLines.length - PASSIVE_DEVICE_LINE_BUFFER_LIMIT);
+      }
+    };
+
+    parser.on("data", this.parserDataHandler);
+  }
+
+  private detachParserDataHandler(parser: ReadlineParser): void {
+    if (this.parserDataHandler) {
+      parser.off("data", this.parserDataHandler);
+      this.parserDataHandler = null;
+    }
+  }
+
+  private beginForegroundDeviceLineCapture(): void {
+    this.foregroundDeviceLineCaptureDepth += 1;
+  }
+
+  private endForegroundDeviceLineCapture(): void {
+    if (this.foregroundDeviceLineCaptureDepth > 0) {
+      this.foregroundDeviceLineCaptureDepth -= 1;
+    }
+  }
+
+  private flushPassiveDeviceLines(onDeviceLine?: (line: string) => void): void {
+    if (!onDeviceLine || this.passiveDeviceLines.length === 0) {
+      return;
+    }
+
+    const pendingLines = this.passiveDeviceLines.splice(0, this.passiveDeviceLines.length);
+    pendingLines.forEach((line) => onDeviceLine(line));
+  }
+
   async send(commands: string[], options: SerialCommandSendOptions): Promise<void> {
     await this.open(options.onDeviceLine);
 
@@ -729,8 +1017,10 @@ export class SerialCommandSession {
     }
 
     let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
+    this.flushPassiveDeviceLines(options.onDeviceLine);
 
     for (const [index, command] of commands.entries()) {
+      this.flushPassiveDeviceLines(options.onDeviceLine);
       await options.beforeCommand?.();
 
       if (options.shouldStop?.()) {
@@ -744,25 +1034,31 @@ export class SerialCommandSession {
 
       while (!sent) {
         try {
+          this.beginForegroundDeviceLineCapture();
           await writeLine(this.port, framedCommand);
-          await waitForAck(
-            this.parser,
-            this.port,
-            getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming),
-            {
-              sessionId: this.sessionId,
-              sequence: commandSequence,
-            },
-            {
-              ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
-              onInterruptReady: (interrupt) => {
-                this.interruptAckWait = interrupt;
-                options.onInterruptReady?.(interrupt);
+          try {
+            await waitForAck(
+              this.parser,
+              this.port,
+              getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming),
+              {
+                sessionId: this.sessionId,
+                sequence: commandSequence,
               },
-            },
-          );
+              {
+                ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
+                onInterruptReady: (interrupt) => {
+                  this.interruptAckWait = interrupt;
+                  options.onInterruptReady?.(interrupt);
+                },
+              },
+            );
+          } finally {
+            this.endForegroundDeviceLineCapture();
+          }
           sent = true;
         } catch (error) {
+          this.endForegroundDeviceLineCapture();
           if (options.shouldStop?.()) {
             throw new Error("Execution stopped.");
           }
@@ -792,6 +1088,8 @@ export class SerialCommandSession {
       this.sequence += 1;
       this.lastUsedAtValue = Date.now();
     }
+
+    this.flushPassiveDeviceLines(options.onDeviceLine);
   }
 }
 
