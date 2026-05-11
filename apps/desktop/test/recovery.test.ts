@@ -621,6 +621,8 @@ test("execution reset keeps unfinished recovery sessions recoverable", async () 
 
     const resetResponse = await fetch(`${server.url}/api/execution/reset`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
     });
     assert.equal(resetResponse.ok, true);
     const resetPayload = (await resetResponse.json()) as {

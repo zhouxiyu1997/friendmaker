@@ -101,9 +101,11 @@ test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
 });
 
 test("/api/generate echoes timing overrides into commands and estimated runtime", async (t) => {
-  const server = await startWebServer({ port: 0 });
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-timing-generate-"));
+  const server = await startWebServer({ port: 0, recoverySessionsRoot });
   t.after(async () => {
     await server.close();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
   });
 
   const imageDataUrl = await solidPngDataUrl(4, 4);
@@ -158,9 +160,11 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
 });
 
 test("/api/generate rejects unsupported round large-brush requests", async (t) => {
-  const server = await startWebServer({ port: 0 });
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-timing-round-"));
+  const server = await startWebServer({ port: 0, recoverySessionsRoot });
   t.after(async () => {
     await server.close();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
   });
 
   const imageDataUrl = await solidPngDataUrl(4, 4);

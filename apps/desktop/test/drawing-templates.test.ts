@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
 import test from "node:test";
 
 import { listDrawingTemplates, loadDrawingTemplateMask } from "../src/drawingTemplates.js";
@@ -28,9 +31,11 @@ test("irregular drawing template masks reserve transparent space outside the cut
 });
 
 test("drawing template API and studio overlay agree on using mask assets", async (t) => {
-  const server = await startWebServer({ port: 0 });
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-drawing-templates-"));
+  const server = await startWebServer({ port: 0, recoverySessionsRoot });
   t.after(async () => {
     await server.close();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
   });
 
   const templatesResponse = await fetch(`${server.url}/api/drawing-templates`);

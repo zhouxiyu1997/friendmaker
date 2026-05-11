@@ -1465,6 +1465,8 @@ async function stopFirmwareFlash() {
   try {
     const response = await fetch("/api/firmware/flash/cancel", {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
     });
     const payload = await response.json();
 

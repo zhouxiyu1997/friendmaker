@@ -155,12 +155,27 @@ export class RecoverySessionStore {
     return this.rootDirectory;
   }
 
+  private resolveSessionPath(jobId: string, suffix: string): string {
+    if (jobId.length === 0 || /[\\/]/u.test(jobId)) {
+      throw new Error("Invalid recovery session id.");
+    }
+
+    const rootDirectory = path.resolve(this.rootDirectory);
+    const filePath = path.resolve(rootDirectory, `${jobId}${suffix}`);
+
+    if (filePath === rootDirectory || !filePath.startsWith(`${rootDirectory}${path.sep}`)) {
+      throw new Error("Invalid recovery session id.");
+    }
+
+    return filePath;
+  }
+
   private commandsFilePath(jobId: string): string {
-    return path.join(this.rootDirectory, `${jobId}.commands.txt`);
+    return this.resolveSessionPath(jobId, ".commands.txt");
   }
 
   private resumeFilePath(jobId: string): string {
-    return path.join(this.rootDirectory, `${jobId}.resume.json`);
+    return this.resolveSessionPath(jobId, ".resume.json");
   }
 
   private async ensureRoot(): Promise<void> {

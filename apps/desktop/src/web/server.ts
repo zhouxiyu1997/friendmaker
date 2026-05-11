@@ -372,6 +372,60 @@ function json(
   response.end(JSON.stringify(payload));
 }
 
+function readSingleHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return typeof value === "string" ? value : null;
+}
+
+function normalizeHeaderOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function assertTrustedApiRequest(request: IncomingMessage, url: URL): void {
+  if (request.method !== "POST" || !url.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  const contentType = readSingleHeaderValue(request.headers["content-type"])
+    ?.split(";")[0]
+    ?.trim()
+    .toLowerCase();
+
+  if (contentType !== "application/json") {
+    throw new HttpError(415, "API requests must use application/json.");
+  }
+
+  const fetchSite = readSingleHeaderValue(request.headers["sec-fetch-site"])?.trim().toLowerCase();
+
+  if (fetchSite === "cross-site") {
+    throw new HttpError(403, "Cross-site API requests are not allowed.");
+  }
+
+  const expectedOrigin = url.origin;
+  const originHeader = readSingleHeaderValue(request.headers.origin);
+
+  if (originHeader) {
+    if (normalizeHeaderOrigin(originHeader) !== expectedOrigin) {
+      throw new HttpError(403, "Cross-origin API requests are not allowed.");
+    }
+
+    return;
+  }
+
+  const refererHeader = readSingleHeaderValue(request.headers.referer);
+
+  if (refererHeader && normalizeHeaderOrigin(refererHeader) !== expectedOrigin) {
+    throw new HttpError(403, "Cross-origin API requests are not allowed.");
+  }
+}
+
 function getContentType(filePath: string): string {
   if (filePath.endsWith(".png")) {
     return "image/png";
@@ -452,7 +506,16 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 
   const raw = Buffer.concat(chunks).toString("utf8");
-  return raw.length > 0 ? JSON.parse(raw) : {};
+
+  if (raw.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, "Malformed JSON request body.");
+  }
 }
 
 function decodeDataUrl(dataUrl: string): Buffer {
@@ -501,6 +564,16 @@ interface LoggedError extends Error {
 interface ExecutionError extends Error {
   lines?: string[];
   session?: SerialSessionSnapshot;
+}
+
+class HttpError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
 }
 
 function createIdleFirmwareFlashState(): FirmwareFlashSnapshot {
@@ -2094,6 +2167,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     }
 
     const url = new URL(request.url, `http://${webRuntime.host}:${webRuntime.port}`);
+    assertTrustedApiRequest(request, url);
 
     if (request.method === "GET" && url.pathname === "/") {
       await serveStatic(response, "index.html");
@@ -2255,73 +2329,108 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     json(response, 404, { error: "Not found." });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    json(response, 500, { error: message });
+    const statusCode = error instanceof HttpError ? error.statusCode : 500;
+    json(response, statusCode, { error: message });
   }
 }
+
+let webServerLeaseHeld = false;
 
 export async function startWebServer(
   options: StartWebServerOptions = {},
 ): Promise<WebServerHandle> {
-  webRuntime = {
-    host: options.host ?? defaultHost,
-    port: options.port ?? defaultPort,
-    staticRoot: options.staticRoot ?? defaultStaticRoot,
-    firmwareRoot: options.firmwareRoot ?? defaultFirmwareRoot,
-    refreshFirmwareRoot: options.refreshFirmwareRoot,
-    toolingManager: new FirmwareToolingManager({
-      appDataRoot: options.appDataRoot ?? defaultAppDataRoot,
-      ...(options.toolingPaths ? { initialConfig: options.toolingPaths } : {}),
-    }),
-    windowsSerialDriverManager: new WindowsSerialDriverManager(
-      options.windowsDriverRoot ?? defaultWindowsDriverRoot,
-    ),
-    flashManager: new FirmwareFlashManager(),
-    recoverySessions: new RecoverySessionStore(
-      options.recoverySessionsRoot ?? defaultRecoverySessionsRoot,
-    ),
-  };
+  if (webServerLeaseHeld) {
+    throw new Error("A web server is already running in this process.");
+  }
 
-  await webRuntime.recoverySessions.cleanupSessions({ startup: true });
+  webServerLeaseHeld = true;
+  let server: Server | null = null;
 
-  const server = createServer(handleRequest);
-
-  await new Promise<void>((resolve, reject) => {
-    const handleError = (error: Error): void => {
-      reject(error);
+  try {
+    webRuntime = {
+      host: options.host ?? defaultHost,
+      port: options.port ?? defaultPort,
+      staticRoot: options.staticRoot ?? defaultStaticRoot,
+      firmwareRoot: options.firmwareRoot ?? defaultFirmwareRoot,
+      refreshFirmwareRoot: options.refreshFirmwareRoot,
+      toolingManager: new FirmwareToolingManager({
+        appDataRoot: options.appDataRoot ?? defaultAppDataRoot,
+        ...(options.toolingPaths ? { initialConfig: options.toolingPaths } : {}),
+      }),
+      windowsSerialDriverManager: new WindowsSerialDriverManager(
+        options.windowsDriverRoot ?? defaultWindowsDriverRoot,
+      ),
+      flashManager: new FirmwareFlashManager(),
+      recoverySessions: new RecoverySessionStore(
+        options.recoverySessionsRoot ?? defaultRecoverySessionsRoot,
+      ),
     };
 
-    server.once("error", handleError);
-    server.listen(webRuntime.port, webRuntime.host, () => {
-      server.off("error", handleError);
-      resolve();
-    });
-  });
+    await webRuntime.recoverySessions.cleanupSessions({ startup: true });
 
-  const address = server.address();
-  const actualPort = typeof address === "object" && address !== null ? address.port : webRuntime.port;
-  webRuntime.port = actualPort;
+    server = createServer(handleRequest);
+    const activeServer = server;
 
-  return {
-    server,
-    host: webRuntime.host,
-    port: actualPort,
-    url: `http://${webRuntime.host}:${actualPort}`,
-    close: async () => {
-      await webRuntime.flashManager.shutdown();
-      await serialSessionManager.disconnect({ force: true }).catch(() => undefined);
-      resetManagedExecutionState();
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
+    await new Promise<void>((resolve, reject) => {
+      const handleError = (error: Error): void => {
+        reject(error);
+      };
 
-          resolve();
-        });
+      activeServer.once("error", handleError);
+      activeServer.listen(webRuntime.port, webRuntime.host, () => {
+        activeServer.off("error", handleError);
+        resolve();
       });
-    },
-  };
+    });
+
+    const address = activeServer.address();
+    const actualPort = typeof address === "object" && address !== null ? address.port : webRuntime.port;
+    webRuntime.port = actualPort;
+    let closed = false;
+
+    return {
+      server: activeServer,
+      host: webRuntime.host,
+      port: actualPort,
+      url: `http://${webRuntime.host}:${actualPort}`,
+      close: async () => {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+
+        try {
+          await webRuntime.flashManager.shutdown();
+          await serialSessionManager.disconnect({ force: true }).catch(() => undefined);
+          resetManagedExecutionState();
+          await new Promise<void>((resolve, reject) => {
+            activeServer.close((error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+
+              resolve();
+            });
+          });
+        } finally {
+          webServerLeaseHeld = false;
+        }
+      },
+    };
+  } catch (error) {
+    webServerLeaseHeld = false;
+
+    if (server) {
+      const activeServer = server;
+      await new Promise<void>((resolve) => {
+        activeServer.close(() => resolve());
+      }).catch(() => undefined);
+    }
+
+    throw error;
+  }
 }
 
 function isDirectRun(): boolean {

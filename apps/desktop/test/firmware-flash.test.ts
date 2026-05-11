@@ -64,16 +64,19 @@ test("firmware flash reports port-specific upload failures without switching to 
 test("firmware flash refreshes the writable firmware root before compiling", async (t) => {
   const initialRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-initial-"));
   const refreshedRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-refreshed-"));
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friend-maker-firmware-recovery-"));
   const server = await startWebServer({
     port: 0,
     firmwareRoot: initialRoot,
     refreshFirmwareRoot: async () => refreshedRoot,
+    recoverySessionsRoot,
   });
 
   t.after(async () => {
     await server.close();
     await rm(initialRoot, { recursive: true, force: true });
     await rm(refreshedRoot, { recursive: true, force: true });
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
   });
 
   assert.equal(await refreshFirmwareRootForFlash(), refreshedRoot);
