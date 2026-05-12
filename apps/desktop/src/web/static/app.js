@@ -11,6 +11,68 @@ import {
 
 document.documentElement.dataset.platform = window.friendMakerWindow?.platform ?? "browser";
 
+const PANEL_LAYOUT_STORAGE_KEY = "friendmaker.panelLayout.v1";
+const PANEL_LAYOUT_RATIO_MIN = 0.08;
+
+const PANEL_LAYOUTS = {
+  studio: {
+    columns: {
+      count: 3,
+      vars: ["--layout-studio-col-1", "--layout-studio-col-2", "--layout-studio-col-3"],
+      defaults: [0.95, 1, 0.82],
+      minPixels: [250, 240, 190],
+    },
+    rows: {
+      count: 2,
+      vars: ["--layout-studio-row-1", "--layout-studio-row-2"],
+      defaults: [1.15, 0.85],
+      minPixels: [260, 160],
+    },
+  },
+  firmware: {
+    columns: {
+      count: 2,
+      vars: ["--layout-firmware-col-1", "--layout-firmware-col-2"],
+      defaults: [0.95, 0.75],
+      minPixels: [280, 260],
+    },
+    rows: {
+      count: 2,
+      vars: ["--layout-firmware-row-1", "--layout-firmware-row-2"],
+      defaults: [0.9, 1],
+      minPixels: [220, 180],
+    },
+  },
+  controller: {
+    columns: {
+      count: 2,
+      vars: ["--layout-controller-col-1", "--layout-controller-col-2"],
+      defaults: [1, 0.8],
+      minPixels: [300, 260],
+    },
+    rows: {
+      count: 2,
+      vars: ["--layout-controller-row-1", "--layout-controller-row-2"],
+      defaults: [1, 0.58],
+      minPixels: [260, 160],
+    },
+  },
+  timing: {
+    columns: {
+      count: 2,
+      vars: ["--layout-timing-col-1", "--layout-timing-col-2"],
+      defaults: [1, 0.9],
+      minPixels: [300, 280],
+    },
+    rows: {
+      count: 3,
+      vars: ["--layout-timing-row-1", "--layout-timing-row-2", "--layout-timing-row-3"],
+      defaults: [0.42, 1, 0.42],
+      minPixels: [150, 260, 140],
+    },
+  },
+};
+
 const state = {
   activePage: "studio",
   imageDataUrl: null,
@@ -238,6 +300,8 @@ const els = {
   statusbarExecution: document.getElementById("statusbar-execution"),
   pageTabs: [...document.querySelectorAll(".page-tab")],
   pages: [...document.querySelectorAll(".page")],
+  resizableLayouts: [...document.querySelectorAll("[data-layout-id].resizable-layout")],
+  layoutSplitters: [...document.querySelectorAll("[data-layout-splitter]")],
   imageInput: document.getElementById("image-input"),
   fileLabel: document.getElementById("file-label"),
   studioConnectionCard: document.getElementById("studio-connection-card"),
@@ -558,6 +622,345 @@ function getGeneratedStudioProfileSummary() {
 
 function getStudioExecutionProfileSummary() {
   return state.commands.length > 0 ? getGeneratedStudioProfileSummary() : buildCurrentStudioProfileSummary();
+}
+
+function normalizeLayoutRatios(values, fallbackValues) {
+  const fallback = Array.isArray(fallbackValues) && fallbackValues.length > 0 ? fallbackValues : [1];
+  const source = Array.isArray(values) && values.length === fallback.length ? values : fallback;
+  const safeValues = source.map((value, index) => {
+    const numericValue = Number(value);
+    const fallbackValue = Number(fallback[index] ?? 1);
+    return Number.isFinite(numericValue) && numericValue > 0
+      ? numericValue
+      : Math.max(PANEL_LAYOUT_RATIO_MIN, fallbackValue);
+  });
+  const total = safeValues.reduce((sum, value) => sum + value, 0);
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return fallback.map((value) => Math.max(PANEL_LAYOUT_RATIO_MIN, Number(value) || 1));
+  }
+
+  return safeValues.map((value) => Math.max(PANEL_LAYOUT_RATIO_MIN, value / total));
+}
+
+function readPanelLayoutStore() {
+  try {
+    const rawValue = window.localStorage?.getItem(PANEL_LAYOUT_STORAGE_KEY);
+    const parsedValue = rawValue ? JSON.parse(rawValue) : {};
+    return parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+      ? parsedValue
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePanelLayoutStore(store) {
+  try {
+    window.localStorage?.setItem(PANEL_LAYOUT_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // Layout persistence is best-effort and should not block the tool UI.
+  }
+}
+
+function getPanelLayoutElement(layoutId) {
+  return els.resizableLayouts.find((layout) => layout.dataset.layoutId === layoutId) ?? null;
+}
+
+function getPanelLayoutConfig(layoutId) {
+  return PANEL_LAYOUTS[layoutId] ?? null;
+}
+
+function getLayoutAxisConfig(layoutConfig, axis) {
+  return axis === "x" ? layoutConfig?.columns : layoutConfig?.rows;
+}
+
+function syncPanelLayoutSplitterValue(layoutId, axis, splitterIndex) {
+  const layoutElement = getPanelLayoutElement(layoutId);
+  const layoutConfig = getPanelLayoutConfig(layoutId);
+  const axisConfig = getLayoutAxisConfig(layoutConfig, axis);
+  const trackPixels = layoutElement && axisConfig
+    ? readPanelLayoutAxisTrackPixels(layoutElement, axisConfig, axis)
+    : null;
+
+  if (!trackPixels || splitterIndex < 0 || splitterIndex >= trackPixels.length - 1) {
+    return;
+  }
+
+  const totalPixels = trackPixels.reduce((sum, value) => sum + value, 0);
+  const leadingPixels = trackPixels
+    .slice(0, splitterIndex + 1)
+    .reduce((sum, value) => sum + value, 0);
+  const valueNow = totalPixels > 0 ? Math.round((leadingPixels / totalPixels) * 100) : 50;
+
+  els.layoutSplitters
+    .filter((splitter) => (
+      (splitter.dataset.layoutId ?? "") === layoutId
+      && (splitter.dataset.layoutAxis === "y" ? "y" : "x") === axis
+      && Number(splitter.dataset.layoutIndex ?? 0) === splitterIndex
+    ))
+    .forEach((splitter) => {
+      splitter.setAttribute("aria-valuemin", "8");
+      splitter.setAttribute("aria-valuemax", "92");
+      splitter.setAttribute("aria-valuenow", String(valueNow));
+    });
+}
+
+function syncPanelLayoutSplitterValues(layoutId) {
+  const layoutConfig = getPanelLayoutConfig(layoutId);
+
+  if (!layoutConfig) {
+    return;
+  }
+
+  for (let index = 0; index < layoutConfig.columns.count - 1; index += 1) {
+    syncPanelLayoutSplitterValue(layoutId, "x", index);
+  }
+
+  for (let index = 0; index < layoutConfig.rows.count - 1; index += 1) {
+    syncPanelLayoutSplitterValue(layoutId, "y", index);
+  }
+}
+
+function applyPanelLayoutAxis(layoutElement, axisConfig, values) {
+  if (!layoutElement || !axisConfig) {
+    return;
+  }
+
+  const ratios = normalizeLayoutRatios(values, axisConfig.defaults);
+  axisConfig.vars.forEach((cssVar, index) => {
+    layoutElement.style.setProperty(cssVar, `${ratios[index]}fr`);
+  });
+}
+
+function readPanelLayoutAxisPixels(layoutElement, axisConfig, axis) {
+  const computedStyle = window.getComputedStyle(layoutElement);
+  const templateValue = axis === "x"
+    ? computedStyle.gridTemplateColumns
+    : computedStyle.gridTemplateRows;
+  const trackValues = templateValue
+    .split(" ")
+    .map((track) => Number.parseFloat(track))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const panelTrackValues = [];
+
+  for (let index = 0; index < trackValues.length && panelTrackValues.length < axisConfig.count; index += 2) {
+    panelTrackValues.push(trackValues[index]);
+  }
+
+  if (panelTrackValues.length !== axisConfig.count) {
+    return null;
+  }
+
+  return normalizeLayoutRatios(panelTrackValues, axisConfig.defaults);
+}
+
+function getPanelLayoutTrackMinimum(axisConfig, trackIndex, totalPixels) {
+  const configuredMinimum = axisConfig?.minPixels?.[trackIndex];
+
+  if (Number.isFinite(configuredMinimum) && configuredMinimum > 0) {
+    return configuredMinimum;
+  }
+
+  return Math.max(48, totalPixels * PANEL_LAYOUT_RATIO_MIN);
+}
+
+function readPanelLayoutAxisTrackPixels(layoutElement, axisConfig, axis) {
+  const computedStyle = window.getComputedStyle(layoutElement);
+  const templateValue = axis === "x"
+    ? computedStyle.gridTemplateColumns
+    : computedStyle.gridTemplateRows;
+  const trackValues = templateValue
+    .split(" ")
+    .map((track) => Number.parseFloat(track))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const panelTrackValues = [];
+
+  for (let index = 0; index < trackValues.length && panelTrackValues.length < axisConfig.count; index += 2) {
+    panelTrackValues.push(trackValues[index]);
+  }
+
+  return panelTrackValues.length === axisConfig.count ? panelTrackValues : null;
+}
+
+function applyStoredPanelLayouts() {
+  const store = readPanelLayoutStore();
+
+  els.resizableLayouts.forEach((layoutElement) => {
+    const layoutId = layoutElement.dataset.layoutId ?? "";
+    const layoutConfig = getPanelLayoutConfig(layoutId);
+    const storedLayout = store[layoutId];
+
+    if (!layoutConfig || !storedLayout || typeof storedLayout !== "object") {
+      return;
+    }
+
+    applyPanelLayoutAxis(layoutElement, layoutConfig.columns, storedLayout.columns);
+    applyPanelLayoutAxis(layoutElement, layoutConfig.rows, storedLayout.rows);
+    syncPanelLayoutSplitterValues(layoutId);
+  });
+}
+
+function persistPanelLayout(layoutId) {
+  const layoutElement = getPanelLayoutElement(layoutId);
+  const layoutConfig = getPanelLayoutConfig(layoutId);
+
+  if (!layoutElement || !layoutConfig) {
+    return;
+  }
+
+  const store = readPanelLayoutStore();
+  const previousLayout = store[layoutId] && typeof store[layoutId] === "object"
+    ? store[layoutId]
+    : {};
+  const columns = readPanelLayoutAxisPixels(layoutElement, layoutConfig.columns, "x");
+  const rows = readPanelLayoutAxisPixels(layoutElement, layoutConfig.rows, "y");
+
+  if (!columns && !rows) {
+    return;
+  }
+
+  store[layoutId] = {
+    columns: columns ?? previousLayout.columns ?? normalizeLayoutRatios(layoutConfig.columns.defaults, layoutConfig.columns.defaults),
+    rows: rows ?? previousLayout.rows ?? normalizeLayoutRatios(layoutConfig.rows.defaults, layoutConfig.rows.defaults),
+  };
+  writePanelLayoutStore(store);
+  syncPanelLayoutSplitterValues(layoutId);
+}
+
+function updatePanelLayoutAxis(layoutId, axis, splitterIndex, pixelDelta, basePixels = null) {
+  const layoutElement = getPanelLayoutElement(layoutId);
+  const layoutConfig = getPanelLayoutConfig(layoutId);
+  const axisConfig = getLayoutAxisConfig(layoutConfig, axis);
+
+  if (!layoutElement || !axisConfig || splitterIndex < 0 || splitterIndex >= axisConfig.count - 1) {
+    return;
+  }
+
+  const currentPixels = Array.isArray(basePixels) && basePixels.length === axisConfig.count
+    ? basePixels
+    : readPanelLayoutAxisTrackPixels(layoutElement, axisConfig, axis);
+
+  if (!currentPixels) {
+    return;
+  }
+
+  const nextPixels = [...currentPixels];
+  const leftIndex = splitterIndex;
+  const rightIndex = splitterIndex + 1;
+  let leftValue = nextPixels[leftIndex] + pixelDelta;
+  let rightValue = nextPixels[rightIndex] - pixelDelta;
+  const pairTotalPixels = nextPixels[leftIndex] + nextPixels[rightIndex];
+  const totalPixels = currentPixels.reduce((sum, value) => sum + value, 0);
+  const leftMinimumPixels = getPanelLayoutTrackMinimum(axisConfig, leftIndex, totalPixels);
+  const rightMinimumPixels = getPanelLayoutTrackMinimum(axisConfig, rightIndex, totalPixels);
+  const minimumPairPixels = leftMinimumPixels + rightMinimumPixels;
+
+  if (pairTotalPixels <= minimumPairPixels) {
+    return;
+  }
+
+  if (leftValue < leftMinimumPixels) {
+    leftValue = leftMinimumPixels;
+    rightValue = pairTotalPixels - leftMinimumPixels;
+  } else if (rightValue < rightMinimumPixels) {
+    rightValue = rightMinimumPixels;
+    leftValue = pairTotalPixels - rightMinimumPixels;
+  }
+
+  nextPixels[leftIndex] = leftValue;
+  nextPixels[rightIndex] = rightValue;
+  applyPanelLayoutAxis(layoutElement, axisConfig, nextPixels);
+  syncPanelLayoutSplitterValue(layoutId, axis, splitterIndex);
+}
+
+function initializePanelLayoutSplitters() {
+  applyStoredPanelLayouts();
+
+  els.layoutSplitters.forEach((splitter) => {
+    const layoutId = splitter.dataset.layoutId ?? "";
+    const axis = splitter.dataset.layoutAxis === "y" ? "y" : "x";
+    const splitterIndex = Number(splitter.dataset.layoutIndex ?? 0);
+
+    syncPanelLayoutSplitterValue(layoutId, axis, splitterIndex);
+
+    splitter.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const startClientPosition = axis === "x" ? event.clientX : event.clientY;
+      const layoutElement = getPanelLayoutElement(layoutId);
+      const layoutConfig = getPanelLayoutConfig(layoutId);
+      const axisConfig = getLayoutAxisConfig(layoutConfig, axis);
+      const startPixels = layoutElement && axisConfig
+        ? readPanelLayoutAxisTrackPixels(layoutElement, axisConfig, axis)
+        : null;
+
+      if (!startPixels) {
+        return;
+      }
+
+      splitter.classList.add("dragging");
+      splitter.setPointerCapture?.(event.pointerId);
+      document.body.classList.add("layout-resizing");
+      document.body.classList.toggle("layout-resizing-y", axis === "y");
+      event.preventDefault();
+
+      const handlePointerMove = (moveEvent) => {
+        const nextClientPosition = axis === "x" ? moveEvent.clientX : moveEvent.clientY;
+        const pixelDelta = nextClientPosition - startClientPosition;
+
+        if (pixelDelta !== 0) {
+          updatePanelLayoutAxis(layoutId, axis, splitterIndex, pixelDelta, startPixels);
+        }
+      };
+
+      const finishDrag = () => {
+        splitter.classList.remove("dragging");
+        document.body.classList.remove("layout-resizing", "layout-resizing-y");
+        persistPanelLayout(layoutId);
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", finishDrag);
+        window.removeEventListener("pointercancel", finishDrag);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", finishDrag, { once: true });
+      window.addEventListener("pointercancel", finishDrag, { once: true });
+    });
+
+    splitter.addEventListener("keydown", (event) => {
+      const layoutId = splitter.dataset.layoutId ?? "";
+      const axis = splitter.dataset.layoutAxis === "y" ? "y" : "x";
+      const splitterIndex = Number(splitter.dataset.layoutIndex ?? 0);
+      const step = event.shiftKey ? 0.06 : 0.025;
+      let delta = 0;
+
+      if (axis === "x" && event.key === "ArrowLeft") {
+        delta = -step;
+      } else if (axis === "x" && event.key === "ArrowRight") {
+        delta = step;
+      } else if (axis === "y" && event.key === "ArrowUp") {
+        delta = -step;
+      } else if (axis === "y" && event.key === "ArrowDown") {
+        delta = step;
+      } else {
+        return;
+      }
+
+      const layoutElement = getPanelLayoutElement(layoutId);
+      const layoutRect = layoutElement?.getBoundingClientRect();
+      const basisPixels = axis === "x" ? layoutRect?.width : layoutRect?.height;
+
+      if (basisPixels) {
+        updatePanelLayoutAxis(layoutId, axis, splitterIndex, delta * basisPixels);
+        persistPanelLayout(layoutId);
+      }
+
+      event.preventDefault();
+    });
+  });
 }
 
 els.pageTabs.forEach((button) => {
@@ -4586,6 +4989,7 @@ function loadImageElement(dataUrl) {
 }
 
 async function init() {
+  initializePanelLayoutSplitters();
   const initialPageName = normalizePageName(window.location.hash.slice(1));
   switchPage(initialPageName, {
     updateHash: window.location.hash.length > 0,

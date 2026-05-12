@@ -116,7 +116,7 @@
 
           <div class="workspace-content">
       <section class="page page-active" data-page="studio">
-        <main class="grid">
+        <main class="grid resizable-layout" data-layout-id="studio">
           <section class="panel panel-form">
             <div class="panel-head">
               <h2>输入</h2>
@@ -425,6 +425,18 @@
             </section>
           </section>
 
+          <div
+            class="layout-splitter layout-splitter-vertical studio-splitter-left"
+            data-layout-splitter
+            data-layout-id="studio"
+            data-layout-axis="x"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="vertical"
+            aria-label="调整输入和预览宽度"
+          ></div>
+
           <section class="panel panel-preview">
             <div class="panel-head">
               <h2>预览</h2>
@@ -499,6 +511,30 @@
             </div>
           </section>
 
+          <div
+            class="layout-splitter layout-splitter-vertical studio-splitter-right"
+            data-layout-splitter
+            data-layout-id="studio"
+            data-layout-axis="x"
+            data-layout-index="1"
+            role="separator"
+            tabindex="0"
+            aria-orientation="vertical"
+            aria-label="调整预览和脚本宽度"
+          ></div>
+
+          <div
+            class="layout-splitter layout-splitter-horizontal studio-splitter-row"
+            data-layout-splitter
+            data-layout-id="studio"
+            data-layout-axis="y"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="horizontal"
+            aria-label="调整脚本和日志高度"
+          ></div>
+
           <section id="official-palette-panel" class="panel panel-official-palette hidden">
             <div class="panel-head">
               <h2>当前预览用色</h2>
@@ -540,8 +576,8 @@
       </section>
 
       <section class="page" data-page="firmware">
-        <main class="firmware-grid">
-          <section class="panel">
+        <main class="firmware-grid resizable-layout" data-layout-id="firmware">
+          <section class="panel panel-firmware-actions">
             <div class="panel-head">
               <h2>刷入固件</h2>
               <p>通过本机 PlatformIO 编译并刷入 ESP32。</p>
@@ -592,7 +628,19 @@
             </div>
           </section>
 
-          <section class="panel">
+          <div
+            class="layout-splitter layout-splitter-vertical firmware-splitter-column"
+            data-layout-splitter
+            data-layout-id="firmware"
+            data-layout-axis="x"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="vertical"
+            aria-label="调整刷入操作和刷入结果宽度"
+          ></div>
+
+          <section class="panel panel-firmware-result">
             <div class="panel-head">
               <h2>刷入结果</h2>
               <p>最近一次刷写状态。</p>
@@ -626,6 +674,18 @@
             </dl>
           </section>
 
+          <div
+            class="layout-splitter layout-splitter-horizontal firmware-splitter-row"
+            data-layout-splitter
+            data-layout-id="firmware"
+            data-layout-axis="y"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="horizontal"
+            aria-label="调整刷入区域和日志高度"
+          ></div>
+
           <section class="panel firmware-log-panel">
             <div class="panel-head">
               <h2>刷写日志</h2>
@@ -642,8 +702,8 @@
       </section>
 
       <section class="page" data-page="controller">
-        <main class="controller-grid">
-          <section class="panel">
+        <main class="controller-grid resizable-layout" data-layout-id="controller">
+          <section class="panel panel-controller-actions">
             <div class="panel-head">
               <h2>手柄测试</h2>
               <p>用单步命令验证真实设备动作。</p>
@@ -732,7 +792,19 @@
             </div>
           </section>
 
-          <section class="panel">
+          <div
+            class="layout-splitter layout-splitter-vertical controller-splitter-column"
+            data-layout-splitter
+            data-layout-id="controller"
+            data-layout-axis="x"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="vertical"
+            aria-label="调整手柄测试和连接状态宽度"
+          ></div>
+
+          <section class="panel panel-controller-status">
             <div class="panel-head">
               <h2>连接状态</h2>
               <p>蓝牙发现、认证、连接和发送状态。</p>
@@ -797,6 +869,18 @@
             </div>
           </section>
 
+          <div
+            class="layout-splitter layout-splitter-horizontal controller-splitter-row"
+            data-layout-splitter
+            data-layout-id="controller"
+            data-layout-axis="y"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="horizontal"
+            aria-label="调整手柄测试区域和日志高度"
+          ></div>
+
           <section class="panel controller-log-panel">
             <div class="panel-head">
               <h2>测试日志</h2>
@@ -813,7 +897,7 @@
       </section>
 
       <section class="page" data-page="timing">
-        <main class="controller-grid timing-lab-grid">
+        <main class="controller-grid timing-lab-grid resizable-layout" data-layout-id="timing">
           <section class="panel timing-overview-panel">
             <div class="panel-head">
               <h2>先看这个</h2>
@@ -886,7 +970,19 @@
             </div>
           </section>
 
-          <section class="panel">
+          <div
+            class="layout-splitter layout-splitter-horizontal timing-splitter-top"
+            data-layout-splitter
+            data-layout-id="timing"
+            data-layout-axis="y"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="horizontal"
+            aria-label="调整概览和调试区域高度"
+          ></div>
+
+          <section class="panel panel-timing-controls">
             <div class="panel-head">
               <h2>先调这两个旋钮</h2>
               <p>这两个值会同时用于测试和正式绘制。</p>
@@ -1015,7 +1111,19 @@
             </div>
           </section>
 
-          <section class="panel">
+          <div
+            class="layout-splitter layout-splitter-vertical timing-splitter-column"
+            data-layout-splitter
+            data-layout-id="timing"
+            data-layout-axis="x"
+            data-layout-index="0"
+            role="separator"
+            tabindex="0"
+            aria-orientation="vertical"
+            aria-label="调整 timing 控件和测试结果宽度"
+          ></div>
+
+          <section class="panel panel-timing-benchmark">
             <div class="panel-head">
               <h2>再选一个测试</h2>
               <p>从快速检查到长程复现。</p>
@@ -1093,6 +1201,18 @@
               </dl>
             </div>
           </section>
+
+          <div
+            class="layout-splitter layout-splitter-horizontal timing-splitter-bottom"
+            data-layout-splitter
+            data-layout-id="timing"
+            data-layout-axis="y"
+            data-layout-index="1"
+            role="separator"
+            tabindex="0"
+            aria-orientation="horizontal"
+            aria-label="调整调试区域和日志高度"
+          ></div>
 
           <section class="panel timing-log-panel">
             <div class="panel-head">
