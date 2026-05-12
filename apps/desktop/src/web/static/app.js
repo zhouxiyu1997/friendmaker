@@ -219,6 +219,21 @@ const state = {
 };
 
 const els = {
+  windowMinimizeButton: document.getElementById("window-minimize-button"),
+  windowMaximizeButton: document.getElementById("window-maximize-button"),
+  windowCloseButton: document.getElementById("window-close-button"),
+  titlePageLabel: document.getElementById("title-page-label"),
+  titlePortStatus: document.getElementById("title-port-status"),
+  workspaceTitle: document.getElementById("workspace-title"),
+  workspaceStatus: document.getElementById("workspace-status"),
+  sidebarPortDot: document.getElementById("sidebar-port-dot"),
+  sidebarControllerDot: document.getElementById("sidebar-controller-dot"),
+  sidebarPortStatus: document.getElementById("sidebar-port-status"),
+  sidebarControllerStatus: document.getElementById("sidebar-controller-status"),
+  statusbarPage: document.getElementById("statusbar-page"),
+  statusbarPort: document.getElementById("statusbar-port"),
+  statusbarController: document.getElementById("statusbar-controller"),
+  statusbarExecution: document.getElementById("statusbar-execution"),
   pageTabs: [...document.querySelectorAll(".page-tab")],
   pages: [...document.querySelectorAll(".page")],
   imageInput: document.getElementById("image-input"),
@@ -465,6 +480,24 @@ const TIMING_BENCHMARK_MODES = {
 };
 
 const VALID_PAGE_NAMES = new Set(["studio", "firmware", "controller", "timing"]);
+const PAGE_UI_COPY = {
+  studio: {
+    title: "脚本生成",
+    status: "导入图片，检查预览，然后开始绘制。",
+  },
+  firmware: {
+    title: "刷入固件",
+    status: "选择型号、环境和串口后刷入 ESP32 固件。",
+  },
+  controller: {
+    title: "手柄测试",
+    status: "连接手柄并验证方向、按键和蓝牙状态。",
+  },
+  timing: {
+    title: "调试测速",
+    status: "先调稳定等待，再用短测和长测确认参数。",
+  },
+};
 const TEMPLATE_CATEGORY_LABELS = {
   all: "全部模板",
   tops: "上衣 / 长衣",
@@ -2064,6 +2097,18 @@ els.timingClearLogButton.addEventListener("click", () => {
   clearLog(els.timingLogOutput);
 });
 
+els.windowMinimizeButton?.addEventListener("click", () => {
+  void window.friendMakerWindow?.minimize?.();
+});
+
+els.windowMaximizeButton?.addEventListener("click", () => {
+  void window.friendMakerWindow?.toggleMaximize?.();
+});
+
+els.windowCloseButton?.addEventListener("click", () => {
+  void window.friendMakerWindow?.close?.();
+});
+
 function switchPage(pageName, options = {}) {
   const { updateHash = true, scrollToPage = true } = options;
   const nextPageName = normalizePageName(pageName);
@@ -2088,12 +2133,14 @@ function switchPage(pageName, options = {}) {
     }
   }
 
+  syncDesktopShellUi();
+
   if (scrollToPage) {
     const activePage = findPageElement(nextPageName);
-    const scrollTarget = activePage?.querySelector(".page-intro") ?? activePage;
-    scrollTarget?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
+    activePage?.scrollTo?.({ top: 0, behavior: "smooth" });
+    activePage?.querySelectorAll(".panel").forEach((panel) => {
+      panel.scrollTop = 0;
+      panel.scrollLeft = 0;
     });
   }
 }
@@ -2105,6 +2152,92 @@ function findPageElement(pageName) {
 function normalizePageName(pageName) {
   const normalizedPageName = typeof pageName === "string" ? pageName.trim() : "";
   return VALID_PAGE_NAMES.has(normalizedPageName) ? normalizedPageName : "studio";
+}
+
+function syncDesktopShellUi() {
+  const copy = PAGE_UI_COPY[state.activePage] ?? PAGE_UI_COPY.studio;
+  const selectedPortLabel = state.selectedPortPath || "未选择";
+  const portStatus = state.serialSession.connected
+    ? `串口已连接：${selectedPortLabel}`
+    : `串口：${selectedPortLabel}`;
+  const hasSelectedPort = Boolean(state.selectedPortPath);
+  const controllerReady = isControllerReadyForStudio();
+  const controllerStatus = controllerReady
+    ? "手柄：已就绪"
+    : `手柄：${state.controller.status.title || "待连接"}`;
+  const executionStatus =
+    state.studio.execution.status === "idle"
+      ? "绘制：未开始"
+      : `绘制：${formatStudioExecutionStatusLabel(state.studio.execution.status)}`;
+
+  if (els.titlePageLabel) {
+    els.titlePageLabel.textContent = copy.title;
+  }
+  if (els.workspaceTitle) {
+    els.workspaceTitle.textContent = copy.title;
+  }
+  if (els.workspaceStatus) {
+    els.workspaceStatus.textContent = copy.status;
+  }
+  if (els.statusbarPage) {
+    els.statusbarPage.textContent = copy.title;
+  }
+  if (els.titlePortStatus) {
+    els.titlePortStatus.textContent = portStatus;
+  }
+  if (els.sidebarPortStatus) {
+    els.sidebarPortStatus.textContent = portStatus;
+  }
+  if (els.sidebarPortDot) {
+    els.sidebarPortDot.className = `status-dot ${
+      state.serialSession.connected
+        ? "status-dot-success"
+        : hasSelectedPort
+          ? "status-dot-warning"
+          : "status-dot-danger"
+    }`;
+  }
+  if (els.statusbarPort) {
+    els.statusbarPort.textContent = portStatus;
+  }
+  if (els.sidebarControllerStatus) {
+    els.sidebarControllerStatus.textContent = controllerStatus;
+  }
+  if (els.sidebarControllerDot) {
+    els.sidebarControllerDot.className = `status-dot ${
+      controllerReady
+        ? "status-dot-success"
+        : isControllerConnectionStillInProgress()
+          ? "status-dot-warning"
+          : "status-dot-danger"
+    }`;
+  }
+  if (els.statusbarController) {
+    els.statusbarController.textContent = controllerStatus;
+  }
+  if (els.statusbarExecution) {
+    els.statusbarExecution.textContent = executionStatus;
+  }
+}
+
+function formatStudioExecutionStatusLabel(status) {
+  switch (status) {
+    case "running":
+      return "进行中";
+    case "paused":
+      return "已暂停";
+    case "stopping":
+      return "正在中断";
+    case "completed":
+      return "已完成";
+    case "stopped":
+      return "已保存恢复点";
+    case "failed":
+    case "error":
+      return "异常中断";
+    default:
+      return "未开始";
+  }
 }
 
 window.addEventListener("hashchange", () => {
@@ -2881,6 +3014,7 @@ function renderStudioConnectionStatus() {
   els.studioConnectionPill.textContent = pill;
   els.studioConnectionTitle.textContent = title;
   els.studioConnectionDetail.textContent = detail;
+  syncDesktopShellUi();
 }
 
 function renderStudioExecutionStatus() {
@@ -2911,6 +3045,7 @@ function renderStudioExecutionStatus() {
       els.studioExecutionStatus.textContent = "当前未开始绘制。";
       break;
   }
+  syncDesktopShellUi();
 }
 
 function renderOfficialPalettePreview() {
@@ -3076,19 +3211,19 @@ function syncStudioUi() {
   els.autoRemoveBackgroundCheckbox.checked = state.studio.removeBackground;
   syncStudioColorCountOptions();
   const backgroundHint = state.studio.removeBackground
-    ? "已开启自动扣背景，会优先去掉白底、浅灰底和棋盘格假透明背景。"
-    : "当前不会自动扣背景；如果素材是白底或棋盘格假透明图，建议开启。";
+    ? "自动扣背景已开启。"
+    : "自动扣背景关闭。";
   const brushShapeHint =
     normalizeBrushShapeValue(state.studio.brushShape) === "square"
-      ? `当前预设是 ${selectedBrushPresetLabel}；开始绘制时设备会先按 X、X 进入笔刷页，再从默认的 7 像素圆点笔刷自动切到这个方块像素笔刷，并连按三次 A 完成选中和返回画布；回到画布后还会额外等待约 3 秒再继续。进入绘画页后不要再手动改笔刷，也不要再移动页面。`
+      ? `${selectedBrushPresetLabel}。开始绘制会自动切笔刷，期间不要手动操作。`
       : state.studio.brushSize === 1
-        ? "当前预设是 1 像素圆形像素笔刷；开始绘制时设备会自动打开笔刷页，切换到这一档后再连按三次 A 返回画布，并等待约 3 秒再继续。"
-        : `当前选的是 ${state.studio.brushSize} 号圆形像素笔刷；这一档暂不支持生成或执行，请切回方块像素笔刷或使用 1 号笔。`;
+        ? "1 像素圆形像素笔刷。开始绘制会自动切笔刷。"
+        : `${state.studio.brushSize} 号圆形像素笔刷暂不支持生成或执行。`;
   const templateHint =
     state.studio.templateId === "none"
-      ? "当前使用正方形画布，不会额外裁掉模板外区域。"
-      : `当前模板是“${state.studio.templateLabel}”，纯模板外区域不会显示；边缘格子只要碰到模板，也会保留绘制来填满可见边缘。`;
-  const scaleHint = `当前导入缩放是 ${state.studio.imageScalePercent}%，100% 表示完整放进画布。`;
+      ? "正方形画布。"
+      : `模板：${state.studio.templateLabel}。`;
+  const scaleHint = `缩放 ${state.studio.imageScalePercent}%。`;
   const positionHint = describeImagePosition(
     state.studio.imageOffsetXPercent,
     state.studio.imageOffsetYPercent,
@@ -3096,18 +3231,18 @@ function syncStudioUi() {
   if (state.studio.colorMode === "mono") {
     els.studioModeHint.textContent =
       unsupportedSelectedBrush
-        ? `${brushShapeHint}${templateHint}${scaleHint}${positionHint}${backgroundHint}`
-        : `深色像素会绘制，浅色像素会保留为空白背景。当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再放进 256x256 脚本坐标画布，并按 ${selectedBrushPresetLabel}和画布中心起步生成脚本。${templateHint}${scaleHint}${positionHint}${brushShapeHint}${backgroundHint}`;
+        ? `${brushShapeHint} ${templateHint} ${scaleHint} ${positionHint} ${backgroundHint}`
+        : `单色模式：深色绘制，浅色留白。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint}`;
   } else if (state.studio.colorMode === "official") {
     els.studioModeHint.textContent =
       unsupportedSelectedBrush
-        ? `${brushShapeHint}${templateHint}${scaleHint}${positionHint}${backgroundHint}`
-        : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片压到 ${state.studio.colorCount} 个官方色以内，并映射到游戏内置的 7x12 官方色盘，再按 ${selectedBrushPresetLabel}生成。${templateHint}${scaleHint}${positionHint}开始前请保持右侧 9 个槽位默认颜色不变。${brushShapeHint}${backgroundHint}`;
+        ? `${brushShapeHint} ${templateHint} ${scaleHint} ${positionHint} ${backgroundHint}`
+        : `官方色模式：最多 ${state.studio.colorCount} 色，映射到 7x12 官方色盘。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint}`;
   } else {
     els.studioModeHint.textContent =
       unsupportedSelectedBrush
-        ? `${brushShapeHint}${templateHint}${scaleHint}${positionHint}${backgroundHint}`
-        : `当前会先按 ${state.studio.imageScalePercent}% 调整图片大小，再把图片自动量化到最多 ${state.studio.colorCount} 个颜色，并按批次写入游戏的 9 个自定义槽位后进行绘制。下方“当前预览用色”会完整列出这次预览实际用到的全部颜色。${templateHint}${scaleHint}${positionHint}开始前建议先确认手柄链路和 timing 已经稳定；对颜色数量较多或结构较复杂的图片，可以先生成预览再正式开始。${brushShapeHint}${backgroundHint}`;
+        ? `${brushShapeHint} ${templateHint} ${scaleHint} ${positionHint} ${backgroundHint}`
+        : `自定义多色：最多 ${state.studio.colorCount} 色，按 9 个自定义色槽分批绘制。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint}`;
   }
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
@@ -3207,6 +3342,7 @@ function syncStudioUi() {
         ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。请先保持右侧 9 个槽位默认颜色不变；开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再按这组默认槽位状态去配置内置 7x12 色盘并继续绘制。`
         : `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 也会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制，这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
   renderStudioConnectionStatus();
+  syncDesktopShellUi();
 }
 
 function syncFirmwareUi() {
@@ -3849,6 +3985,7 @@ function renderPortSelects() {
       select.appendChild(option);
     });
   });
+  syncDesktopShellUi();
 }
 
 async function loadFirmwareInfo() {
@@ -4062,6 +4199,7 @@ function renderControllerStatus() {
   els.controllerStatusInitStep.textContent = result.initStep;
   els.controllerStatusInitError.textContent = result.initError;
   els.controllerStatusTime.textContent = metaTime;
+  syncDesktopShellUi();
 }
 
 function firmwareStatusLabel(status) {
