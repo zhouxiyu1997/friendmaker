@@ -9,6 +9,8 @@ import {
   syncStudioColorCountState,
 } from "./studioColorCountState.js";
 
+document.documentElement.dataset.platform = window.friendMakerWindow?.platform ?? "browser";
+
 const state = {
   activePage: "studio",
   imageDataUrl: null,

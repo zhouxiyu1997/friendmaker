@@ -148,8 +148,9 @@ async function ensureWritableFirmwareRoot(): Promise<string> {
 async function createMainWindow(): Promise<void> {
   const firmwareRoot = await ensureWritableFirmwareRoot();
   const appIcon = getAppIconPath();
+  const isMac = process.platform === "darwin";
 
-  if (process.platform === "darwin" && existsSync(appIcon)) {
+  if (isMac && existsSync(appIcon)) {
     app.dock?.setIcon(appIcon);
   }
 
@@ -170,7 +171,8 @@ async function createMainWindow(): Promise<void> {
     minWidth: 980,
     minHeight: 720,
     title: "Friend Maker",
-    frame: false,
+    frame: isMac ? true : false,
+    ...(isMac ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 13, y: 12 } } : {}),
     backgroundColor: "#F7F1DF",
     roundedCorners: true,
     ...(existsSync(appIcon) ? { icon: appIcon } : {}),
@@ -253,7 +255,15 @@ if (!hasLock) {
 
   app.on("window-all-closed", () => {
     void stopWebServer().finally(() => {
-      app.quit();
+      if (process.platform !== "darwin") {
+        app.quit();
+      }
     });
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void createMainWindow();
+    }
   });
 }

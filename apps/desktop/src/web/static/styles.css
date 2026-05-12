@@ -192,6 +192,18 @@ textarea:disabled {
   color: var(--on-primary);
 }
 
+:root[data-platform="darwin"] .titlebar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:root[data-platform="darwin"] .titlebar-drag {
+  padding-left: 78px;
+}
+
+:root[data-platform="darwin"] .window-controls {
+  display: none;
+}
+
 .desktop-body {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 const windowApi = {
+  platform: process.platform,
   minimize: async (): Promise<void> => {
     await ipcRenderer.invoke("friend-maker-window:minimize");
   },
@@ -13,4 +14,3 @@ const windowApi = {
 };
 
 contextBridge.exposeInMainWorld("friendMakerWindow", windowApi);
-
