@@ -12,107 +12,115 @@
       content="Friend Maker, 朋友制作器, Tomodachi Life, 朋友收集梦想生活, Nintendo Switch auto draw, ESP32 Pro Controller emulator, pixel art drawing automation"
     />
     <title>朋友制作器 / Friend Maker | Tomodachi Life 自动绘制工具</title>
+    <script>
+      document.documentElement.dataset.platform = window.friendMakerWindow?.platform ?? "browser";
+    </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="shell">
-      <header class="hero">
-        <div class="hero-copy">
-          <div class="hero-topline">
-            <span class="hero-tag">Switch 版《朋友收集：梦想生活》 / Tomodachi Life</span>
+    <div class="app-shell">
+      <header class="titlebar" aria-label="应用标题栏">
+        <div class="titlebar-drag">
+          <img class="app-mark" src="/app-icon.png" alt="" aria-hidden="true" />
+          <div class="titlebar-copy">
+            <strong>Friend Maker</strong>
+            <span id="title-page-label">脚本生成</span>
           </div>
-          <h1 class="hero-brand">朋友制作器 / Friend Maker</h1>
-          <p class="hero-body">
-            朋友制作器把图片处理、ESP32 固件刷写、Switch 手柄链路测试和正式绘制放进同一套本地工作台。图片会先转换成像素预览和动作脚本，
-            再通过 ESP32 模拟 Switch Pro Controller 输入完成自动绘制。
-          </p>
-          <p class="subcopy">
-            桌面端安装包和仓库源码两种进入方式，最终都会汇合到“刷入固件 -> 手柄测试 -> 调试测速 -> 脚本生成”这套四页工作流。当前主线支持
-            “单色绘制”“官方色绘制”和“自定义多色（自动量化）”。开始前请确认 Switch 已进入绘图页并保持默认画布状态；开始后不要再手动改笔刷，也不要再移动页面。如果使用官方色绘制，再额外确认官方色槽位仍保持默认状态。
-          </p>
+          <span id="title-port-status" class="titlebar-status">串口未选择</span>
         </div>
-        <div class="hero-side">
-          <div class="hero-badge">
-            <span>Current Workflow</span>
-            <strong>Flash -> Test -> Tune -> Draw</strong>
-          </div>
-          <section class="workflow-card" aria-label="推荐流程">
-            <span class="workflow-label">推荐流程</span>
-            <ol class="workflow-list">
-              <li>
-                <strong>先刷固件</strong>
-                <span>先到“刷入固件”确认 PlatformIO、串口设备和当前固件环境都正常。</span>
-              </li>
-              <li>
-                <strong>再测连接</strong>
-                <span>在“手柄测试”里完成配对、按钮测试和方向测试，确认链路已经进入可发送状态。</span>
-              </li>
-              <li>
-                <strong>再调 timing</strong>
-                <span>在“调试测速”里优先调 inputDelay，把当前板子、线材和连接稳定性先跑出来。</span>
-              </li>
-              <li>
-                <strong>最后导图</strong>
-                <span>回到“脚本生成”导入图片、检查预览，再开始绘制；如果之前中断，也可以从页面内的恢复任务继续。</span>
-              </li>
-            </ol>
-          </section>
+        <div class="window-controls" aria-label="窗口控制">
+          <button id="window-minimize-button" class="window-control" type="button" title="最小化" aria-label="最小化">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10" /></svg>
+          </button>
+          <button id="window-maximize-button" class="window-control" type="button" title="最大化/还原" aria-label="最大化或还原">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6h8v8H6z" /></svg>
+          </button>
+          <button id="window-close-button" class="window-control window-control-close" type="button" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8M14 6l-8 8" /></svg>
+          </button>
         </div>
       </header>
 
-      <div class="page-nav-wrap">
-        <nav class="page-nav" aria-label="功能导航">
-          <button class="page-tab active" data-page-target="studio" type="button">
-            <span class="page-tab-title">脚本生成</span>
-            <small class="page-tab-meta">导图、预览、执行</small>
-          </button>
-          <button class="page-tab" data-page-target="firmware" type="button">
-            <span class="page-tab-title">刷入固件</span>
-            <small class="page-tab-meta">编译、烧录、排错</small>
-          </button>
-          <button class="page-tab" data-page-target="controller" type="button">
-            <span class="page-tab-title">手柄测试</span>
-            <small class="page-tab-meta">连接、状态、单步动作</small>
-          </button>
-          <button class="page-tab" data-page-target="timing" type="button">
-            <span class="page-tab-title">调试测速</span>
-            <small class="page-tab-meta">Timing、试按、方圈/点阵</small>
-          </button>
-        </nav>
-      </div>
+      <div class="desktop-body">
+        <aside class="sidebar" aria-label="功能导航">
+          <div class="sidebar-head">
+            <span class="sidebar-kicker">Workspace</span>
+            <strong>自动绘制工作台</strong>
+          </div>
 
-      <section class="author-notice" aria-label="作者说明">
-        <div class="author-notice-copy">
-          <strong>作者说明</strong>
-          <p>
-            来源作者：小红书作者 <b>惜羽拓麻镇</b>。本项目采用 <b>GPL-3.0-or-later</b> 开源；如公开转发、转载或二次分享，建议注明作者名称
-            <b>惜羽拓麻镇</b>，并附上原始发布地址。
-          </p>
-        </div>
-        <div class="author-pill-row" aria-label="项目信息">
-          <span class="author-pill">GPL-3.0-or-later</span>
-          <span class="author-pill subtle">来源作者：惜羽拓麻镇</span>
-        </div>
-      </section>
+          <nav class="page-nav" aria-label="功能导航">
+            <button class="page-tab active" data-page-target="studio" type="button">
+              <svg class="page-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Z" />
+                <path d="m13.5 7 3.5 3.5" />
+              </svg>
+              <span class="page-tab-copy">
+                <span class="page-tab-title">脚本生成</span>
+                <small class="page-tab-meta">导图、预览、执行</small>
+              </span>
+            </button>
+            <button class="page-tab" data-page-target="firmware" type="button">
+              <svg class="page-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 3v4M16 3v4M8 17v4M16 17v4M3 8h4M17 8h4M3 16h4M17 16h4" />
+                <path d="M7 7h10v10H7z" />
+                <path d="M10 10h4v4h-4z" />
+              </svg>
+              <span class="page-tab-copy">
+                <span class="page-tab-title">刷入固件</span>
+                <small class="page-tab-meta">编译、烧录、排错</small>
+              </span>
+            </button>
+            <button class="page-tab" data-page-target="controller" type="button">
+              <svg class="page-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 15h.01M9.5 12.5h.01M14.5 12.5h.01M17 15h.01" />
+                <path d="M7 10h10a4 4 0 0 1 3.7 5.5l-.7 1.7a2.2 2.2 0 0 1-3.6.7L14.5 16h-5l-1.9 1.9a2.2 2.2 0 0 1-3.6-.7l-.7-1.7A4 4 0 0 1 7 10Z" />
+              </svg>
+              <span class="page-tab-copy">
+                <span class="page-tab-title">手柄测试</span>
+                <small class="page-tab-meta">连接、状态、单步动作</small>
+              </span>
+            </button>
+            <button class="page-tab" data-page-target="timing" type="button">
+              <svg class="page-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 8v5l3 2" />
+                <path d="M7 3h10" />
+                <path d="M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
+              </svg>
+              <span class="page-tab-copy">
+                <span class="page-tab-title">调试测速</span>
+                <small class="page-tab-meta">Timing、试按、长测</small>
+              </span>
+            </button>
+          </nav>
 
+          <div class="sidebar-status" aria-label="硬件状态">
+            <div class="sidebar-status-row">
+              <span id="sidebar-port-dot" class="status-dot status-dot-warning" aria-hidden="true"></span>
+              <span id="sidebar-port-status">串口未选择</span>
+            </div>
+            <div class="sidebar-status-row">
+              <span id="sidebar-controller-dot" class="status-dot status-dot-warning" aria-hidden="true"></span>
+              <span id="sidebar-controller-status">手柄待连接</span>
+            </div>
+          </div>
+        </aside>
+
+        <section class="workspace" aria-label="工作区">
+          <header class="workspace-toolbar">
+            <div>
+              <p class="workspace-kicker">Nintendo Switch / ESP32</p>
+              <h1 id="workspace-title">脚本生成</h1>
+            </div>
+            <p id="workspace-status" class="workspace-status">导入图片，检查预览，然后开始绘制。</p>
+          </header>
+
+          <div class="workspace-content">
       <section class="page page-active" data-page="studio">
-        <section class="page-intro">
-          <div class="page-intro-copy">
-            <p class="page-kicker">脚本生成</p>
-            <h2>把图片处理、像素预览和执行放在同一条视线里</h2>
-            <p>这里适合连续完成“导入图片、调整参数、确认预览、开始绘制”这一整段流程。</p>
-          </div>
-          <div class="page-step-row" aria-label="脚本生成步骤">
-            <span class="page-step">1. 导入图片</span>
-            <span class="page-step">2. 调整缩放和位置</span>
-            <span class="page-step">3. 检查预览后开始绘制</span>
-          </div>
-        </section>
         <main class="grid">
           <section class="panel panel-form">
             <div class="panel-head">
               <h2>输入</h2>
-              <p>导入图片，设定单色、官方色或自定义多色（自动量化）参数，然后发送到 ESP32 开始绘制。</p>
+              <p>导入图片，设置颜色、模板和位置。</p>
             </div>
 
             <label class="file-drop" for="image-input">
@@ -135,7 +143,7 @@
             <div class="execution-box mono-note-box">
               <div class="panel-head compact">
                 <h2>绘制模式</h2>
-                <p>当前固定走 256x256 脚本坐标画布并从画布中心起步。单色模式画黑白图，官方色模式会量化到游戏内置的 7x12 色盘；自定义多色模式会先自动量化颜色，再按批次写入 9 个自定义色槽。现在也可以给画布套用异形图纸模板，模板外区域会直接裁掉。当前版本在生成页只开放方块像素笔刷；开始绘制后设备会先按两次 X 打开笔刷页，再从默认的 7 像素圆点笔刷自动切到这里选中的预设，并再按三次 A 回到画布，随后等待约 3 秒再继续。</p>
+                <p>256x256 坐标画布，从中心起步。正式绘制会自动切到所选像素画笔。</p>
               </div>
 
               <p class="hint" id="studio-mode-hint">
@@ -154,7 +162,7 @@
               <div class="brush-picker-card">
                 <div class="panel-head compact">
                   <h2>像素画笔</h2>
-                  <p>进入脚本生成页时只需要在这里选一次。开始绘制或恢复绘制时，设备会自动连按两次 X 打开笔刷页，并从默认的 7 像素圆点笔刷切到对应的方块像素画笔；选中后还会再按三次 A 回到画布，并额外等待约 3 秒。</p>
+                  <p>开始或恢复绘制时会自动进入笔刷页并切换预设。</p>
                 </div>
 
                 <div class="brush-picker-layout brush-picker-layout-single">
@@ -276,7 +284,7 @@
             <div class="template-picker-card">
               <div class="panel-head compact">
                 <h2>图纸模板</h2>
-                <p>选择后，预览会裁掉模板外区域；边缘格子只要和模板有重叠也会保留绘制，这样大画笔能把可见边缘填满。不选时保持当前正方形画布行为。</p>
+                <p>模板外区域会被裁掉；不选则保持正方形画布。</p>
               </div>
 
               <div class="field-grid template-picker-grid">
@@ -301,7 +309,7 @@
                 </div>
                 <div class="template-preview-copy">
                   <strong id="template-preview-label">无模板（正方形）</strong>
-                  <small>模板缩略图只用于确认当前选中项；真正的裁剪会在生成预览和绘制命令时一起生效。</small>
+                  <small>裁剪会在生成预览和命令时生效。</small>
                 </div>
               </div>
             </div>
@@ -366,7 +374,7 @@
             <div class="execution-box">
               <div class="panel-head compact">
                 <h2>执行</h2>
-                <p>手柄连接完成后，这里会直接把脚本发送到 ESP32 串口设备。进入绘画页后不要再手动改笔刷，也不要再移动页面；开始绘制时设备会先按两次 X 打开笔刷页，再自己切到脚本预设的像素画笔，并补三次 A 回到画布，随后等待约 3 秒。</p>
+                <p>选择串口后发送脚本。开始前确认 Switch 停在默认画布。</p>
               </div>
 
               <div class="field-grid execution-grid">
@@ -383,7 +391,7 @@
               </div>
 
               <p class="hint" id="execution-hint">请选择串口设备，连接手柄后即可直接开始绘制。</p>
-              <p class="hint">安全时序模式会默认启用；请先刷入最新固件。执行前只需要确认已经重新进入绘画页并停在默认画布状态；从开始切笔刷到整段绘制结束，都不要再手动碰手柄或页面。</p>
+              <p class="hint">执行期间不要触碰手柄或页面。</p>
             </div>
 
             <div class="action-row">
@@ -398,11 +406,11 @@
               <button id="stop-execution-button" class="ghost" type="button" disabled>中断并保存恢复点</button>
             </div>
 
-            <p class="hint">暂停绘制和中断并保存恢复点都会在当前命令完成后生效。如果你点了暂停后看到 Switch 还会继续动一下，这是正常现象；它会先把当前命令跑完。</p>
+            <p class="hint">暂停和中断会在当前命令完成后生效。</p>
             <p class="hint" id="studio-execution-status">当前未开始绘制。</p>
             <section id="execution-emergency-panel" class="execution-emergency hidden" aria-label="应急操作">
               <p class="hint">
-                如果“正在中断绘制”持续很久没有结束，说明当前会话可能卡住了。只有这种情况下，才使用下面的应急按钮强制清除卡住状态。
+                仅在中断长时间无响应时使用。
               </p>
               <button id="reset-execution-button" class="ghost danger" type="button" disabled>强制清除卡住状态</button>
             </section>
@@ -410,7 +418,7 @@
             <section class="recovery-panel" aria-label="恢复任务">
               <div class="panel-head compact">
                 <h2>恢复任务</h2>
-                <p>中断或异常后，会在本地保存脚本和恢复点。请先在 Switch 里保存当前画作，再手动重新进入绘画页；恢复开始后设备也会自动按两次 X 打开笔刷页，并切回保存任务对应的像素画笔，再按三次 A 回到画布，随后等待约 3 秒。</p>
+                <p>恢复前先在 Switch 里保存，并重新进入绘画页。</p>
               </div>
               <p class="hint" id="recovery-empty-state">当前没有可恢复任务。</p>
               <div id="recovery-session-list" class="recovery-session-list"></div>
@@ -420,7 +428,7 @@
           <section class="panel panel-preview">
             <div class="panel-head">
               <h2>预览</h2>
-              <p>这里显示像素化结果、模板裁剪效果和关键统计信息。</p>
+              <p>像素预览、模板裁剪和统计。</p>
             </div>
 
             <div class="preview-tools">
@@ -495,7 +503,7 @@
             <div class="panel-head">
               <h2>当前预览用色</h2>
               <p id="official-palette-summary">
-                这里会显示程序当前使用的颜色集合，并高亮或完整列出这张图实际量化到的颜色。
+                显示本次预览实际使用的颜色。
               </p>
             </div>
 
@@ -505,7 +513,7 @@
           <section class="panel panel-script">
             <div class="panel-head">
               <h2>脚本</h2>
-              <p>这是当前协议下可直接发送给设备的动作脚本。官方色绘制和自定义多色（自动量化）都会额外插入色盘配置命令。</p>
+              <p>生成后可直接发送或导出。</p>
             </div>
 
             <textarea id="commands-output" class="code-block" spellcheck="false" placeholder="生成后会在这里显示命令脚本"></textarea>
@@ -519,7 +527,7 @@
           <section class="panel panel-log">
             <div class="panel-head">
               <h2>执行日志</h2>
-              <p>这里会显示模拟器日志，或者串口设备返回的状态信息。</p>
+              <p>串口返回和执行状态。</p>
             </div>
 
             <div class="action-row slim log-toolbar">
@@ -532,23 +540,11 @@
       </section>
 
       <section class="page" data-page="firmware">
-        <section class="page-intro">
-          <div class="page-intro-copy">
-            <p class="page-kicker">刷入固件</p>
-            <h2>把环境选择、烧录结果和日志排查拆得更清楚</h2>
-            <p>这页只负责 ESP32 固件编译和刷写，适合在设备需要更新时单独完成，不打断主绘制流程。</p>
-          </div>
-          <div class="page-step-row" aria-label="刷入固件步骤">
-            <span class="page-step">1. 选择目标环境</span>
-            <span class="page-step">2. 确认串口设备</span>
-            <span class="page-step">3. 编译并刷入固件</span>
-          </div>
-        </section>
         <main class="firmware-grid">
           <section class="panel">
             <div class="panel-head">
               <h2>刷入固件</h2>
-              <p>这里会调用本机的 PlatformIO，直接把固件编译并刷入 ESP32。</p>
+              <p>通过本机 PlatformIO 编译并刷入 ESP32。</p>
             </div>
 
             <div class="field-grid">
@@ -599,7 +595,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>刷入结果</h2>
-              <p>这里会用简洁信息展示最近一次刷写是否成功。</p>
+              <p>最近一次刷写状态。</p>
             </div>
 
             <div id="firmware-status-card" class="firmware-status-card firmware-status-idle">
@@ -633,7 +629,7 @@
           <section class="panel firmware-log-panel">
             <div class="panel-head">
               <h2>刷写日志</h2>
-              <p>这里会返回 PlatformIO 的完整输出，方便排查烧录问题。</p>
+              <p>PlatformIO 输出。</p>
             </div>
 
             <div class="action-row slim log-toolbar">
@@ -646,23 +642,11 @@
       </section>
 
       <section class="page" data-page="controller">
-        <section class="page-intro">
-          <div class="page-intro-copy">
-            <p class="page-kicker">手柄测试</p>
-            <h2>先确认连接状态，再做单步动作验证</h2>
-            <p>这里把连接、可发现、认证、配对和动作测试拆开显示，方便先排链路问题，再排按键动作。</p>
-          </div>
-          <div class="page-step-row" aria-label="手柄测试步骤">
-            <span class="page-step">1. 刷新并连接手柄</span>
-            <span class="page-step">2. 确认状态变为可发送</span>
-            <span class="page-step">3. 做方向和按钮测试</span>
-          </div>
-        </section>
         <main class="controller-grid">
           <section class="panel">
             <div class="panel-head">
               <h2>手柄测试</h2>
-              <p>这里用单步命令测试真实设备动作，不依赖整张图片脚本。</p>
+              <p>用单步命令验证真实设备动作。</p>
             </div>
 
             <div class="field-grid">
@@ -751,7 +735,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>连接状态</h2>
-              <p>把开发板是否可发现、是否认证、是否真正连上手柄这几步单独可视化出来。</p>
+              <p>蓝牙发现、认证、连接和发送状态。</p>
             </div>
 
             <div id="controller-status-card" class="firmware-status-card firmware-status-idle controller-status-card">
@@ -816,7 +800,7 @@
           <section class="panel controller-log-panel">
             <div class="panel-head">
               <h2>测试日志</h2>
-              <p>这里会显示每次按钮测试或自定义命令的返回内容。</p>
+              <p>按钮测试和自定义命令返回。</p>
             </div>
 
             <div class="action-row slim log-toolbar">
@@ -829,23 +813,11 @@
       </section>
 
       <section class="page" data-page="timing">
-        <section class="page-intro">
-          <div class="page-intro-copy">
-            <p class="page-kicker">调试测速</p>
-            <h2>按现象调参数，不用背英文名</h2>
-            <p>这页把两个 timing 翻译成更好理解的“稳定等待”和“按键保持”。先做小动作，再跑快速检查，最后用以中心为基准的 6 行 x 240 点阵做长程复现。</p>
-          </div>
-          <div class="page-step-row" aria-label="调试测速步骤">
-            <span class="page-step">1. 先试 1 格</span>
-            <span class="page-step">2. 再调两个旋钮</span>
-            <span class="page-step">3. 最后跑长测</span>
-          </div>
-        </section>
         <main class="controller-grid timing-lab-grid">
           <section class="panel timing-overview-panel">
             <div class="panel-head">
               <h2>先看这个</h2>
-              <p>如果你只是想把画画跑稳，不需要记命令，也不需要一上来就跑最长基准。按下面这套顺序最省心。</p>
+              <p>按顺序调参，先稳定再提速。</p>
             </div>
 
             <div class="timing-overview-grid">
@@ -917,7 +889,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>先调这两个旋钮</h2>
-              <p>这里调好的值会同时影响手柄测试、测速和正式绘制。先调“稳定等待”，再微调“按键保持”。</p>
+              <p>这两个值会同时用于测试和正式绘制。</p>
             </div>
 
             <div class="field-grid">
@@ -1016,7 +988,7 @@
 
             <div class="panel-head compact">
               <h2>先做一个小动作</h2>
-              <p>每次都会先套用当前参数，再发送方向或按钮动作。建议先用 1 格确认稳不稳，再决定要不要跑基准。</p>
+              <p>先用小动作确认连接和参数。</p>
             </div>
 
             <p id="timing-status-hint" class="hint">请先选择串口，并确保手柄已经进入“已就绪”。</p>
@@ -1046,7 +1018,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>再选一个测试</h2>
-              <p>从左到右越来越严格。先跑快速检查，再看累计漂移，最后再用以中心为基准的 6 行 x 240 点阵复现真实长程问题。</p>
+              <p>从快速检查到长程复现。</p>
             </div>
 
             <div class="timing-benchmark-grid">
@@ -1083,7 +1055,7 @@
 
             <div class="panel-head compact">
               <h2>本次结果</h2>
-              <p>点任意一个测试后，这里会显示这组参数大概有多快、是否顺利跑完，以及设备最后一次返回了什么。</p>
+              <p>显示耗时、理论值和设备反馈。</p>
             </div>
 
             <div id="timing-benchmark-card" class="firmware-status-card firmware-status-idle timing-benchmark-card">
@@ -1125,7 +1097,7 @@
           <section class="panel timing-log-panel">
             <div class="panel-head">
               <h2>设备返回日志</h2>
-              <p>这里只有设备原始返回内容。平时不用一直盯着看，只有测试失败或结果不对劲时，再回来对照排查就够了。</p>
+              <p>设备原始返回内容。</p>
             </div>
 
             <div class="action-row slim log-toolbar">
@@ -1136,6 +1108,17 @@
           </section>
         </main>
       </section>
+          </div>
+        </section>
+      </div>
+
+      <footer class="statusbar" aria-label="状态栏">
+        <span id="statusbar-page">脚本生成</span>
+        <span id="statusbar-port">串口：未选择</span>
+        <span id="statusbar-controller">手柄：待连接</span>
+        <span id="statusbar-execution">绘制：未开始</span>
+        <span class="statusbar-license">GPL-3.0-or-later · 来源作者：惜羽拓麻镇</span>
+      </footer>
     </div>
 
     <script type="module" src="/app.js"></script>

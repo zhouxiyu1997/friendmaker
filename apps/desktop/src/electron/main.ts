@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -14,8 +14,16 @@ const repoRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
 let mainWindow: BrowserWindow | null = null;
 let webServer: WebServerHandle | null = null;
 
+function getWindowFromSender(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+  return BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+}
+
 function getStaticRoot(): string {
   return path.resolve(__dirname, "..", "web", "static");
+}
+
+function getPreloadPath(): string {
+  return path.resolve(__dirname, "preload.js");
 }
 
 function getBundledFirmwareRoot(): string {
@@ -140,8 +148,9 @@ async function ensureWritableFirmwareRoot(): Promise<string> {
 async function createMainWindow(): Promise<void> {
   const firmwareRoot = await ensureWritableFirmwareRoot();
   const appIcon = getAppIconPath();
+  const isMac = process.platform === "darwin";
 
-  if (process.platform === "darwin" && existsSync(appIcon)) {
+  if (isMac && existsSync(appIcon)) {
     app.dock?.setIcon(appIcon);
   }
 
@@ -162,11 +171,16 @@ async function createMainWindow(): Promise<void> {
     minWidth: 980,
     minHeight: 720,
     title: "Friend Maker",
+    frame: isMac ? true : false,
+    ...(isMac ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 13, y: 12 } } : {}),
+    backgroundColor: "#F7F1DF",
+    roundedCorners: true,
     ...(existsSync(appIcon) ? { icon: appIcon } : {}),
     webPreferences: {
+      preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
     },
   });
 
@@ -188,6 +202,29 @@ const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) {
   app.quit();
 } else {
+  ipcMain.handle("friend-maker-window:minimize", (event) => {
+    getWindowFromSender(event)?.minimize();
+  });
+
+  ipcMain.handle("friend-maker-window:toggle-maximize", (event) => {
+    const window = getWindowFromSender(event);
+    if (!window) {
+      return false;
+    }
+
+    if (window.isMaximized()) {
+      window.unmaximize();
+      return false;
+    }
+
+    window.maximize();
+    return true;
+  });
+
+  ipcMain.handle("friend-maker-window:close", (event) => {
+    getWindowFromSender(event)?.close();
+  });
+
   app.on("second-instance", () => {
     if (!mainWindow) {
       return;
@@ -218,7 +255,15 @@ if (!hasLock) {
 
   app.on("window-all-closed", () => {
     void stopWebServer().finally(() => {
-      app.quit();
+      if (process.platform !== "darwin") {
+        app.quit();
+      }
     });
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void createMainWindow();
+    }
   });
 }
