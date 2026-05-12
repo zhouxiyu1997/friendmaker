@@ -109,17 +109,12 @@ textarea:disabled {
 }
 
 .app-mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 24px;
   height: 24px;
-  border: 1px solid rgba(168, 138, 110, 0.55);
-  border-radius: 8px;
-  background: var(--ac-cream);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  object-fit: cover;
   box-shadow: 0 2px 0 rgba(138, 106, 74, 0.22);
 }
 
