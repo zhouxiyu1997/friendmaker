@@ -41,7 +41,11 @@ const COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS = 1_500;
 const COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3_000;
 const COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
 const BASIC_COLOR_TAB_SETTLE_MS = 140;
-const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
+// Real controllers can finish long custom-palette edits a few seconds later
+// than the nominal button-hold math suggests, especially while Bluetooth HID
+// traffic is busy. Keep a wider guard band so we do not retry a slot right as
+// the device is about to ACK the completed color write.
+const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 10_000;
 
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
