@@ -347,6 +347,7 @@ Before continuing:
 - `Pause Drawing` and `Stop and Save Recovery Point` both wait for the current command to finish first
 - If `Stopping Drawing` gets stuck for a long time, use the emergency button in the page to clear the stuck state
 - If step tests show ghost inputs, sticky inputs, or repeated actions, press the board's `EN` button first and reconnect the controller
+- If pressing `EN` immediately fixes ghost or sticky inputs, rerun controller validation before judging drawing or color issues
 
 ## 9. More troubleshooting and platform notes
 
