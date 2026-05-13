@@ -63,6 +63,72 @@ export interface DrawingProfile {
   centerToTopLeftDy: number;
 }
 
+export interface PaletteCalibrationSteps {
+  hue: number;
+  saturation: number;
+  value: number;
+}
+
+export type CustomColorCalibrationSampleKind = "hue-anchor" | "problem-anchor";
+
+export interface CustomColorCalibrationSampleDefinition {
+  id: string;
+  kind: CustomColorCalibrationSampleKind;
+  label: string;
+  targetHex: string;
+  baseSteps: PaletteCalibrationSteps;
+}
+
+export interface CustomColorCalibrationSample {
+  id: string;
+  kind: CustomColorCalibrationSampleKind;
+  label: string;
+  targetHex: string;
+  baseSteps: PaletteCalibrationSteps;
+  adjustments: PaletteCalibrationSteps;
+  finalSteps: PaletteCalibrationSteps;
+  predictedHex: string;
+}
+
+export interface CustomColorCalibrationHueAnchor {
+  sampleId: string;
+  hue: number;
+  delta: PaletteCalibrationSteps;
+}
+
+export interface CustomColorCalibrationProblemAnchor {
+  sampleId: string;
+  targetHex: string;
+  hsv: {
+    hue: number;
+    saturation: number;
+    value: number;
+  };
+  delta: PaletteCalibrationSteps;
+}
+
+export interface CustomColorCalibrationDerivedModel {
+  hueAnchors: CustomColorCalibrationHueAnchor[];
+  problemAnchors: CustomColorCalibrationProblemAnchor[];
+  lowSaturationThreshold: number;
+  problemBlendRadius: number;
+}
+
+export interface CustomColorCalibration {
+  version: 1;
+  enabled: boolean;
+  updatedAt: string;
+  samples: CustomColorCalibrationSample[];
+  derivedModel: CustomColorCalibrationDerivedModel;
+}
+
+export interface PaletteCalibrationEntry {
+  colorIndex: number;
+  targetHex: string;
+  calibratedHex: string;
+  commandHex: string;
+}
+
 export interface PixelizationResult {
   pixelMap: PixelMap;
   usedColorIndexes: number[];

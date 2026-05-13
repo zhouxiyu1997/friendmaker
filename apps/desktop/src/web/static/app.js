@@ -157,6 +157,8 @@ const state = {
     removeBackground: false,
     usedColorIndexes: [],
     generatedPalette: [],
+    generatedTargetPalette: [],
+    generatedPaletteEntries: [],
     resumePlan: null,
     recoverySessions: [],
     officialPalette: {
@@ -279,6 +281,17 @@ const state = {
       deviceSummary: "-",
       updatedAt: null,
     },
+  },
+  calibration: {
+    busy: false,
+    samples: [],
+    selectedSampleId: "",
+    adjustmentsById: {},
+    savedSampleIds: [],
+    defaultCalibration: null,
+    draftCalibration: null,
+    globalCalibration: null,
+    globalCalibrationSource: "none",
   },
 };
 
@@ -451,6 +464,29 @@ const els = {
   timingBenchmarkTime: document.getElementById("timing-benchmark-time"),
   timingLogOutput: document.getElementById("timing-log-output"),
   timingClearLogButton: document.getElementById("timing-clear-log-button"),
+  calibrationPortSelect: document.getElementById("calibration-port-select"),
+  calibrationRefreshPortsButton: document.getElementById("calibration-refresh-ports-button"),
+  calibrationGlobalStatus: document.getElementById("calibration-global-status"),
+  calibrationCurrentLabel: document.getElementById("calibration-current-label"),
+  calibrationCurrentStatus: document.getElementById("calibration-current-status"),
+  calibrationSavedSamplesCount: document.getElementById("calibration-saved-samples-count"),
+  calibrationSampleList: document.getElementById("calibration-sample-list"),
+  calibrationTargetSwatch: document.getElementById("calibration-target-swatch"),
+  calibrationTargetHex: document.getElementById("calibration-target-hex"),
+  calibrationPredictedSwatch: document.getElementById("calibration-predicted-swatch"),
+  calibrationPredictedHex: document.getElementById("calibration-predicted-hex"),
+  calibrationStatusHint: document.getElementById("calibration-status-hint"),
+  calibrationAxisButtons: [...document.querySelectorAll("[data-calibration-axis][data-calibration-delta]")],
+  calibrationStartSampleButton: document.getElementById("calibration-start-sample-button"),
+  calibrationSaveSampleButton: document.getElementById("calibration-save-sample-button"),
+  calibrationSaveGlobalButton: document.getElementById("calibration-save-global-button"),
+  calibrationClearGlobalButton: document.getElementById("calibration-clear-global-button"),
+  calibrationExportButton: document.getElementById("calibration-export-button"),
+  calibrationImportButton: document.getElementById("calibration-import-button"),
+  calibrationImportInput: document.getElementById("calibration-import-input"),
+  calibrationEnabledCheckbox: document.getElementById("calibration-enabled-checkbox"),
+  calibrationLogOutput: document.getElementById("calibration-log-output"),
+  calibrationClearLogButton: document.getElementById("calibration-clear-log-button"),
 };
 
 let studioExecutionPollTimer = null;
@@ -489,10 +525,22 @@ const STUDIO_IMAGE_OFFSET_LIMITS = {
 };
 
 const SHARED_TIMING_STORAGE_KEY = "friend-maker.shared-timing";
+const CUSTOM_COLOR_CALIBRATION_STORAGE_KEY = "friendmaker.customColorCalibration.v1";
+const CUSTOM_COLOR_CALIBRATION_EXPORT_FILENAME = "friendmaker-custom-color-calibration.json";
 const DEFAULT_SHARED_TIMING = {
   inputDelay: 45,
   buttonPressDuration: 65,
   homeDuration: 1800,
+};
+const CALIBRATION_PALETTE_TIMING = {
+  buttonPressDuration: 90,
+  inputDelay: 90,
+  homeDuration: 1800,
+};
+const CALIBRATION_STEP_LIMITS = {
+  hue: { min: 0, max: 200 },
+  saturation: { min: 0, max: 213 },
+  value: { min: 0, max: 112 },
 };
 const SHARED_TIMING_LIMITS = {
   inputDelay: { min: 16, max: 100, step: 1 },
@@ -545,7 +593,7 @@ const TIMING_BENCHMARK_MODES = {
   },
 };
 
-const VALID_PAGE_NAMES = new Set(["studio", "firmware", "controller", "timing"]);
+const VALID_PAGE_NAMES = new Set(["studio", "firmware", "controller", "timing", "calibration"]);
 const PAGE_UI_COPY = {
   studio: {
     title: "脚本生成",
@@ -562,6 +610,10 @@ const PAGE_UI_COPY = {
   timing: {
     title: "调试测速",
     status: "先调稳定等待，再用短测和长测确认参数。",
+  },
+  calibration: {
+    title: "颜色校准",
+    status: "按固定样本人工微调自定义色，并保存全局校准。",
   },
 };
 const TEMPLATE_CATEGORY_LABELS = {
@@ -1086,7 +1138,7 @@ els.thresholdRange.addEventListener("input", () => {
   scheduleStudioPreviewRefresh();
 });
 
-[els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect, els.timingPortSelect].forEach((select) => {
+[els.studioPortSelect, els.firmwarePortSelect, els.controllerPortSelect, els.timingPortSelect, els.calibrationPortSelect].forEach((select) => {
   select.addEventListener("change", () => {
     state.selectedPortPath = select.value;
     state.missingSelectedPortPath = null;
@@ -1095,7 +1147,7 @@ els.thresholdRange.addEventListener("input", () => {
     syncFirmwareUi();
     syncControllerUi();
     syncTimingLabUi();
-    syncTimingLabUi();
+    syncCalibrationUi();
   });
 });
 
@@ -1177,6 +1229,12 @@ els.installCh341DriverButton.addEventListener("click", async () => {
 els.controllerRefreshButton.addEventListener("click", async () => {
   await refreshPorts({
     log: (message) => appendLog(els.controllerLogOutput, message),
+  });
+});
+
+els.calibrationRefreshPortsButton.addEventListener("click", async () => {
+  await refreshPorts({
+    log: (message) => appendLog(els.calibrationLogOutput, message),
   });
 });
 
@@ -1504,6 +1562,7 @@ function buildStudioGeneratePayload() {
     removeBackground: state.studio.removeBackground,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
+    customColorCalibration: state.calibration.globalCalibration ?? null,
   };
 }
 
@@ -1535,6 +1594,12 @@ function applyGeneratedStudioPayload(payload) {
     : [];
   state.studio.generatedPalette = Array.isArray(payload.profile.palette)
     ? payload.profile.palette
+    : [];
+  state.studio.generatedTargetPalette = Array.isArray(payload.profile.targetPalette)
+    ? payload.profile.targetPalette
+    : [];
+  state.studio.generatedPaletteEntries = Array.isArray(payload.profile.paletteEntries)
+    ? payload.profile.paletteEntries
     : [];
   state.studio.profile = {
     baudRate: payload.profile.baudRate ?? 115200,
@@ -2502,6 +2567,82 @@ els.timingClearLogButton.addEventListener("click", () => {
   clearLog(els.timingLogOutput);
 });
 
+els.calibrationSampleList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-calibration-sample-id]");
+
+  if (!button) {
+    return;
+  }
+
+  state.calibration.selectedSampleId = button.dataset.calibrationSampleId ?? "";
+  syncCalibrationUi();
+});
+
+els.calibrationAxisButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const axis = button.dataset.calibrationAxis ?? "";
+    const delta = Number(button.dataset.calibrationDelta ?? 0);
+
+    if (!["hue", "saturation", "value"].includes(axis) || !Number.isFinite(delta) || delta === 0) {
+      appendLog(els.calibrationLogOutput, `未知校准微调动作：${axis} ${button.dataset.calibrationDelta ?? ""}`);
+      return;
+    }
+
+    await nudgeCalibrationAxis(axis, delta);
+  });
+});
+
+els.calibrationStartSampleButton?.addEventListener("click", async () => {
+  await replaySelectedCalibrationSample();
+});
+
+els.calibrationSaveSampleButton?.addEventListener("click", async () => {
+  await saveSelectedCalibrationSample();
+});
+
+els.calibrationSaveGlobalButton?.addEventListener("click", async () => {
+  await saveGlobalCustomColorCalibration();
+});
+
+els.calibrationClearGlobalButton?.addEventListener("click", async () => {
+  const shouldClear = window.confirm(
+    "这会放弃当前本地覆盖校准，并恢复到应用内置的默认校准。现在恢复吗？",
+  );
+
+  if (!shouldClear) {
+    return;
+  }
+
+  await clearGlobalCustomColorCalibration();
+});
+
+els.calibrationExportButton?.addEventListener("click", () => {
+  exportGlobalCustomColorCalibration();
+});
+
+els.calibrationImportButton?.addEventListener("click", () => {
+  els.calibrationImportInput?.click();
+});
+
+els.calibrationImportInput?.addEventListener("change", async () => {
+  const file = els.calibrationImportInput?.files?.[0] ?? null;
+
+  if (!file) {
+    return;
+  }
+
+  await importGlobalCustomColorCalibration(file);
+  els.calibrationImportInput.value = "";
+});
+
+els.calibrationEnabledCheckbox?.addEventListener("change", () => {
+  updateGlobalCalibrationEnabled(els.calibrationEnabledCheckbox.checked);
+});
+
+els.calibrationClearLogButton?.addEventListener("click", () => {
+  clearLog(els.calibrationLogOutput);
+});
+
 els.windowMinimizeButton?.addEventListener("click", () => {
   void window.friendMakerWindow?.minimize?.();
 });
@@ -2670,6 +2811,7 @@ function setStudioBusy(isBusy) {
   els.copyButton.disabled = isBusy || state.commands.length === 0;
   els.downloadButton.disabled = isBusy || state.commands.length === 0;
   syncStudioUi();
+  syncCalibrationUi();
 }
 
 function isStudioExecutionActive() {
@@ -2749,6 +2891,7 @@ function applyStudioExecutionSnapshot(snapshot) {
   }
 
   syncStudioUi();
+  syncCalibrationUi();
 }
 
 async function pollStudioExecutionStatus() {
@@ -3019,6 +3162,7 @@ function setControllerBusy(isBusy) {
   els.controllerSendCustomButton.disabled = isBusy;
   syncControllerUi();
   syncTimingLabUi();
+  syncCalibrationUi();
 }
 
 function applySerialSessionSnapshot(snapshot) {
@@ -3039,6 +3183,7 @@ function applySerialSessionSnapshot(snapshot) {
   };
   syncControllerUi();
   syncTimingLabUi();
+  syncCalibrationUi();
 }
 
 async function loadSerialSessionStatus() {
@@ -3093,6 +3238,7 @@ function setControllerStatus(partialStatus) {
   renderControllerStatus();
   syncControllerUi();
   syncStudioUi();
+  syncCalibrationUi();
 }
 
 function setControllerPendingStatus({ title, detail }) {
@@ -3460,6 +3606,9 @@ function renderOfficialPalettePreview() {
   const generatedPalette = Array.isArray(state.studio.generatedPalette)
     ? state.studio.generatedPalette
     : [];
+  const paletteEntries = Array.isArray(state.studio.generatedPaletteEntries)
+    ? state.studio.generatedPaletteEntries
+    : [];
 
   els.officialPalettePanel.classList.toggle(
     "hidden",
@@ -3510,30 +3659,55 @@ function renderOfficialPalettePreview() {
   }
 
   if (isPaletteMode && generatedPalette.length > 0) {
-    els.officialPaletteSummary.textContent =
-      `这里完整列出这张图当前预览实际用到的全部颜色。当前共使用 ${generatedPalette.length} 个自动量化颜色，绘制时会按 9 槽一批写入自定义色槽。`;
+    const usesCalibratedPalette = paletteEntries.some(
+      (entry) => entry.targetHex && entry.calibratedHex && entry.targetHex !== entry.calibratedHex,
+    );
+    els.officialPaletteSummary.textContent = usesCalibratedPalette
+      ? `这里列出这张图当前预览采用的目标/成品预计色。当前共使用 ${generatedPalette.length} 个自动量化颜色；主色块显示预览色，下面同时标出目标色和实际发送到自定义色槽的补偿色。`
+      : `这里完整列出这张图当前预览实际用到的全部颜色。当前共使用 ${generatedPalette.length} 个自动量化颜色，绘制时会按 9 槽一批写入自定义色槽。`;
     els.officialPaletteGrid.innerHTML = "";
 
-    generatedPalette.forEach((colorHex, index) => {
+    const entriesToRender =
+      paletteEntries.length > 0
+        ? paletteEntries
+        : generatedPalette.map((colorHex, index) => ({
+            colorIndex: index,
+            targetHex: colorHex,
+            calibratedHex: colorHex,
+            commandHex: colorHex,
+          }));
+
+    entriesToRender.forEach((entry, index) => {
       const cell = document.createElement("div");
       cell.className = "official-palette-cell used";
+      const displayHex = usesCalibratedPalette ? entry.targetHex : entry.calibratedHex;
 
       const swatch = document.createElement("div");
       swatch.className = "official-palette-swatch";
-      swatch.style.background = colorHex;
+      swatch.style.background = displayHex;
 
       const meta = document.createElement("div");
       meta.className = "official-palette-meta";
 
       const coord = document.createElement("span");
       coord.className = "official-palette-coord";
-      coord.textContent = `P${index}`;
+      coord.textContent = `P${entry.colorIndex ?? index}`;
 
-      const hex = document.createElement("span");
-      hex.className = "official-palette-hex";
-      hex.textContent = colorHex;
+      const predictedHex = document.createElement("span");
+      predictedHex.className = "official-palette-hex";
+      predictedHex.textContent = usesCalibratedPalette
+        ? `预览 ${displayHex}`
+        : displayHex;
 
-      meta.append(coord, hex);
+      meta.append(coord, predictedHex);
+
+      if (usesCalibratedPalette) {
+        const targetHex = document.createElement("span");
+        targetHex.className = "official-palette-coord";
+        targetHex.textContent = `发送 ${entry.calibratedHex}`;
+        meta.append(targetHex);
+      }
+
       cell.append(swatch, meta);
       els.officialPaletteGrid.appendChild(cell);
     });
@@ -3745,7 +3919,7 @@ function syncStudioUi() {
       ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 黑白脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再从画布中心继续翻译成方向键移动与 A 绘制。`
       : generatedProfile.colorMode === "official"
         ? `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 官方色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。请先保持右侧 9 个槽位默认颜色不变；开始后 ESP32 会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再按这组默认槽位状态去配置内置 7x12 色盘并继续绘制。`
-        : `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 也会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再分批把当前预览实际用到的颜色写入 9 个自定义槽位后再绘制，这条路线仍处于实验阶段，建议先从颜色较少、结构简单的图片开始。`;
+        : `当前会把按 ${generatedProfile.imageScalePercent}% 缩放、${describeImagePosition(generatedProfile.imageOffsetXPercent, generatedProfile.imageOffsetYPercent, false)}后的 256x256 自动量化多色脚本通过串口发送到 ${state.selectedPortPath}，模板为“${generatedProfile.templateLabel}”。开始后 ESP32 也会先按 X、X 打开笔刷页，从默认的 7 像素圆点笔刷自动切到 ${generatedProfile.brushSize} 像素${generatedProfile.brushShape === "round" ? "圆形像素笔刷" : "方块像素笔刷"}，并连按三次 A 完成选中和返回画布；随后会额外等待约 3 秒，再分批把用于补偿的自定义色槽颜色写入 9 个槽位后再绘制。当前主预览显示的是目标 / 成品预计色，不一定等于发送到色槽里的更深补偿色。`;
   renderStudioConnectionStatus();
   syncDesktopShellUi();
 }
@@ -3953,6 +4127,125 @@ function syncTimingLabUi() {
   renderTimingBenchmarkResult();
 }
 
+function syncCalibrationUi() {
+  const hasPort = Boolean(state.selectedPortPath);
+  const controllerReady = isControllerReadyForStudio();
+  const disabled =
+    state.calibration.busy ||
+    state.serialSession.busy ||
+    state.controller.busy ||
+    isStudioExecutionActive();
+  const sampleCount = state.calibration.samples.length;
+
+  if (!getSelectedCalibrationSample() && sampleCount > 0) {
+    state.calibration.selectedSampleId = state.calibration.samples[0]?.id ?? "";
+  }
+
+  const selectedSample = getSelectedCalibrationSample();
+  const derivedSample = selectedSample ? getDerivedCalibrationSample(selectedSample.id) : null;
+  const selectedAdjustments = selectedSample
+    ? getCalibrationSampleAdjustments(selectedSample.id)
+    : createEmptyCalibrationAdjustments();
+  const selectedFinalState = selectedSample
+    ? resolveCalibrationSampleState(selectedSample, selectedAdjustments)
+    : null;
+  const canRunCalibrationCommands = !disabled && hasPort && controllerReady && Boolean(selectedSample);
+  const canSaveGlobal =
+    !disabled &&
+    sampleCount > 0 &&
+    state.calibration.savedSampleIds.length >= sampleCount;
+  const globalCalibration = state.calibration.globalCalibration;
+  const globalEnabled = globalCalibration?.enabled !== false;
+  const globalCalibrationSource = state.calibration.globalCalibrationSource;
+
+  els.calibrationPortSelect.disabled = disabled;
+  els.calibrationRefreshPortsButton.disabled = disabled;
+  els.calibrationStartSampleButton.disabled = !canRunCalibrationCommands;
+  els.calibrationSaveSampleButton.disabled = disabled || !selectedSample;
+  els.calibrationSaveGlobalButton.disabled = !canSaveGlobal;
+  els.calibrationClearGlobalButton.disabled =
+    disabled ||
+    !state.calibration.defaultCalibration ||
+    globalCalibrationSource === "bundled-default";
+  els.calibrationExportButton.disabled = disabled || !globalCalibration;
+  els.calibrationImportButton.disabled = disabled;
+  if (els.calibrationImportInput) {
+    els.calibrationImportInput.disabled = disabled;
+  }
+  els.calibrationEnabledCheckbox.disabled = !globalCalibration || disabled;
+  els.calibrationEnabledCheckbox.checked = globalCalibration ? globalEnabled : true;
+
+  els.calibrationCurrentLabel.textContent = selectedSample?.label ?? "等待加载样本";
+  els.calibrationCurrentStatus.textContent = selectedSample
+    ? isCalibrationSampleSaved(selectedSample.id)
+      ? "已保存到本轮校准"
+      : "还未保存"
+    : "当前没有可用样本";
+  els.calibrationSavedSamplesCount.textContent = `${state.calibration.savedSampleIds.length} / ${sampleCount}`;
+
+  if (globalCalibration) {
+    const sourceLabel =
+      globalCalibrationSource === "bundled-default"
+        ? "当前使用内置默认校准"
+        : "当前使用本地覆盖校准";
+    els.calibrationGlobalStatus.textContent = globalEnabled
+      ? `${sourceLabel} · 已启用 · 更新于 ${new Date(globalCalibration.updatedAt).toLocaleString()}`
+      : `${sourceLabel} · 已保存但未启用 · 更新于 ${new Date(globalCalibration.updatedAt).toLocaleString()}`;
+  } else {
+    els.calibrationGlobalStatus.textContent = "当前还没有保存全局校准。";
+  }
+
+  els.calibrationSampleList.innerHTML = "";
+  state.calibration.samples.forEach((sample, index) => {
+    const button = document.createElement("button");
+    const saved = isCalibrationSampleSaved(sample.id);
+    const derived = getDerivedCalibrationSample(sample.id);
+    button.type = "button";
+    button.className = `calibration-sample-card${sample.id === state.calibration.selectedSampleId ? " active" : ""}${saved ? " saved" : ""}`;
+    button.dataset.calibrationSampleId = sample.id;
+
+    const title = document.createElement("strong");
+    title.textContent = `${index + 1}. ${sample.label}`;
+
+    const meta = document.createElement("span");
+    meta.className = "calibration-sample-meta";
+    meta.textContent = saved ? "已保存" : "待保存";
+
+    const detail = document.createElement("span");
+    detail.className = "calibration-sample-detail";
+    detail.textContent = derived ? `${sample.targetHex} -> ${derived.predictedHex}` : sample.targetHex;
+
+    button.append(title, meta, detail);
+    els.calibrationSampleList.appendChild(button);
+  });
+
+  const targetHex = selectedSample?.targetHex ?? "#000000";
+  const predictedHex = derivedSample?.predictedHex ?? selectedSample?.targetHex ?? "#000000";
+  els.calibrationTargetSwatch.style.background = targetHex;
+  els.calibrationTargetHex.textContent = targetHex;
+  els.calibrationPredictedSwatch.style.background = predictedHex;
+  els.calibrationPredictedHex.textContent = predictedHex;
+
+  els.calibrationAxisButtons.forEach((button) => {
+    button.disabled = !canRunCalibrationCommands;
+  });
+
+  if (!selectedSample) {
+    els.calibrationStatusHint.textContent = "正在等待校准样本加载完成。";
+  } else if (!hasPort) {
+    els.calibrationStatusHint.textContent = "先选择串口，再把 Switch 手动停在“自定义颜色编辑页”。";
+  } else if (!controllerReady) {
+    els.calibrationStatusHint.textContent = "串口已选好。先去“手柄测试”页把手柄连接到“已就绪”，再回来做颜色校准。";
+  } else if (state.calibration.busy) {
+    els.calibrationStatusHint.textContent = `正在执行样本：${selectedSample.label}。请观察 Switch 上当前颜色，执行期间不要再碰手柄。`;
+  } else {
+    const currentSteps = selectedFinalState?.finalSteps;
+    els.calibrationStatusHint.textContent = currentSteps
+      ? `先手动停在“自定义颜色编辑页”，然后重放样本；当前草稿步数为 Hue ${currentSteps.hue} / Sat ${currentSteps.saturation} / Value ${currentSteps.value}。`
+      : "先手动停在“自定义颜色编辑页”，然后点击“开始/重放当前样本”。";
+  }
+}
+
 function syncControllerUi() {
   const hasPort = Boolean(state.selectedPortPath);
   const ready = state.controller.status.readyValue === true;
@@ -3977,6 +4270,12 @@ function syncControllerUi() {
 function setTimingLabBusy(isBusy) {
   state.timingLab.busy = isBusy;
   syncTimingLabUi();
+  syncControllerUi();
+}
+
+function setCalibrationBusy(isBusy) {
+  state.calibration.busy = isBusy;
+  syncCalibrationUi();
   syncControllerUi();
 }
 
@@ -4108,6 +4407,252 @@ async function runTimingLabCommands(commands, label) {
   }
 
   return result;
+}
+
+async function runCalibrationCommands(commands, label) {
+  const result = await runTimedSerialCommands({
+    commands,
+    label,
+    logTarget: els.calibrationLogOutput,
+    setBusy: setCalibrationBusy,
+    successLabel: label,
+  });
+
+  if (result?.payload?.lines) {
+    updateControllerStatusFromLines(result.payload.lines);
+  } else {
+    await requestControllerStatus();
+  }
+
+  return result;
+}
+
+function buildCalibrationReplayCommands(sample, adjustments) {
+  const { finalSteps } = resolveCalibrationSampleState(sample, adjustments);
+  const commands = ["STICK 0 -1 1500", "STICK -1 0 3000", "HOLD ZL 2500", "W 500"];
+
+  if (finalSteps.hue > 0) {
+    commands.push(`TAP ZR ${finalSteps.hue}`);
+  }
+
+  commands.push(
+    `CFG INPUT ${CALIBRATION_PALETTE_TIMING.buttonPressDuration} ${CALIBRATION_PALETTE_TIMING.inputDelay} ${CALIBRATION_PALETTE_TIMING.homeDuration}`,
+  );
+
+  if (finalSteps.saturation > 0) {
+    commands.push(`TAP DRIGHT ${finalSteps.saturation}`);
+  }
+
+  if (finalSteps.value > 0) {
+    commands.push(`TAP DDOWN ${finalSteps.value}`);
+  }
+
+  commands.push("E");
+  return commands;
+}
+
+function buildCalibrationAxisCommands(axis, delta) {
+  const magnitude = Math.abs(delta);
+
+  if (magnitude <= 0) {
+    return [];
+  }
+
+  if (axis === "hue") {
+    return [`TAP ${delta >= 0 ? "ZR" : "ZL"} ${magnitude}`, "E"];
+  }
+
+  const directionByAxis = {
+    saturation: delta >= 0 ? "DRIGHT" : "DLEFT",
+    value: delta >= 0 ? "DDOWN" : "DUP",
+  };
+  const direction = directionByAxis[axis];
+
+  if (!direction) {
+    return [];
+  }
+
+  return [
+    `CFG INPUT ${CALIBRATION_PALETTE_TIMING.buttonPressDuration} ${CALIBRATION_PALETTE_TIMING.inputDelay} ${CALIBRATION_PALETTE_TIMING.homeDuration}`,
+    `TAP ${direction} ${magnitude}`,
+    "E",
+  ];
+}
+
+async function replaySelectedCalibrationSample() {
+  const sample = getSelectedCalibrationSample();
+
+  if (!sample) {
+    appendLog(els.calibrationLogOutput, "当前还没有可重放的校准样本。");
+    return;
+  }
+
+  const adjustments = getCalibrationSampleAdjustments(sample.id);
+  const result = await runCalibrationCommands(
+    buildCalibrationReplayCommands(sample, adjustments),
+    `重放校准样本：${sample.label}`,
+  );
+
+  if (result) {
+    appendLog(
+      els.calibrationLogOutput,
+      `样本已重放到目标位置：${sample.label} · 目标 ${sample.targetHex}`,
+    );
+  }
+}
+
+async function nudgeCalibrationAxis(axis, delta) {
+  const sample = getSelectedCalibrationSample();
+
+  if (!sample) {
+    appendLog(els.calibrationLogOutput, "请先选择一个校准样本。");
+    return;
+  }
+
+  const commands = buildCalibrationAxisCommands(axis, delta);
+
+  if (commands.length === 0) {
+    return;
+  }
+
+  const result = await runCalibrationCommands(
+    commands,
+    `微调 ${sample.label} · ${axis} ${delta > 0 ? "+" : ""}${delta}`,
+  );
+
+  if (!result) {
+    return;
+  }
+
+  const currentAdjustments = getCalibrationSampleAdjustments(sample.id);
+  const nextAdjustments = {
+    ...currentAdjustments,
+    [axis]: currentAdjustments[axis] + delta,
+  };
+  const resolvedState = resolveCalibrationSampleState(sample, nextAdjustments);
+  state.calibration.adjustmentsById = {
+    ...state.calibration.adjustmentsById,
+    [sample.id]: resolvedState.adjustments,
+  };
+  markCalibrationSampleUnsaved(sample.id);
+  await refreshCalibrationDraft({ logErrors: true });
+}
+
+async function saveSelectedCalibrationSample() {
+  const sample = getSelectedCalibrationSample();
+
+  if (!sample) {
+    appendLog(els.calibrationLogOutput, "请先选择一个校准样本。");
+    return;
+  }
+
+  markCalibrationSampleSaved(sample.id);
+  await refreshCalibrationDraft({ logErrors: true });
+  appendLog(els.calibrationLogOutput, `已保存样本：${sample.label}`);
+  syncCalibrationUi();
+}
+
+async function saveGlobalCustomColorCalibration() {
+  const totalSamples = state.calibration.samples.length;
+
+  if (totalSamples === 0) {
+    appendLog(els.calibrationLogOutput, "当前还没有可保存的校准样本。");
+    return;
+  }
+
+  if (state.calibration.savedSampleIds.length < totalSamples) {
+    appendLog(
+      els.calibrationLogOutput,
+      `还不能保存全局校准：当前仅保存了 ${state.calibration.savedSampleIds.length} / ${totalSamples} 个样本。`,
+    );
+    return;
+  }
+
+  try {
+    const calibration = await requestCalibrationDerivation({
+      enabled: els.calibrationEnabledCheckbox.checked,
+    });
+    setGlobalCustomColorCalibration(calibration, { source: "local", persist: true });
+    syncCalibrationUi();
+    scheduleStudioPreviewRefresh();
+    appendLog(
+      els.calibrationLogOutput,
+      `全局校准已保存：${els.calibrationEnabledCheckbox.checked ? "启用" : "已保存但未启用"}。`,
+    );
+  } catch (error) {
+    appendLog(els.calibrationLogOutput, `保存全局校准失败：${getErrorMessage(error)}`);
+  }
+}
+
+function updateGlobalCalibrationEnabled(enabled) {
+  if (!state.calibration.globalCalibration) {
+    syncCalibrationUi();
+    return;
+  }
+
+  const updatedCalibration = {
+    ...state.calibration.globalCalibration,
+    enabled,
+  };
+
+  setGlobalCustomColorCalibration(updatedCalibration, {
+    source: state.calibration.globalCalibrationSource,
+    persist: true,
+  });
+  syncCalibrationUi();
+  scheduleStudioPreviewRefresh();
+}
+
+async function clearGlobalCustomColorCalibration() {
+  if (state.calibration.defaultCalibration) {
+    setGlobalCustomColorCalibration(state.calibration.defaultCalibration, {
+      source: "bundled-default",
+      persist: true,
+    });
+    appendLog(els.calibrationLogOutput, "已恢复到内置默认校准。");
+  } else {
+    setGlobalCustomColorCalibration(null, { source: "none", persist: true });
+    appendLog(els.calibrationLogOutput, "未找到内置默认校准，当前已回退到线性映射。");
+  }
+
+  scheduleStudioPreviewRefresh();
+}
+
+function exportGlobalCustomColorCalibration() {
+  if (!state.calibration.globalCalibration) {
+    appendLog(els.calibrationLogOutput, "当前没有可导出的全局校准。");
+    return;
+  }
+
+  const blob = new Blob([`${JSON.stringify(state.calibration.globalCalibration, null, 2)}\n`], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = CUSTOM_COLOR_CALIBRATION_EXPORT_FILENAME;
+  link.click();
+  URL.revokeObjectURL(url);
+  appendLog(els.calibrationLogOutput, "已导出当前全局校准。");
+}
+
+async function importGlobalCustomColorCalibration(file) {
+  try {
+    const rawText = await file.text();
+    const parsed = JSON.parse(rawText);
+    const calibration = await requestCalibrationNormalization(parsed);
+
+    if (!calibration) {
+      throw new Error("导入内容不是有效的校准配置。");
+    }
+
+    setGlobalCustomColorCalibration(calibration, { source: "local", persist: true });
+    syncCalibrationUi();
+    scheduleStudioPreviewRefresh();
+    appendLog(els.calibrationLogOutput, `已导入全局校准：${file.name}`);
+  } catch (error) {
+    appendLog(els.calibrationLogOutput, `导入全局校准失败：${getErrorMessage(error)}`);
+  }
 }
 
 function buildSquareSpiralBenchmarkCommands(spiralDepth) {
@@ -4333,6 +4878,7 @@ async function refreshPorts({ log } = {}) {
     syncStudioUi();
     syncFirmwareUi();
     syncControllerUi();
+    syncCalibrationUi();
 
     if (typeof log === "function") {
       log(
@@ -4363,6 +4909,7 @@ function renderPortSelects() {
     els.firmwarePortSelect,
     els.controllerPortSelect,
     els.timingPortSelect,
+    els.calibrationPortSelect,
   ];
 
   selects.forEach((select) => {
@@ -4819,6 +5366,267 @@ function buildSharedTimingConfigCommand() {
   return `CFG INPUT ${state.sharedTiming.buttonPressDuration} ${state.sharedTiming.inputDelay} ${state.sharedTiming.homeDuration}`;
 }
 
+function createEmptyCalibrationAdjustments() {
+  return {
+    hue: 0,
+    saturation: 0,
+    value: 0,
+  };
+}
+
+function normalizeCalibrationAdjustments(value) {
+  return {
+    hue: Number.isFinite(Number(value?.hue)) ? Math.round(Number(value.hue)) : 0,
+    saturation: Number.isFinite(Number(value?.saturation)) ? Math.round(Number(value.saturation)) : 0,
+    value: Number.isFinite(Number(value?.value)) ? Math.round(Number(value.value)) : 0,
+  };
+}
+
+function getCalibrationSampleDefinition(sampleId) {
+  return state.calibration.samples.find((sample) => sample.id === sampleId) ?? null;
+}
+
+function getSelectedCalibrationSample() {
+  return getCalibrationSampleDefinition(state.calibration.selectedSampleId);
+}
+
+function getCalibrationSampleAdjustments(sampleId) {
+  return normalizeCalibrationAdjustments(state.calibration.adjustmentsById[sampleId]);
+}
+
+function resolveCalibrationSampleState(sample, adjustments = createEmptyCalibrationAdjustments()) {
+  const normalizedAdjustments = normalizeCalibrationAdjustments(adjustments);
+  const finalSteps = {
+    hue: clampNumber(
+      sample.baseSteps.hue + normalizedAdjustments.hue,
+      CALIBRATION_STEP_LIMITS.hue.min,
+      CALIBRATION_STEP_LIMITS.hue.max,
+    ),
+    saturation: clampNumber(
+      sample.baseSteps.saturation + normalizedAdjustments.saturation,
+      CALIBRATION_STEP_LIMITS.saturation.min,
+      CALIBRATION_STEP_LIMITS.saturation.max,
+    ),
+    value: clampNumber(
+      sample.baseSteps.value + normalizedAdjustments.value,
+      CALIBRATION_STEP_LIMITS.value.min,
+      CALIBRATION_STEP_LIMITS.value.max,
+    ),
+  };
+
+  return {
+    adjustments: {
+      hue: finalSteps.hue - sample.baseSteps.hue,
+      saturation: finalSteps.saturation - sample.baseSteps.saturation,
+      value: finalSteps.value - sample.baseSteps.value,
+    },
+    finalSteps,
+  };
+}
+
+function buildCalibrationAdjustmentsPayload() {
+  return state.calibration.samples.reduce((payload, sample) => {
+    payload[sample.id] = getCalibrationSampleAdjustments(sample.id);
+    return payload;
+  }, {});
+}
+
+function cloneCalibrationValue(value) {
+  if (!value) {
+    return null;
+  }
+
+  return JSON.parse(JSON.stringify(value));
+}
+
+function persistCustomColorCalibration() {
+  try {
+    if (
+      state.calibration.globalCalibration &&
+      state.calibration.globalCalibrationSource !== "bundled-default"
+    ) {
+      window.localStorage.setItem(
+        CUSTOM_COLOR_CALIBRATION_STORAGE_KEY,
+        JSON.stringify(state.calibration.globalCalibration),
+      );
+    } else {
+      window.localStorage.removeItem(CUSTOM_COLOR_CALIBRATION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures and keep the current in-memory calibration.
+  }
+}
+
+function loadStoredCustomColorCalibration() {
+  try {
+    const rawValue = window.localStorage.getItem(CUSTOM_COLOR_CALIBRATION_STORAGE_KEY);
+
+    if (!rawValue) {
+      state.calibration.globalCalibration = null;
+      state.calibration.globalCalibrationSource = "none";
+      return false;
+    }
+
+    state.calibration.globalCalibration = JSON.parse(rawValue);
+    state.calibration.globalCalibrationSource = "local";
+    return true;
+  } catch {
+    state.calibration.globalCalibration = null;
+    state.calibration.globalCalibrationSource = "none";
+    return false;
+  }
+}
+
+function hydrateCalibrationDraftFromGlobalCalibration() {
+  const calibration = state.calibration.globalCalibration;
+
+  if (!calibration || !Array.isArray(calibration.samples)) {
+    state.calibration.adjustmentsById = {};
+    state.calibration.savedSampleIds = [];
+    state.calibration.draftCalibration = null;
+    return;
+  }
+
+  state.calibration.adjustmentsById = calibration.samples.reduce((entries, sample) => {
+    entries[sample.id] = normalizeCalibrationAdjustments(sample.adjustments);
+    return entries;
+  }, {});
+  state.calibration.savedSampleIds = calibration.samples.map((sample) => sample.id);
+  state.calibration.draftCalibration = cloneCalibrationValue(calibration);
+}
+
+function setGlobalCustomColorCalibration(calibration, { source = "local", persist = true } = {}) {
+  state.calibration.globalCalibration = cloneCalibrationValue(calibration);
+  state.calibration.globalCalibrationSource = calibration ? source : "none";
+  hydrateCalibrationDraftFromGlobalCalibration();
+
+  if (persist) {
+    persistCustomColorCalibration();
+  }
+}
+
+async function loadDefaultCustomColorCalibration() {
+  try {
+    const response = await fetch("/api/custom-color-calibration/default");
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "读取内置默认校准失败");
+    }
+
+    state.calibration.defaultCalibration = payload.calibration ?? null;
+
+    if (!state.calibration.globalCalibration && state.calibration.defaultCalibration) {
+      setGlobalCustomColorCalibration(state.calibration.defaultCalibration, {
+        source: "bundled-default",
+        persist: false,
+      });
+    }
+  } catch (error) {
+    appendLog(els.calibrationLogOutput, `读取内置默认校准失败：${getErrorMessage(error)}`);
+    state.calibration.defaultCalibration = null;
+  }
+}
+
+async function requestCalibrationDerivation({
+  adjustmentsById = buildCalibrationAdjustmentsPayload(),
+  enabled = state.calibration.globalCalibration?.enabled !== false,
+} = {}) {
+  const response = await fetch("/api/custom-color-calibration/derive", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ adjustmentsById, enabled }),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "校准推导失败");
+  }
+
+  return payload.calibration ?? null;
+}
+
+async function requestCalibrationNormalization(calibration) {
+  const response = await fetch("/api/custom-color-calibration/normalize", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ calibration }),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "校准导入失败");
+  }
+
+  return payload.calibration ?? null;
+}
+
+async function refreshCalibrationDraft({ logErrors = false } = {}) {
+  try {
+    const calibration = await requestCalibrationDerivation();
+    state.calibration.draftCalibration = calibration;
+    return calibration;
+  } catch (error) {
+    if (logErrors) {
+      appendLog(els.calibrationLogOutput, `刷新校准预测失败：${getErrorMessage(error)}`);
+    }
+    return null;
+  } finally {
+    syncCalibrationUi();
+  }
+}
+
+function getDerivedCalibrationSample(sampleId) {
+  return state.calibration.draftCalibration?.samples?.find((sample) => sample.id === sampleId) ?? null;
+}
+
+function isCalibrationSampleSaved(sampleId) {
+  return state.calibration.savedSampleIds.includes(sampleId);
+}
+
+function markCalibrationSampleSaved(sampleId) {
+  if (!isCalibrationSampleSaved(sampleId)) {
+    state.calibration.savedSampleIds = [...state.calibration.savedSampleIds, sampleId];
+  }
+}
+
+function markCalibrationSampleUnsaved(sampleId) {
+  if (isCalibrationSampleSaved(sampleId)) {
+    state.calibration.savedSampleIds = state.calibration.savedSampleIds.filter((id) => id !== sampleId);
+  }
+}
+
+async function loadCalibrationSamples() {
+  try {
+    const response = await fetch("/api/custom-color-calibration/samples");
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "校准样本加载失败");
+    }
+
+    state.calibration.samples = Array.isArray(payload.samples) ? payload.samples : [];
+
+    if (!state.calibration.selectedSampleId) {
+      state.calibration.selectedSampleId = state.calibration.samples[0]?.id ?? "";
+    }
+
+    if (state.calibration.globalCalibration) {
+      hydrateCalibrationDraftFromGlobalCalibration();
+    }
+
+    if (!state.calibration.draftCalibration) {
+      await refreshCalibrationDraft();
+    } else {
+      syncCalibrationUi();
+    }
+  } catch (error) {
+    appendLog(els.calibrationLogOutput, `加载校准样本失败：${getErrorMessage(error)}`);
+    state.calibration.samples = [];
+    syncCalibrationUi();
+  }
+}
+
 function syncSharedTimingIntoStudioProfile() {
   state.studio.profile = {
     ...state.studio.profile,
@@ -4996,6 +5804,7 @@ async function init() {
     scrollToPage: window.location.hash.length > 0,
   });
   loadSharedTiming();
+  loadStoredCustomColorCalibration();
   state.studio.canvasSize = Number(els.sizeSelect.value || state.studio.canvasSize);
   state.studio.brushSize = Number(els.brushSizeSelect.value || state.studio.brushSize);
   state.timingLab.quickStep = Number(els.timingStepSelect.value || state.timingLab.quickStep);
@@ -5021,6 +5830,8 @@ async function init() {
     loadFirmwareInfo(),
     loadWindowsSerialDriversInfo(),
     loadOfficialPalette(),
+    loadDefaultCustomColorCalibration(),
+    loadCalibrationSamples(),
     loadSerialSessionStatus(),
     pollStudioExecutionStatus(),
     refreshRecoverySessions(),
@@ -5030,6 +5841,7 @@ async function init() {
   syncFirmwareUi();
   syncControllerUi();
   syncTimingLabUi();
+  syncCalibrationUi();
   renderControllerStatus();
 
   if (state.serialSession.connected && state.selectedPortPath) {

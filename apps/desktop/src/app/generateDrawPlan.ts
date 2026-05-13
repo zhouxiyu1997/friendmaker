@@ -1,12 +1,24 @@
 import type { ImageSource } from "../image/loadImage.js";
 import { getUnsupportedBrushShapeMessageForProfile } from "../brushBehavior.js";
 import { createBrushGrid, gridCellBounds, isGridCellInBounds } from "../brushGrid.js";
+import {
+  applyPaletteCalibrationToPixelMap,
+  buildPaletteCalibrationEntries,
+} from "../customColorCalibration.js";
 import { pixelizeImage } from "../image/pixelize.js";
 import { renderPreviewToBuffer } from "../image/renderPreview.js";
 import { estimateRuntimeMs, generateScanlinePlan, type PathStrategy } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
-import type { CanvasBounds, DrawingMask, DrawingProfile, PixelMap, ResumePlan } from "../types.js";
+import type {
+  CanvasBounds,
+  CustomColorCalibration,
+  DrawingMask,
+  DrawingProfile,
+  PaletteCalibrationEntry,
+  PixelMap,
+  ResumePlan,
+} from "../types.js";
 
 export interface DrawPlanPathStats {
   lineRunCount: number;
@@ -22,6 +34,9 @@ export interface DrawPlan {
   pixelMap: PixelMap;
   usedColorIndexes: number[];
   paletteHexes: string[];
+  commandPaletteHexes: string[];
+  targetPaletteHexes: string[];
+  paletteEntries: PaletteCalibrationEntry[];
   totalPixels: number;
   estimatedRuntimeMs: number;
   previewPng: Buffer;
@@ -40,6 +55,7 @@ export async function generateDrawPlan(
     removeBackground?: boolean;
     drawingMask?: DrawingMask | null;
     pathStrategy?: PathStrategy;
+    customColorCalibration?: CustomColorCalibration | null;
   },
 ): Promise<DrawPlan> {
   const unsupportedBrushShapeMessage = getUnsupportedBrushShapeMessageForProfile(profile);
@@ -48,13 +64,47 @@ export async function generateDrawPlan(
     throw new Error(unsupportedBrushShapeMessage);
   }
 
-  const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
-  const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
-  const scanlinePlan = generateScanlinePlan(pixelMap, profile, options?.pathStrategy);
+  const { pixelMap: targetPixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
+  const paletteEntries =
+    profile.colorMode === "palette"
+      ? buildPaletteCalibrationEntries(targetPixelMap, options?.customColorCalibration)
+      : [];
+  const commandPixelMap =
+    profile.colorMode === "palette"
+      ? applyPaletteCalibrationToPixelMap(targetPixelMap, paletteEntries)
+      : targetPixelMap;
+  const previewPixelMap =
+    profile.colorMode === "palette" && options?.customColorCalibration?.enabled === true
+      ? targetPixelMap
+      : commandPixelMap;
+  const previewPng = await renderPreviewToBuffer(previewPixelMap, profile, previewScale);
+  const scanlinePlan = generateScanlinePlan(commandPixelMap, profile, options?.pathStrategy);
   const drawCommands = scanlinePlan.commands;
-  const imageBounds = calculateCanvasBounds(pixelMap, profile);
+  const imageBounds = calculateCanvasBounds(previewPixelMap, profile);
   const pathStats = calculatePathStats(drawCommands);
-  const paletteHexes = Array.from(
+  const paletteHexes = collectPaletteHexes(previewPixelMap);
+  const commandPaletteHexes = collectPaletteHexes(commandPixelMap);
+  const targetPaletteHexes = collectPaletteHexes(targetPixelMap);
+
+  return {
+    commands: serializeCommands(drawCommands),
+    resumePlan: scanlinePlan.resumePlan,
+    pixelMap: commandPixelMap,
+    usedColorIndexes,
+    paletteHexes,
+    commandPaletteHexes,
+    targetPaletteHexes,
+    paletteEntries,
+    totalPixels: countDrawablePixels(commandPixelMap),
+    estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),
+    previewPng,
+    imageBounds,
+    pathStats,
+  };
+}
+
+function collectPaletteHexes(pixelMap: PixelMap): string[] {
+  return Array.from(
     pixelMap
       .flatMap((row) =>
         row
@@ -66,19 +116,6 @@ export async function generateDrawPlan(
   )
     .sort((a, b) => a[0] - b[0])
     .map(([, colorHex]) => colorHex);
-
-  return {
-    commands: serializeCommands(drawCommands),
-    resumePlan: scanlinePlan.resumePlan,
-    pixelMap,
-    usedColorIndexes,
-    paletteHexes,
-    totalPixels: countDrawablePixels(pixelMap),
-    estimatedRuntimeMs: estimateRuntimeMs(drawCommands, profile),
-    previewPng,
-    imageBounds,
-    pathStats,
-  };
 }
 
 function countDrawablePixels(pixelMap: PixelMap): number {

@@ -91,6 +91,17 @@
                 <small class="page-tab-meta">Timing、试按、长测</small>
               </span>
             </button>
+            <button class="page-tab" data-page-target="calibration" type="button">
+              <svg class="page-tab-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 18h16" />
+                <path d="M7 15V8l5-4 5 4v7" />
+                <path d="M10 14h4" />
+              </svg>
+              <span class="page-tab-copy">
+                <span class="page-tab-title">颜色校准</span>
+                <small class="page-tab-meta">自定义色、采样、保存</small>
+              </span>
+            </button>
           </nav>
 
           <div class="sidebar-status" aria-label="硬件状态">
@@ -1225,6 +1236,166 @@
             </div>
 
             <pre id="timing-log-output" class="log-output" data-empty-log="等待开始调试...">等待开始调试...</pre>
+          </section>
+        </main>
+      </section>
+
+      <section class="page" data-page="calibration">
+        <main class="controller-grid calibration-grid">
+          <section class="panel calibration-guide-panel">
+            <div class="panel-head">
+              <h2>校准向导</h2>
+              <p>这套流程只服务“自定义多色”。先手动停在 Switch 的自定义颜色编辑页，再在这里重放样本、微调并保存。</p>
+            </div>
+
+            <div class="execution-box mono-note-box">
+              <div class="panel-head compact">
+                <h2>当前状态</h2>
+                <p id="calibration-global-status">当前还没有保存全局校准。</p>
+              </div>
+
+              <div class="firmware-meta-list">
+                <div class="firmware-meta-row">
+                  <dt>当前样本</dt>
+                  <dd id="calibration-current-label">等待加载样本</dd>
+                </div>
+                <div class="firmware-meta-row">
+                  <dt>样本状态</dt>
+                  <dd id="calibration-current-status">-</dd>
+                </div>
+                <div class="firmware-meta-row">
+                  <dt>已保存</dt>
+                  <dd id="calibration-saved-samples-count">0 / 0</dd>
+                </div>
+              </div>
+            </div>
+
+            <div class="execution-box mono-note-box">
+              <div class="panel-head compact">
+                <h2>默认说明</h2>
+                <p>当前内置默认校准来自作者本人设备的手工调整。如果你认为自己调出的颜色更准确，欢迎联系作者更新默认配置。</p>
+              </div>
+            </div>
+
+            <div class="panel-head compact">
+              <h2>固定样本</h2>
+              <p>第一版固定 9 个样本。点一项后再重放到 Switch 当前编辑页。</p>
+            </div>
+
+            <div id="calibration-sample-list" class="calibration-sample-list" aria-label="校准样本列表"></div>
+          </section>
+
+          <section class="panel calibration-controls-panel">
+            <div class="panel-head">
+              <h2>微调控制</h2>
+              <p>左边是目标色，右边是当前草稿预计色。重放样本后，用下面的按钮对当前样本做人工微调。</p>
+            </div>
+
+            <div class="calibration-swatch-grid">
+              <article class="calibration-swatch-card">
+                <span>目标色</span>
+                <div id="calibration-target-swatch" class="calibration-swatch"></div>
+                <strong id="calibration-target-hex">#000000</strong>
+              </article>
+
+              <article class="calibration-swatch-card">
+                <span>校准后预计色</span>
+                <div id="calibration-predicted-swatch" class="calibration-swatch"></div>
+                <strong id="calibration-predicted-hex">#000000</strong>
+              </article>
+            </div>
+
+            <div class="panel-head compact">
+              <h2>轴向微调</h2>
+              <p>每次只改一小步。`Hue` 走共享 timing，`Saturation / Value` 会自动切到调色盘固定节奏。</p>
+            </div>
+
+            <div class="calibration-axis-grid">
+              <article class="execution-box calibration-axis-card">
+                <strong>Hue</strong>
+                <div class="action-row slim calibration-button-row">
+                  <button class="ghost" type="button" data-calibration-axis="hue" data-calibration-delta="-5">-5</button>
+                  <button class="ghost" type="button" data-calibration-axis="hue" data-calibration-delta="-1">-1</button>
+                  <button class="ghost" type="button" data-calibration-axis="hue" data-calibration-delta="1">+1</button>
+                  <button class="ghost" type="button" data-calibration-axis="hue" data-calibration-delta="5">+5</button>
+                </div>
+              </article>
+
+              <article class="execution-box calibration-axis-card">
+                <strong>Saturation</strong>
+                <div class="action-row slim calibration-button-row">
+                  <button class="ghost" type="button" data-calibration-axis="saturation" data-calibration-delta="-5">-5</button>
+                  <button class="ghost" type="button" data-calibration-axis="saturation" data-calibration-delta="-1">-1</button>
+                  <button class="ghost" type="button" data-calibration-axis="saturation" data-calibration-delta="1">+1</button>
+                  <button class="ghost" type="button" data-calibration-axis="saturation" data-calibration-delta="5">+5</button>
+                </div>
+              </article>
+
+              <article class="execution-box calibration-axis-card">
+                <strong>Value</strong>
+                <div class="action-row slim calibration-button-row">
+                  <button class="ghost" type="button" data-calibration-axis="value" data-calibration-delta="-5">-5</button>
+                  <button class="ghost" type="button" data-calibration-axis="value" data-calibration-delta="-1">-1</button>
+                  <button class="ghost" type="button" data-calibration-axis="value" data-calibration-delta="1">+1</button>
+                  <button class="ghost" type="button" data-calibration-axis="value" data-calibration-delta="5">+5</button>
+                </div>
+              </article>
+            </div>
+
+            <div class="panel-head compact">
+              <h2>设备执行</h2>
+              <p>重放当前样本会先归位到统一起点，再把草稿步数完整走一遍。</p>
+            </div>
+
+            <div class="field-grid">
+              <label>
+                <span>当前串口</span>
+                <select id="calibration-port-select">
+                  <option value="">未检测到串口</option>
+                </select>
+              </label>
+
+              <label class="checkbox-card" for="calibration-enabled-checkbox">
+                <input id="calibration-enabled-checkbox" type="checkbox" />
+                <span class="checkbox-copy">
+                  <strong>启用这份全局校准</strong>
+                  <small>保存后，脚本生成里的“自定义多色”会自动带上它。</small>
+                </span>
+              </label>
+            </div>
+
+            <p id="calibration-status-hint" class="hint">先手动停在“自定义颜色编辑页”，再开始重放样本。</p>
+
+            <div class="action-row">
+              <button id="calibration-refresh-ports-button" class="ghost" type="button">刷新串口</button>
+              <button id="calibration-start-sample-button" class="primary" type="button">开始 / 重放当前样本</button>
+              <button id="calibration-save-sample-button" class="ghost" type="button">保存当前样本</button>
+            </div>
+
+            <div class="action-row">
+              <button id="calibration-save-global-button" class="primary" type="button">保存全局校准</button>
+              <button id="calibration-clear-global-button" class="ghost" type="button">恢复内置默认校准</button>
+            </div>
+
+            <div class="action-row">
+              <button id="calibration-export-button" class="ghost" type="button">导出当前校准</button>
+              <button id="calibration-import-button" class="ghost" type="button">导入校准文件</button>
+            </div>
+
+            <input id="calibration-import-input" type="file" accept="application/json,.json" class="hidden" />
+          </section>
+
+          <section class="panel calibration-log-panel">
+            <div class="panel-head">
+              <h2>校准日志</h2>
+              <p>这里会显示样本重放、微调和保存过程里的设备返回。</p>
+            </div>
+
+            <div class="action-row slim log-toolbar">
+              <button id="calibration-clear-log-button" class="ghost" type="button">清空日志</button>
+            </div>
+
+            <pre id="calibration-log-output" class="log-output" data-empty-log="等待开始校准...">等待开始校准...</pre>
           </section>
         </main>
       </section>

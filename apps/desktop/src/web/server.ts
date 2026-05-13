@@ -17,6 +17,12 @@ import { DEFAULT_ACK_TIMEOUT_MS } from "../config/defaultProfile.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
 import {
+  deriveCustomColorCalibration,
+  getDefaultCustomColorCalibration,
+  getCustomColorCalibrationSamples,
+  normalizeCustomColorCalibration,
+} from "../customColorCalibration.js";
+import {
   getDrawingTemplateDefinition,
   listDrawingTemplates,
   loadDrawingTemplateMask,
@@ -35,7 +41,7 @@ import {
   type SerialSessionSnapshot,
 } from "../serial/sender.js";
 import { SimulatedAckSender } from "../simulator/sender.js";
-import type { ResumePlan, SenderControls } from "../types.js";
+import type { PaletteCalibrationSteps, ResumePlan, SenderControls } from "../types.js";
 import {
   RecoverySessionStore,
   applyRecoveryProgress,
@@ -1318,6 +1324,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     removeBackground?: boolean;
     inputDelay?: number;
     buttonPressDuration?: number;
+    customColorCalibration?: unknown;
   };
 
   if (!body.imageDataUrl) {
@@ -1374,6 +1381,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       imageOffsetYPercent,
       removeBackground: body.removeBackground === true,
       drawingMask,
+      customColorCalibration: normalizeCustomColorCalibration(body.customColorCalibration),
     },
   );
 
@@ -1393,6 +1401,8 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       colorCount: profile.colorCount,
       removeBackground: body.removeBackground === true,
       palette: plan.paletteHexes,
+      targetPalette: plan.targetPaletteHexes,
+      paletteEntries: plan.paletteEntries,
       baudRate: profile.baudRate,
       ackTimeoutMs: profile.ackTimeoutMs,
       commandRetryCount: profile.commandRetryCount,
@@ -1413,6 +1423,51 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     commands: plan.commands,
     resumePlan: plan.resumePlan,
   });
+}
+
+function handleCustomColorCalibrationSamples(response: ServerResponse): void {
+  json(response, 200, {
+    samples: getCustomColorCalibrationSamples(),
+  });
+}
+
+function handleDefaultCustomColorCalibration(response: ServerResponse): void {
+  json(response, 200, {
+    calibration: getDefaultCustomColorCalibration(),
+  });
+}
+
+async function handleCustomColorCalibrationDerive(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    adjustmentsById?: Record<string, Partial<PaletteCalibrationSteps> | undefined>;
+    enabled?: boolean;
+  };
+
+  const adjustmentsById =
+    body.adjustmentsById && typeof body.adjustmentsById === "object" ? body.adjustmentsById : {};
+  const calibration = deriveCustomColorCalibration(adjustmentsById);
+  calibration.enabled = body.enabled !== false;
+  json(response, 200, { calibration });
+}
+
+async function handleCustomColorCalibrationNormalize(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(request)) as {
+    calibration?: unknown;
+  };
+  const calibration = normalizeCustomColorCalibration(body.calibration);
+
+  if (!calibration) {
+    json(response, 400, { error: "Invalid custom color calibration payload." });
+    return;
+  }
+
+  json(response, 200, { calibration });
 }
 
 function handleDrawingTemplates(response: ServerResponse): void {
@@ -2290,6 +2345,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
     if (request.method === "GET" && url.pathname === "/api/official-palette") {
       handleOfficialPalette(response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/custom-color-calibration/samples") {
+      handleCustomColorCalibrationSamples(response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/custom-color-calibration/default") {
+      handleDefaultCustomColorCalibration(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/custom-color-calibration/derive") {
+      await handleCustomColorCalibrationDerive(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/custom-color-calibration/normalize") {
+      await handleCustomColorCalibrationNormalize(request, response);
       return;
     }
 

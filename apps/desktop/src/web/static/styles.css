@@ -486,6 +486,17 @@ textarea:disabled {
     minmax(140px, var(--layout-timing-row-3, 0.42fr));
 }
 
+.calibration-grid {
+  grid-template-columns:
+    minmax(300px, 1fr)
+    var(--splitter-size)
+    minmax(320px, 1.05fr);
+  grid-template-rows:
+    minmax(260px, 1fr)
+    var(--splitter-size)
+    minmax(180px, 0.62fr);
+}
+
 .panel {
   display: grid;
   align-content: start;
@@ -664,6 +675,21 @@ textarea:disabled {
 .timing-log-panel {
   grid-column: 1 / -1;
   grid-row: 5;
+}
+
+.calibration-guide-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.calibration-controls-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.calibration-log-panel {
+  grid-column: 1 / -1;
+  grid-row: 3;
 }
 
 .panel-firmware-actions,
@@ -1452,7 +1478,8 @@ input[type="range"] {
 .panel-log,
 .firmware-log-panel,
 .controller-log-panel,
-.timing-log-panel {
+.timing-log-panel,
+.calibration-log-panel {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
@@ -1494,6 +1521,97 @@ input[type="range"] {
   overflow-wrap: anywhere;
   color: var(--text);
   font-size: 12px;
+}
+
+.calibration-sample-list {
+  display: grid;
+  gap: 8px;
+}
+
+.calibration-sample-card {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.calibration-sample-card:hover {
+  border-color: rgba(168, 138, 110, 0.42);
+  background: var(--surface-muted);
+}
+
+.calibration-sample-card.active {
+  border-color: var(--primary);
+  background: rgba(245, 229, 176, 0.42);
+}
+
+.calibration-sample-card.saved {
+  box-shadow: inset 0 0 0 1px rgba(46, 123, 78, 0.28);
+}
+
+.calibration-sample-card strong {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.calibration-sample-meta,
+.calibration-sample-detail {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.calibration-swatch-grid,
+.calibration-axis-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.calibration-swatch-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.calibration-axis-card,
+.calibration-swatch-card {
+  display: grid;
+  gap: 8px;
+}
+
+.calibration-swatch-card span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.calibration-swatch-card strong,
+.calibration-axis-card strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.calibration-swatch {
+  min-height: 88px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.calibration-button-row {
+  justify-content: stretch;
+}
+
+.calibration-button-row > button {
+  flex: 1 1 0;
 }
 
 .controller-test-layout {
