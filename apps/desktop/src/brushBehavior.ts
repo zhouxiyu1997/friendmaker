@@ -1,4 +1,11 @@
-import { moveCommand, pressButtonCommand, waitCommand, type DrawCommand } from "./protocol/commands.js";
+import {
+  inputConfigCommand,
+  moveCommand,
+  pressButtonCommand,
+  waitCommand,
+  type DrawCommand,
+} from "./protocol/commands.js";
+import { DEFAULT_SAFE_INPUT_TIMING } from "./protocol/timing.js";
 import type { BrushShape, BrushSize, DrawingProfile } from "./types.js";
 
 const BRUSH_PICKER_EXIT_SETTLE_MS = 3_000;
@@ -53,7 +60,10 @@ export function getUnsupportedBrushShapeMessageForProfile(
 }
 
 export function buildAutomaticBrushSetupCommands(
-  profile: Pick<DrawingProfile, "brushSize" | "brushShape">,
+  profile: Pick<
+    DrawingProfile,
+    "brushSize" | "brushShape" | "buttonPressDuration" | "inputDelay" | "homeDuration"
+  >,
 ): DrawCommand[] {
   // Assumption: after pressing X twice, the brush picker opens with the 7px
   // round brush focused at row 0 / column 2. The current UI then lays out
@@ -65,7 +75,27 @@ export function buildAutomaticBrushSetupCommands(
   const targetRow = BRUSH_SELECTOR_ROW_BY_SHAPE[profile.brushShape];
   const dx = targetColumn - DEFAULT_BRUSH_SELECTOR_COLUMN;
   const dy = targetRow - DEFAULT_BRUSH_SELECTOR_ROW;
-  const commands: DrawCommand[] = [pressButtonCommand("X"), pressButtonCommand("X")];
+  const brushSetupButtonPressMs = Math.max(
+    profile.buttonPressDuration,
+    DEFAULT_SAFE_INPUT_TIMING.buttonPressMs,
+  );
+  const brushSetupInputDelayMs = Math.max(profile.inputDelay, DEFAULT_SAFE_INPUT_TIMING.inputDelayMs);
+  const needsBrushSetupTimingOverride =
+    brushSetupButtonPressMs !== profile.buttonPressDuration ||
+    brushSetupInputDelayMs !== profile.inputDelay;
+  const commands: DrawCommand[] = [];
+
+  if (needsBrushSetupTimingOverride) {
+    commands.push(
+      inputConfigCommand(
+        brushSetupButtonPressMs,
+        brushSetupInputDelayMs,
+        profile.homeDuration,
+      ),
+    );
+  }
+
+  commands.push(pressButtonCommand("X"), pressButtonCommand("X"));
 
   if (dx !== 0 || dy !== 0) {
     commands.push(moveCommand(dx, dy));
@@ -75,5 +105,16 @@ export function buildAutomaticBrushSetupCommands(
   commands.push(pressButtonCommand("A"));
   commands.push(pressButtonCommand("A"));
   commands.push(waitCommand(BRUSH_PICKER_EXIT_SETTLE_MS));
+
+  if (needsBrushSetupTimingOverride) {
+    commands.push(
+      inputConfigCommand(
+        profile.buttonPressDuration,
+        profile.inputDelay,
+        profile.homeDuration,
+      ),
+    );
+  }
+
   return commands;
 }

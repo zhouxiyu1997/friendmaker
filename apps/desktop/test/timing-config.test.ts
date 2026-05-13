@@ -6,6 +6,7 @@ import test from "node:test";
 
 import sharp from "sharp";
 
+import { buildAutomaticBrushSetupCommands } from "../src/brushBehavior.js";
 import { buildRecoveryExecutionPlan } from "../src/app/recovery.js";
 import { DEFAULT_ACK_TIMEOUT_MS } from "../src/config/defaultProfile.js";
 import { loadProfile } from "../src/config/loadProfile.js";
@@ -77,6 +78,30 @@ async function solidPngDataUrl(width: number, height: number): Promise<string> {
   return `data:image/png;base64,${buffer.toString("base64")}`;
 }
 
+test("brush setup can temporarily slow down fast shared timing", () => {
+  const commands = serializeCommands(
+    buildAutomaticBrushSetupCommands({
+      brushSize: 27,
+      brushShape: "square",
+      buttonPressDuration: 56,
+      inputDelay: 43,
+      homeDuration: 1800,
+    }),
+  );
+
+  assert.deepEqual(commands, [
+    "CFG INPUT 100 100 1800",
+    "BTN X",
+    "BTN X",
+    "M 3 1",
+    "BTN A",
+    "BTN A",
+    "BTN A",
+    "W 3000",
+    "CFG INPUT 56 43 1800",
+  ]);
+});
+
 test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
   const profile = makeProfile({
     inputDelay: 170,
@@ -94,10 +119,30 @@ test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
   });
 
   assert.equal(commands[0], "CFG INPUT 65 170 2400");
-  assert.deepEqual(commands.slice(1, 8), ["BTN X", "BTN X", "M -1 1", "BTN A", "BTN A", "BTN A", "W 3000"]);
+  assert.deepEqual(commands.slice(1, 10), [
+    "CFG INPUT 100 170 2400",
+    "BTN X",
+    "BTN X",
+    "M -1 1",
+    "BTN A",
+    "BTN A",
+    "BTN A",
+    "W 3000",
+    "CFG INPUT 65 170 2400",
+  ]);
   assert.equal(scanlinePlan.resumePlan.inputConfigCommand, "CFG INPUT 65 170 2400");
   assert.equal(recoveryPlan.commands[0], "CFG INPUT 65 170 2400");
-  assert.deepEqual(recoveryPlan.commands.slice(1, 8), ["BTN X", "BTN X", "M -1 1", "BTN A", "BTN A", "BTN A", "W 3000"]);
+  assert.deepEqual(recoveryPlan.commands.slice(1, 10), [
+    "CFG INPUT 100 170 2400",
+    "BTN X",
+    "BTN X",
+    "M -1 1",
+    "BTN A",
+    "BTN A",
+    "BTN A",
+    "W 3000",
+    "CFG INPUT 65 170 2400",
+  ]);
 });
 
 test("/api/generate echoes timing overrides into commands and estimated runtime", async (t) => {
