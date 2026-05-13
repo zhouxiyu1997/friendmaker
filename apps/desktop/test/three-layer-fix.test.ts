@@ -482,9 +482,15 @@ test("serial sender probes fresh ESP32 serial sessions before first sequenced co
 test("palette-config commands get enough timeout for calibrated custom colors", () => {
   const timing = { buttonPressMs: 100, inputDelayMs: 100, homeMs: 1800 };
 
-  assert.equal(getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing), 45_380);
-  assert.equal(getAckTimeoutForCommand("PC 2 #00FF00", 20_000, timing), 80_820);
-  assert.equal(getAckTimeoutForCommand("PC 6 #000000", 20_000, timing), 35_320);
+  assert.equal(getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing), 53_380);
+  assert.equal(getAckTimeoutForCommand("PC 2 #00FF00", 20_000, timing), 88_820);
+  assert.equal(getAckTimeoutForCommand("PC 6 #000000", 20_000, timing), 43_320);
+});
+
+test("palette-config timeout covers long warm-color slots on default shared timing", () => {
+  const timing = { buttonPressMs: 65, inputDelayMs: 45, homeMs: 1800 };
+
+  assert.ok(getAckTimeoutForCommand("PC 1 #B62C00", 5_000, timing) > 78_536);
 });
 
 test("controller input report failures are not retried", async () => {
