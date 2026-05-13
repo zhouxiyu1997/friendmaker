@@ -63,6 +63,34 @@ test("default custom color calibration is valid and clone-safe", () => {
   assert.deepEqual(normalized, calibration);
 });
 
+test("normalizeCustomColorCalibration rebuilds canonical calibration from imported sample adjustments", () => {
+  const calibration = deriveCustomColorCalibration({
+    brown: { saturation: 7, value: 9 },
+    skin: { value: 4 },
+  });
+  const imported = JSON.parse(JSON.stringify(calibration));
+  imported.samples[0].predictedHex = "#zzzzzz";
+  imported.derivedModel.problemAnchors[0].delta.hue = "oops";
+  imported.derivedModel.lowSaturationThreshold = null;
+
+  const normalized = normalizeCustomColorCalibration(imported);
+
+  assert.deepEqual(normalized, calibration);
+});
+
+test("normalizeCustomColorCalibration rejects malformed imported sample adjustments", () => {
+  const calibration = getDefaultCustomColorCalibration();
+  const malformedAdjustment = JSON.parse(JSON.stringify(calibration));
+  malformedAdjustment.samples[0].adjustments.hue = "oops";
+
+  assert.equal(normalizeCustomColorCalibration(malformedAdjustment), null);
+
+  const missingSample = JSON.parse(JSON.stringify(calibration));
+  missingSample.samples.pop();
+
+  assert.equal(normalizeCustomColorCalibration(missingSample), null);
+});
+
 test("default custom color calibration leaves neutral whites and grays unchanged", () => {
   const calibration = getDefaultCustomColorCalibration();
   const pureWhite = applyCustomColorCalibrationToHex("#ffffff", calibration);

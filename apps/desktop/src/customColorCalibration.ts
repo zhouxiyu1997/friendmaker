@@ -439,6 +439,85 @@ function findSampleDefinition(id: string): CustomColorCalibrationSampleDefinitio
   return SAMPLE_DEFINITIONS.find((sample) => sample.id === id);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeCalibrationAdjustments(value: unknown): PaletteCalibrationSteps | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const hue = value.hue;
+  const saturation = value.saturation;
+  const brightness = value.value;
+
+  if (
+    typeof hue !== "number" ||
+    typeof saturation !== "number" ||
+    typeof brightness !== "number" ||
+    !Number.isFinite(hue) ||
+    !Number.isFinite(saturation) ||
+    !Number.isFinite(brightness)
+  ) {
+    return null;
+  }
+
+  return {
+    hue: Math.round(hue),
+    saturation: Math.round(saturation),
+    value: Math.round(brightness),
+  };
+}
+
+function normalizeCalibrationUpdatedAt(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  return new Date(timestamp).toISOString();
+}
+
+function normalizeImportedCalibrationAdjustments(
+  value: unknown,
+): Record<string, PaletteCalibrationSteps> | null {
+  if (!Array.isArray(value) || value.length !== SAMPLE_DEFINITIONS.length) {
+    return null;
+  }
+
+  const adjustmentsById: Record<string, PaletteCalibrationSteps> = {};
+  const seenSampleIds = new Set<string>();
+
+  for (const sample of value) {
+    if (!isRecord(sample) || typeof sample.id !== "string") {
+      return null;
+    }
+
+    const definition = findSampleDefinition(sample.id);
+
+    if (!definition || seenSampleIds.has(sample.id)) {
+      return null;
+    }
+
+    const adjustments = normalizeCalibrationAdjustments(sample.adjustments);
+
+    if (!adjustments) {
+      return null;
+    }
+
+    adjustmentsById[sample.id] = adjustments;
+    seenSampleIds.add(sample.id);
+  }
+
+  return seenSampleIds.size === SAMPLE_DEFINITIONS.length ? adjustmentsById : null;
+}
+
 function wrapHueDistance(a: number, b: number): number {
   const distance = Math.abs(a - b) % 360;
   return distance > 180 ? 360 - distance : distance;
@@ -658,24 +737,22 @@ export function deriveCustomColorCalibration(
 export function normalizeCustomColorCalibration(
   value: unknown,
 ): CustomColorCalibration | null {
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value)) {
     return null;
   }
 
   const candidate = value as Partial<CustomColorCalibration>;
+  const updatedAt = normalizeCalibrationUpdatedAt(candidate.updatedAt);
+  const adjustmentsById = normalizeImportedCalibrationAdjustments(candidate.samples);
 
-  if (
-    candidate.version !== 1 ||
-    typeof candidate.enabled !== "boolean" ||
-    !Array.isArray(candidate.samples) ||
-    !candidate.derivedModel ||
-    !Array.isArray(candidate.derivedModel.hueAnchors) ||
-    !Array.isArray(candidate.derivedModel.problemAnchors)
-  ) {
+  if (candidate.version !== 1 || typeof candidate.enabled !== "boolean" || !updatedAt || !adjustmentsById) {
     return null;
   }
 
-  return cloneCustomColorCalibration(candidate as CustomColorCalibration);
+  const calibration = deriveCustomColorCalibration(adjustmentsById);
+  calibration.enabled = candidate.enabled;
+  calibration.updatedAt = updatedAt;
+  return calibration;
 }
 
 export function applyCustomColorCalibrationToHex(
