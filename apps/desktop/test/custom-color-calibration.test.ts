@@ -63,6 +63,20 @@ test("default custom color calibration is valid and clone-safe", () => {
   assert.deepEqual(normalized, calibration);
 });
 
+test("default custom color calibration leaves neutral whites and grays unchanged", () => {
+  const calibration = getDefaultCustomColorCalibration();
+  const pureWhite = applyCustomColorCalibrationToHex("#ffffff", calibration);
+  const offWhite = applyCustomColorCalibrationToHex("#f2f4f7", calibration);
+  const lightGray = applyCustomColorCalibrationToHex("#d6d6d6", calibration);
+  const warmGray = applyCustomColorCalibrationToHex("#82756c", calibration);
+
+  assert.deepEqual(pureWhite.finalSteps, pureWhite.targetSteps);
+  assert.equal(pureWhite.commandHex, "#ffffff");
+  assert.deepEqual(offWhite.finalSteps, offWhite.targetSteps);
+  assert.deepEqual(lightGray.finalSteps, lightGray.targetSteps);
+  assert.notDeepEqual(warmGray.finalSteps, warmGray.targetSteps);
+});
+
 test("/api/custom-color-calibration routes expose samples and derived calibration", async (t) => {
   const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-calibration-api-"));
   const server = await startWebServer({ port: 0, recoverySessionsRoot });

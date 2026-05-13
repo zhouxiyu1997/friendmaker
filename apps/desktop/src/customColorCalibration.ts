@@ -12,6 +12,7 @@ import { normalizeHexColor, parseHexColor, rgbToHex } from "./utils/colors.js";
 const HUE_STEP_COUNT = 200;
 const SATURATION_STEP_COUNT = 213;
 const VALUE_STEP_COUNT = 112;
+const ACHROMATIC_SATURATION_THRESHOLD = 0.04;
 const LOW_SATURATION_THRESHOLD = 0.28;
 const PROBLEM_BLEND_RADIUS = 0.42;
 const HUE_BIAS_WEIGHT = 0.65;
@@ -548,6 +549,14 @@ function getCalibrationDeltasForHex(
 ): PaletteCalibrationSteps {
   const { r, g, b } = parseHexColor(targetHex);
   const hsv = rgbToHsv(r, g, b);
+
+  // Pure whites/grays do not have a meaningful hue in the in-game editor.
+  // Treat them as neutral so the warm-color calibration anchors do not tint
+  // them pink or brown.
+  if (hsv.saturation <= ACHROMATIC_SATURATION_THRESHOLD) {
+    return { hue: 0, saturation: 0, value: 0 };
+  }
+
   const chromaticDelta = weightSteps(
     interpolateCircularHueAnchors(hsv.hue, calibration.derivedModel.hueAnchors),
     {
