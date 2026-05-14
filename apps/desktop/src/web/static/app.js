@@ -13,6 +13,7 @@ document.documentElement.dataset.platform = window.friendMakerWindow?.platform ?
 
 const PANEL_LAYOUT_STORAGE_KEY = "friendmaker.panelLayout.v1";
 const PANEL_LAYOUT_RATIO_MIN = 0.08;
+const STUDIO_PREVIEW_COLUMN_MIN_PX = 568;
 
 const PANEL_LAYOUTS = {
   studio: {
@@ -20,7 +21,7 @@ const PANEL_LAYOUTS = {
       count: 3,
       vars: ["--layout-studio-col-1", "--layout-studio-col-2", "--layout-studio-col-3"],
       defaults: [0.95, 1, 0.82],
-      minPixels: [250, 240, 190],
+      minPixels: [250, STUDIO_PREVIEW_COLUMN_MIN_PX, 190],
     },
     rows: {
       count: 2,
@@ -290,6 +291,7 @@ const els = {
   titlePortStatus: document.getElementById("title-port-status"),
   workspaceTitle: document.getElementById("workspace-title"),
   workspaceStatus: document.getElementById("workspace-status"),
+  workspaceContent: document.querySelector(".workspace-content"),
   sidebarPortDot: document.getElementById("sidebar-port-dot"),
   sidebarControllerDot: document.getElementById("sidebar-controller-dot"),
   sidebarPortStatus: document.getElementById("sidebar-port-status"),
@@ -2542,8 +2544,10 @@ function switchPage(pageName, options = {}) {
 
   if (scrollToPage) {
     const activePage = findPageElement(nextPageName);
+    els.workspaceContent?.scrollTo?.({ left: 0, top: 0, behavior: "smooth" });
+    els.workspaceContent && (els.workspaceContent.scrollLeft = 0);
     activePage?.scrollTo?.({ top: 0, behavior: "smooth" });
-    activePage?.querySelectorAll(".panel").forEach((panel) => {
+    activePage?.querySelectorAll(".panel, .preview-column").forEach((panel) => {
       panel.scrollTop = 0;
       panel.scrollLeft = 0;
     });
