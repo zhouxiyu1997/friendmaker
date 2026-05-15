@@ -4,7 +4,7 @@
 
 Version: v0.2
 Status: Alpha trial
-Updated: 2026-05-07
+Updated: 2026-05-14
 
 ## 1. Product overview
 
@@ -201,7 +201,7 @@ The current alpha should satisfy at least the following:
 2. Confirm controller status quickly
 3. Import a new image
 4. Choose `mono drawing`, `official palette drawing`, or `custom multicolor`
-5. Confirm brush size, center-start assumption, template selection, and official-palette slot assumptions
+5. Confirm the selected web brush preset, center-start assumption, template selection, and official-palette slot assumptions
 6. Start drawing and watch progress through logs and recovery state
 
 ## 9. Technical and scene assumptions
@@ -209,8 +209,8 @@ The current alpha should satisfy at least the following:
 The current mainline is built on these fixed assumptions:
 
 - the target canvas is modeled as `256x256` script coordinates
+- before drawing starts, Friend Maker switches to the brush selected in the web UI automatically
 - before drawing starts, the brush / cursor is already at the center of the canvas
-- the brush size inside `Switch` has already been changed manually to match the web UI
 - using the square brush is recommended
 - `A` performs drawing
 - the D-pad performs one-cell movement
@@ -225,6 +225,27 @@ These are not the final product shape. They are the current engineering boundari
 - `custom multicolor` is already available as a formal feature, but color fidelity and long-run stability still need more work
 - the desktop app still depends on successful local `PlatformIO`, toolchain, and upstream download preparation
 - packaged installation flow and error messaging still need more polish, especially on `Windows`
+
+### 10.1 Planned color-difference adjustment strategy
+
+This section records the intended adjustment boundary for future work on the gap between `web preview colors` and `actual Switch appearance`, so later tuning work can follow one consistent product direction.
+
+This does not mean the current alpha already has visual closed-loop calibration, and it does not change the explicit non-goals in section 7.2 around automatic visual calibration or exact custom-color auto tuning.
+
+- the goal is not absolute color accuracy for arbitrary images; the goal is to make `official palette drawing` and `custom multicolor` look closer to the web preview without adding a camera-based feedback loop, while keeping runs repeatable
+- priority should go to `official palette drawing` first, then `custom multicolor`; `mono drawing` is not the main target of this round of color-difference tuning
+- the adjustment chain should be split into two stages:
+  - `perceptual color-difference matching`: gradually move from the current engineering-oriented RGB distance toward a matching strategy that is closer to human perception, so obvious wrong-color picks are reduced first
+  - `in-game appearance compensation`: once a candidate color is selected, apply rules that compensate for how the game actually displays color, such as dark-tone protection, low-saturation protection, warm-tone bias, and highlight compression
+- `official palette drawing` should eventually maintain a versioned `84-color calibration table`, so each official color can store both a preview reference and an on-device compensation conclusion / weight; future adjustments should prefer table updates instead of scattering hard-coded fixes
+- `custom multicolor` should maintain a set of adjustable levers instead of a single hard-coded target; the first levers to consider are:
+  - pre-quantization brightness / saturation compensation
+  - post-quantization per-slot micro-adjustment
+  - conservative protection for dark, skin-like, and low-saturation regions
+  - different compensation presets for different brush sizes when needed
+- the preview layer and execution layer should keep a clear distinction between `before correction` and `after correction`, so later debugging can tell whether a mismatch came from quantization, compensation, or in-game rendering
+- any color-difference correction should avoid breaking existing recovery sessions, command segmentation, or official/custom palette-slot protocols; color correction should be introduced as a separate step between `image quantize -> palette selection -> preview`
+- future acceptance should include fixed reference images that compare `before correction` vs `after correction` in both preview output and real-device appearance, with each adjustment documenting which image class improved
 
 ## 11. Milestone status
 
@@ -273,6 +294,7 @@ Status: ongoing
 - visual calibration
 - offline execution
 - more stable color and position calibration
+- versioned color-difference compensation and tuning levers
 - more complete packaged install, recovery, and troubleshooting UX
 
 ## 12. Acceptance criteria for the current stage
@@ -298,6 +320,7 @@ The current stage should be accepted against these criteria:
 - recovery sessions: `apps/desktop/src/web/recoverySessions.ts`
 - drawing templates: `apps/desktop/src/drawingTemplates.ts`
 - image processing: `apps/desktop/src/image/*`
+- primary touchpoints for future color-difference tuning: `apps/desktop/src/image/quantize.ts`, `apps/desktop/src/config/officialPalette.ts`, and `apps/desktop/src/web/static/app.js`
 - path generation: `apps/desktop/src/path/scanline.ts`
 - serial sending: `apps/desktop/src/serial/sender.ts`
 - firmware implementation: `firmware/esp32/src/*`
@@ -305,6 +328,6 @@ The current stage should be accepted against these criteria:
 ## 14. Priority for the next stage
 
 1. keep improving Bluetooth connection stability and long-run drawing stability
-2. keep improving custom-multicolor color correction, color fidelity, and real-device appearance
+2. improve official-palette and custom-multicolor color fidelity in the order of `perceptual matching -> in-game compensation -> versioned calibration tables / tuning levers`
 3. keep optimizing drawing paths, command execution paths, and long-run efficiency
 4. keep improving user experience, including execution logs, status prompts, recovery UX, packaged desktop install flow, and internal validation guidance

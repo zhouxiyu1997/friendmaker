@@ -51,13 +51,13 @@ The current version already brings these into one workflow:
 
 Before you start real drawing, confirm these three things:
 
-1. The brush size inside `Switch` already matches the value in the web UI
+1. The `Script Studio` page already has the pixel brush you want selected; when drawing or resuming starts, the app switches to that brush automatically
 2. After entering the drawing page, the brush and cursor are sitting at the `canvas center`
 3. If you use `official palette drawing`, the game's `9` palette slots still keep their default colors
 
 Extra reminders:
 
-- The recovery flow also assumes that you re-enter the drawing page and continue from the `canvas center`
+- The recovery flow also assumes that you re-enter the drawing page and continue from the `canvas center`; resuming also switches back to the saved brush automatically
 - After drawing starts, do not touch the controller or the screen again
 - Using the square brush first is strongly recommended
 
@@ -336,8 +336,8 @@ Before continuing:
 
 1. Save the current artwork inside `Switch`
 2. Re-enter the drawing page manually
-3. Confirm the brush and cursor are back at the `canvas center`
-4. Then continue from the recovery task
+3. Confirm the cursor is back at the `canvas center`
+4. Then continue from the recovery task; the app will switch back to the saved brush automatically
 
 ## 8. Usage reminders
 
@@ -347,6 +347,7 @@ Before continuing:
 - `Pause Drawing` and `Stop and Save Recovery Point` both wait for the current command to finish first
 - If `Stopping Drawing` gets stuck for a long time, use the emergency button in the page to clear the stuck state
 - If step tests show ghost inputs, sticky inputs, or repeated actions, press the board's `EN` button first and reconnect the controller
+- If pressing `EN` immediately fixes ghost or sticky inputs, rerun controller validation before judging drawing or color issues
 
 ## 9. More troubleshooting and platform notes
 

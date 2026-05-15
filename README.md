@@ -77,7 +77,7 @@ This README includes both Simplified Chinese and English sections. Use the butto
 1. `刷入固件`：确认 `PlatformIO`、串口和固件环境正常
 2. `手柄测试`：完成 `Switch` 配对、按钮和方向测试
 3. `调试测速`：先调 `inputDelay`，再微调 `buttonPressDuration`
-4. `脚本生成`：导图、检查预览、开始绘制，并在需要时从页面内的恢复任务继续
+4. `脚本生成`：导图、检查预览、开始绘制，并在需要时从页面内的恢复任务继续；正式绘制前会自动切到所选像素画笔，无需再手动在游戏里选笔刷
 
 ### 当前使用建议与限制
 
@@ -114,6 +114,7 @@ This README includes both Simplified Chinese and English sections. Use the butto
 - `Windows x64`：运行 `.exe` 安装包后直接启动 `Friend Maker`
 - 首次进入 `刷入固件` 页时，如果提示缺少 `PlatformIO`，点击 `准备 PlatformIO`
 - `刷入固件` 页现在会先让你选择 `Switch 型号`：`Switch`、`Switch 2`、`Switch Lite`
+- `刷入固件` 页里也会提示 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个 GitHub Pages 在线刷机站；如果改走网页刷机，请刷入与当前 `Switch` 型号对应的版本，刷完后回到桌面端的 `手柄测试` 页继续
 - `Switch 2 / Switch Lite` 当前只给主线 `ESP32-WROOM-32 / ESP-32S` 提供专用固件；如果你的板子更接近 `NodeMCU-32S`，继续优先使用标准 `Switch` 固件
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要 `稳定联网`
 - 如果应用提示缺少 `Python`，允许它下载一个供 `Friend Maker` 使用的本地运行环境即可
@@ -236,7 +237,7 @@ After startup, use the same flow:
 1. `Firmware Flash`: confirm `PlatformIO`, serial port, and firmware target
 2. `Controller Test`: pair with `Switch` and verify button / direction behavior
 3. `Timing Tune / Benchmark`: adjust `inputDelay` first, then fine-tune `buttonPressDuration`
-4. `Script Studio`: import images, review previews, start drawing, and resume from in-page recovery tasks when needed
+4. `Script Studio`: import images, review previews, start drawing, and resume from in-page recovery tasks when needed; before drawing starts, the app switches to the selected pixel brush automatically, so you no longer need to choose it manually in-game
 
 ### Current guidance and limits
 
@@ -272,6 +273,9 @@ After startup, use the same flow:
 - `macOS`: install the `.dmg`, then launch `Friend Maker`
 - `Windows x64`: run the `.exe` installer, then launch `Friend Maker`
 - On first entry to `Firmware Flash`, click `Prepare PlatformIO` if it is missing
+- `Firmware Flash` now asks you to choose a `Switch` model first: `Switch`, `Switch 2`, or `Switch Lite`
+- The `Firmware Flash` page also points to [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) on GitHub Pages; if you switch to the web flasher, flash the build that matches your current `Switch` model, then return to `Controller Test` in the desktop app
+- `Switch 2 / Switch Lite` firmware is currently only provided for mainline `ESP32-WROOM-32 / ESP-32S`; if your board is closer to `NodeMCU-32S`, stay on standard `Switch` firmware for now
 - The first toolchain and dependency preparation step needs a `stable network connection`
 - If the app says `Python` is missing, allow it to download an app-local runtime for Friend Maker
 - On `Windows`, if `PlatformIO` is ready but no serial port appears, try the in-app `CP210x` helper before `CH340/CH341`

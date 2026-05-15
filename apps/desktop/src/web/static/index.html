@@ -443,79 +443,92 @@
             aria-label="调整输入和预览宽度"
           ></div>
 
-          <section class="panel panel-preview">
-            <div class="panel-head">
-              <h2>预览</h2>
-              <p>像素预览、模板裁剪和统计。</p>
-            </div>
+          <div class="preview-column">
+            <section class="panel panel-preview">
+              <div class="panel-head">
+                <h2>预览</h2>
+                <p>像素预览、模板裁剪和统计。</p>
+              </div>
 
-            <div class="preview-tools">
-              <label class="checkbox-card" for="auto-remove-background-checkbox">
-                <input id="auto-remove-background-checkbox" type="checkbox" />
-                <span class="checkbox-copy">
-                  <strong>自动扣背景</strong>
-                  <small>适合白底、浅灰底、棋盘格假透明图。真正带透明通道的 PNG 不需要开启。</small>
-                </span>
-              </label>
+              <div class="preview-tools">
+                <label class="checkbox-card" for="auto-remove-background-checkbox">
+                  <input id="auto-remove-background-checkbox" type="checkbox" />
+                  <span class="checkbox-copy">
+                    <strong>自动扣背景</strong>
+                    <small>适合白底、浅灰底、棋盘格假透明图。真正带透明通道的 PNG 不需要开启。</small>
+                  </span>
+                </label>
 
-              <label class="preview-select-card">
-                <span>辅助线</span>
-                <select id="preview-guide-select">
-                  <option value="none" selected>关闭</option>
-                  <option value="quad">2*2</option>
-                  <option value="quarter">4*4</option>
-                  <option value="eighth">16*16</option>
-                </select>
-                <small>只用于预览里辅助对齐，不影响最终生成。</small>
-              </label>
-            </div>
+                <label class="preview-select-card">
+                  <span>辅助线</span>
+                  <select id="preview-guide-select">
+                    <option value="none" selected>关闭</option>
+                    <option value="quad">2*2</option>
+                    <option value="quarter">4*4</option>
+                    <option value="eighth">16*16</option>
+                  </select>
+                  <small>只用于预览里辅助对齐，不影响最终生成。</small>
+                </label>
+              </div>
 
-            <div class="preview-frame">
-              <div id="preview-canvas" class="preview-canvas" data-guide="none">
-                <img id="preview-image" alt="生成预览" />
-                <img id="preview-template-overlay" alt="" aria-hidden="true" />
-                <div class="preview-guide" aria-hidden="true"></div>
-                <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
+              <div id="preview-frame" class="preview-frame">
+                <div id="preview-canvas" class="preview-canvas" data-guide="none">
+                  <img id="preview-image" alt="生成预览" />
+                  <img id="preview-template-overlay" alt="" aria-hidden="true" />
+                  <div class="preview-guide" aria-hidden="true"></div>
+                  <div class="empty-state" id="preview-empty">生成后这里会显示像素预览。</div>
+                </div>
               </div>
-            </div>
 
-            <div class="preview-meta-strip">
-              <div class="preview-meta-card">
-                <span>画布范围</span>
-                <strong id="stat-canvas-size">256x256</strong>
-                <small id="stat-canvas-range">x: 0-255 · y: 0-255</small>
+              <div class="preview-meta-strip">
+                <div class="preview-meta-card">
+                  <span>画布范围</span>
+                  <strong id="stat-canvas-size">256x256</strong>
+                  <small id="stat-canvas-range">x: 0-255 · y: 0-255</small>
+                </div>
+                <div class="preview-meta-card">
+                  <span>图片尺寸</span>
+                  <strong id="stat-image-size">-</strong>
+                  <small id="stat-image-scale">-</small>
+                </div>
+                <div class="preview-meta-card">
+                  <span>图片位置</span>
+                  <strong id="stat-image-origin">-</strong>
+                  <small id="stat-image-range">-</small>
+                </div>
               </div>
-              <div class="preview-meta-card">
-                <span>图片尺寸</span>
-                <strong id="stat-image-size">-</strong>
-                <small id="stat-image-scale">-</small>
-              </div>
-              <div class="preview-meta-card">
-                <span>图片位置</span>
-                <strong id="stat-image-origin">-</strong>
-                <small id="stat-image-range">-</small>
-              </div>
-            </div>
 
-            <div class="stat-strip">
-              <div class="stat-card">
-                <span>颜色</span>
-                <strong id="stat-colors">-</strong>
+              <div class="stat-strip">
+                <div class="stat-card">
+                  <span>颜色</span>
+                  <strong id="stat-colors">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>像素</span>
+                  <strong id="stat-pixels">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>命令数</span>
+                  <strong id="stat-commands">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>预计耗时</span>
+                  <strong id="stat-runtime">-</strong>
+                </div>
               </div>
-              <div class="stat-card">
-                <span>像素</span>
-                <strong id="stat-pixels">-</strong>
+            </section>
+
+            <section id="official-palette-panel" class="panel panel-official-palette hidden">
+              <div class="panel-head">
+                <h2>当前预览用色</h2>
+                <p id="official-palette-summary">
+                  显示本次预览实际使用的颜色。
+                </p>
               </div>
-              <div class="stat-card">
-                <span>命令数</span>
-                <strong id="stat-commands">-</strong>
-              </div>
-              <div class="stat-card">
-                <span>预计耗时</span>
-                <strong id="stat-runtime">-</strong>
-              </div>
-            </div>
-          </section>
+
+              <div id="official-palette-grid" class="official-palette-grid"></div>
+            </section>
+          </div>
 
           <div
             class="layout-splitter layout-splitter-vertical studio-splitter-right"
@@ -540,17 +553,6 @@
             aria-orientation="horizontal"
             aria-label="调整脚本和日志高度"
           ></div>
-
-          <section id="official-palette-panel" class="panel panel-official-palette hidden">
-            <div class="panel-head">
-              <h2>当前预览用色</h2>
-              <p id="official-palette-summary">
-                显示本次预览实际使用的颜色。
-              </p>
-            </div>
-
-            <div id="official-palette-grid" class="official-palette-grid"></div>
-          </section>
 
           <section class="panel panel-script">
             <div class="panel-head">
@@ -610,6 +612,26 @@
 
             <p class="hint" id="firmware-platformio-hint">正在检测 PlatformIO...</p>
             <p class="hint" id="firmware-env-hint">选择目标开发板后，这里会显示对应说明。</p>
+
+            <div class="mono-note-box firmware-web-flasher-card">
+              <div class="panel-head compact">
+                <h2>也可在线刷机</h2>
+                <p id="firmware-web-flasher-hint" class="hint">
+                  GitHub Pages 上也提供了 Friend Maker Firmware Flasher。请先在网页端刷入和当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。
+                </p>
+              </div>
+              <div class="action-row slim">
+                <a
+                  class="ghost-link"
+                  href="https://zhouxiyu1997.github.io/friendmaker/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  打开在线刷机站
+                </a>
+                <button id="firmware-open-controller-button" class="ghost" type="button">前往手柄测试</button>
+              </div>
+            </div>
 
             <div id="windows-driver-panel" class="driver-panel hidden">
               <strong>Windows 串口驱动</strong>

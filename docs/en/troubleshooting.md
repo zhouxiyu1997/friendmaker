@@ -168,12 +168,14 @@ Additional notes:
 - these symptoms often come together with link instability, board state issues, or power fluctuations
 - if rebooting the board helps, it usually means the current link state was refreshed
 
+If the issue disappears after pressing `EN`, it is more likely that the board state, Bluetooth HID report path, or a transient power / thermal condition was refreshed; in that case, rerun `Controller Test` and `Timing Tune / Benchmark` first, and do not treat the previous abnormal drawing result as evidence that color recognition or `official palette drawing` itself is wrong.
+
 ## 6. Drawing drifts, offsets, or becomes less stable over longer runs
 
 Check these first:
 
 - whether you already ran `Timing Tune / Benchmark`
-- whether the brush size in `Switch` matches the value in the web UI
+- whether the brush selected in `Script Studio` is the one you actually want to run; real drawing switches to that selected brush automatically
 - whether the cursor really starts from the `canvas center`
 - whether the controller or touchscreen was touched again after drawing started
 

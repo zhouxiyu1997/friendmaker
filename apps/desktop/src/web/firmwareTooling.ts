@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -99,10 +99,25 @@ interface PlatformIoPythonDependencyStatus {
   pyparsingVersion: string | null;
 }
 
+type PlatformIoPythonProbeState = "ready" | "missing" | "probe_failed";
+
+export interface PlatformIoPythonDependencyProbe {
+  state: PlatformIoPythonProbeState;
+  missingModules: string[];
+  pyparsingVersion: string | null;
+  probeError: string | null;
+}
+
 interface PlatformIoCompatibilityResult {
   checked: number;
   repaired: number;
   targets: string[];
+}
+
+interface PlatformIoCompatibilityHooks {
+  collectTargets: typeof collectPlatformIoPythonTargets;
+  inspectDependencies: typeof inspectPlatformIoPythonDependencies;
+  repairDependencies: typeof repairPlatformIoPythonDependencies;
 }
 
 interface ResolvedExecutable extends ToolingExecutableStatus {
@@ -116,6 +131,7 @@ interface ResolvedPython extends PythonToolingStatus {
 interface FirmwareToolingManagerOptions {
   appDataRoot: string;
   initialConfig?: ToolingConfig;
+  compatibilityHooks?: Partial<PlatformIoCompatibilityHooks>;
 }
 
 function createIdleInstallState(): ToolingInstallSnapshot {
@@ -284,80 +300,226 @@ export async function collectPlatformIoPythonTargets(platformIoPath: string): Pr
   return targets;
 }
 
-export function parsePlatformIoPythonDependencyStatus(
+function toPlatformIoPythonDependencyProbe(
+  status: PlatformIoPythonDependencyStatus,
+  probeError: string | null = null,
+): PlatformIoPythonDependencyProbe {
+  if (probeError) {
+    return {
+      state: "probe_failed",
+      missingModules: status.missingModules,
+      pyparsingVersion: status.pyparsingVersion,
+      probeError,
+    };
+  }
+
+  return {
+    state:
+      status.missingModules.length === 0 &&
+      status.pyparsingVersion === PLATFORMIO_REQUIRED_PYPARSING_VERSION
+        ? "ready"
+        : "missing",
+    missingModules: status.missingModules,
+    pyparsingVersion: status.pyparsingVersion,
+    probeError: null,
+  };
+}
+
+function createPlatformIoPythonDependencyProbeFailure(
+  probeError: string,
+  status?: PlatformIoPythonDependencyStatus | null,
+): PlatformIoPythonDependencyProbe {
+  return {
+    state: "probe_failed",
+    missingModules: status?.missingModules ?? [],
+    pyparsingVersion: status?.pyparsingVersion ?? null,
+    probeError: probeError.trim() || "probe failed",
+  };
+}
+
+export function parsePlatformIoPythonDependencyProbe(
   rawStatus: string,
-): PlatformIoPythonDependencyStatus | null {
+): PlatformIoPythonDependencyProbe | null {
   try {
     const parsed = JSON.parse(rawStatus) as {
       missingModules?: unknown;
       pyparsingVersion?: unknown;
+      probeError?: unknown;
     };
     if (!Array.isArray(parsed.missingModules)) {
       return null;
     }
 
-    return {
+    const status: PlatformIoPythonDependencyStatus = {
       missingModules: parsed.missingModules.filter((value): value is string => typeof value === "string"),
       pyparsingVersion:
         typeof parsed.pyparsingVersion === "string" && parsed.pyparsingVersion.length > 0
           ? parsed.pyparsingVersion
           : null,
     };
+    const probeError =
+      typeof parsed.probeError === "string" && parsed.probeError.trim().length > 0
+        ? parsed.probeError.trim()
+        : null;
+
+    return probeError
+      ? createPlatformIoPythonDependencyProbeFailure(probeError, status)
+      : toPlatformIoPythonDependencyProbe(status);
   } catch {
     return null;
   }
 }
 
-function inspectPlatformIoPythonDependencies(
+function summarizePlatformIoPythonProbeFailure(result: {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}): string {
+  if (result.error) {
+    return result.error.message;
+  }
+
+  const stderrLines = result.stderr
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (stderrLines.length > 0) {
+    return stderrLines.at(-1) ?? stderrLines[0] ?? "probe failed";
+  }
+
+  const stdoutLines = result.stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (stdoutLines.length > 0) {
+    return stdoutLines.at(-1) ?? stdoutLines[0] ?? "probe failed";
+  }
+
+  return `probe exited with code ${String(result.status ?? "unknown")}`;
+}
+
+export function buildPlatformIoPythonDependencyProbeFromProcessResult(
+  result: Pick<SpawnSyncReturns<string>, "status" | "stdout" | "stderr" | "error">,
+): PlatformIoPythonDependencyProbe {
+  if (result.status !== 0) {
+    return createPlatformIoPythonDependencyProbeFailure(
+      summarizePlatformIoPythonProbeFailure({
+        status: result.status,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+        ...(result.error ? { error: result.error } : {}),
+      }),
+    );
+  }
+
+  const parsed = parsePlatformIoPythonDependencyProbe((result.stdout ?? "").trim());
+  if (parsed) {
+    return parsed;
+  }
+
+  const stdout = (result.stdout ?? "").trim();
+  const stderr = (result.stderr ?? "").trim();
+  const details = [
+    ...(stderr.length > 0 ? [`stderr=${stderr}`] : []),
+    ...(stdout.length > 0 ? [`stdout=${stdout}`] : []),
+  ];
+  return createPlatformIoPythonDependencyProbeFailure(
+    details.length > 0 ? `probe returned invalid JSON (${details.join("; ")})` : "probe returned invalid JSON",
+  );
+}
+
+export function inspectPlatformIoPythonDependencies(
   pythonPath: string,
-): PlatformIoPythonDependencyStatus | null {
+  options: {
+    env?: NodeJS.ProcessEnv;
+  } = {},
+): PlatformIoPythonDependencyProbe {
   const checkCode = [
     "import importlib.util",
     "import json",
     "missing = []",
-    `for module in ${JSON.stringify([...PLATFORMIO_REQUIRED_PYTHON_MODULES, "pyparsing"])}:`,
-    "    if importlib.util.find_spec(module) is None:",
-    "        missing.append(module)",
     "pyparsing_version = None",
-    "if 'pyparsing' not in missing:",
-    "    import pyparsing",
-    "    pyparsing_version = getattr(pyparsing, '__version__', None)",
-    "print(json.dumps({'missingModules': missing, 'pyparsingVersion': pyparsing_version}))",
+    "probe_error = None",
+    "try:",
+    `    for module in ${JSON.stringify(PLATFORMIO_REQUIRED_PYTHON_MODULES)}:`,
+    "        if importlib.util.find_spec(module) is None:",
+    "            missing.append(module)",
+    "    if importlib.util.find_spec('pyparsing') is None:",
+    "        missing.append('pyparsing')",
+    "    else:",
+    "        try:",
+    "            import pyparsing",
+    "            pyparsing_version = getattr(pyparsing, '__version__', None)",
+    "        except Exception as exc:",
+    "            probe_error = f'{type(exc).__name__}: {exc}'",
+    "except Exception as exc:",
+    "    probe_error = f'{type(exc).__name__}: {exc}'",
+    "print(json.dumps({'missingModules': missing, 'pyparsingVersion': pyparsing_version, 'probeError': probe_error}))",
   ].join("\n");
   const result = spawnSync(pythonPath, ["-c", checkCode], {
     encoding: "utf8",
+    env: options.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  if (result.status !== 0) {
-    return null;
-  }
-
-  return parsePlatformIoPythonDependencyStatus(result.stdout.trim());
+  return buildPlatformIoPythonDependencyProbeFromProcessResult(result);
 }
 
-function isPlatformIoPythonCompatibilityReady(status: PlatformIoPythonDependencyStatus | null): boolean {
-  return (
-    status !== null &&
-    status.missingModules.length === 0 &&
-    status.pyparsingVersion === PLATFORMIO_REQUIRED_PYPARSING_VERSION
-  );
+function isPlatformIoPythonCompatibilityReady(probe: PlatformIoPythonDependencyProbe): boolean {
+  return probe.state === "ready";
 }
 
-function formatPlatformIoPythonDependencyStatus(status: PlatformIoPythonDependencyStatus | null): string {
-  if (!status) {
-    return "status unavailable";
+function formatPlatformIoPythonDependencyProbe(probe: PlatformIoPythonDependencyProbe): string {
+  if (probe.state === "probe_failed") {
+    return `probe failed: ${probe.probeError ?? "unknown error"}`;
   }
 
   const details: string[] = [];
-  if (status.missingModules.length > 0) {
-    details.push(`missing=${status.missingModules.join(",")}`);
+  if (probe.missingModules.length > 0) {
+    details.push(`missing=${probe.missingModules.join(",")}`);
   }
-  if (status.pyparsingVersion !== PLATFORMIO_REQUIRED_PYPARSING_VERSION) {
-    details.push(`pyparsing=${status.pyparsingVersion ?? "missing"}`);
+  if (probe.pyparsingVersion !== PLATFORMIO_REQUIRED_PYPARSING_VERSION) {
+    details.push(`pyparsing=${probe.pyparsingVersion ?? "missing"}`);
   }
 
   return details.join(" ") || "ready";
+}
+
+async function repairPlatformIoPythonDependencies(
+  pythonPath: string,
+  options: {
+    onLine?: (line: string) => void;
+  } = {},
+): Promise<void> {
+  await runProcess(
+    pythonPath,
+    [
+      "-m",
+      "pip",
+      "install",
+      "--disable-pip-version-check",
+      "--no-input",
+      "--upgrade",
+      ...PLATFORMIO_REQUIRED_PIP_PACKAGES,
+      `pyparsing==${PLATFORMIO_REQUIRED_PYPARSING_VERSION}`,
+    ],
+    options.onLine
+      ? {
+          onLine: options.onLine,
+        }
+      : {},
+  );
+}
+
+function getPlatformIoCompatibilityHooks(
+  overrides?: Partial<PlatformIoCompatibilityHooks>,
+): PlatformIoCompatibilityHooks {
+  return {
+    collectTargets: overrides?.collectTargets ?? collectPlatformIoPythonTargets,
+    inspectDependencies: overrides?.inspectDependencies ?? inspectPlatformIoPythonDependencies,
+    repairDependencies: overrides?.repairDependencies ?? repairPlatformIoPythonDependencies,
+  };
 }
 
 async function sha256File(filePath: string): Promise<string> {
@@ -466,8 +628,11 @@ function runProcess(
 
 export class FirmwareToolingManager {
   private installState: ToolingInstallSnapshot = createIdleInstallState();
+  private readonly compatibilityHooks: PlatformIoCompatibilityHooks;
 
-  constructor(private readonly options: FirmwareToolingManagerOptions) {}
+  constructor(private readonly options: FirmwareToolingManagerOptions) {
+    this.compatibilityHooks = getPlatformIoCompatibilityHooks(options.compatibilityHooks);
+  }
 
   async getInfo(): Promise<FirmwareToolingInfo> {
     return {
@@ -546,7 +711,7 @@ export class FirmwareToolingManager {
       };
     }
 
-    const targets = await collectPlatformIoPythonTargets(options.platformIoPath);
+    const targets = await this.compatibilityHooks.collectTargets(options.platformIoPath);
     const result: PlatformIoCompatibilityResult = {
       checked: 0,
       repaired: 0,
@@ -560,27 +725,17 @@ export class FirmwareToolingManager {
 
     for (const target of targets) {
       result.checked += 1;
-      const status = inspectPlatformIoPythonDependencies(target.pythonPath);
-      if (isPlatformIoPythonCompatibilityReady(status)) {
+      const initialProbe = this.compatibilityHooks.inspectDependencies(target.pythonPath);
+      if (isPlatformIoPythonCompatibilityReady(initialProbe)) {
         options.onLine?.(`PlatformIO Python compatibility ready: ${target.label}`);
         continue;
       }
 
       options.onLine?.(
-        `Repairing PlatformIO Python compatibility for ${target.label} (${formatPlatformIoPythonDependencyStatus(status)})...`,
+        `Repairing PlatformIO Python compatibility for ${target.label} (${formatPlatformIoPythonDependencyProbe(initialProbe)})...`,
       );
-      await runProcess(
+      await this.compatibilityHooks.repairDependencies(
         target.pythonPath,
-        [
-          "-m",
-          "pip",
-          "install",
-          "--disable-pip-version-check",
-          "--no-input",
-          "--upgrade",
-          ...PLATFORMIO_REQUIRED_PIP_PACKAGES,
-          `pyparsing==${PLATFORMIO_REQUIRED_PYPARSING_VERSION}`,
-        ],
         options.onLine
           ? {
               onLine: options.onLine,
@@ -588,10 +743,16 @@ export class FirmwareToolingManager {
           : {},
       );
 
-      const verifiedStatus = inspectPlatformIoPythonDependencies(target.pythonPath);
-      if (!isPlatformIoPythonCompatibilityReady(verifiedStatus)) {
+      const verifiedProbe = this.compatibilityHooks.inspectDependencies(target.pythonPath);
+      if (verifiedProbe.state === "probe_failed") {
         throw new Error(
-          `PlatformIO Python compatibility repair did not converge for ${target.label}: ${formatPlatformIoPythonDependencyStatus(verifiedStatus)}`,
+          `PlatformIO Python compatibility repair could not be verified for ${target.label}: ${formatPlatformIoPythonDependencyProbe(verifiedProbe)}`,
+        );
+      }
+
+      if (!isPlatformIoPythonCompatibilityReady(verifiedProbe)) {
+        throw new Error(
+          `PlatformIO Python compatibility repair did not converge for ${target.label}: ${formatPlatformIoPythonDependencyProbe(verifiedProbe)}`,
         );
       }
 
