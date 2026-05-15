@@ -378,8 +378,10 @@ const els = {
   firmwareStopButton: document.getElementById("firmware-stop-button"),
   firmwarePlatformIoHint: document.getElementById("firmware-platformio-hint"),
   firmwareEnvHint: document.getElementById("firmware-env-hint"),
+  firmwareWebFlasherHint: document.getElementById("firmware-web-flasher-hint"),
   windowsDriverPanel: document.getElementById("windows-driver-panel"),
   windowsDriverHint: document.getElementById("windows-driver-hint"),
+  firmwareOpenControllerButton: document.getElementById("firmware-open-controller-button"),
   installCp210xDriverButton: document.getElementById("install-cp210x-driver-button"),
   installCh341DriverButton: document.getElementById("install-ch341-driver-button"),
   firmwareStatusCard: document.getElementById("firmware-status-card"),
@@ -1151,6 +1153,10 @@ els.refreshPortsButton.addEventListener("click", async () => {
 });
 
 els.studioOpenControllerButton.addEventListener("click", () => {
+  switchPage("controller");
+});
+
+els.firmwareOpenControllerButton.addEventListener("click", () => {
   switchPage("controller");
 });
 
@@ -1965,8 +1971,8 @@ function updateFirmwareResultFromFlashSnapshot(flash) {
 
   if (flash?.status === "completed") {
     const detail = flash.fallbackToAutoDetect
-      ? "固定端口失败后已自动改用 PlatformIO 串口探测并刷入成功，可以继续去手柄测试页读取设备信息。"
-      : "设备已经写入完成，可以继续去手柄测试页读取设备信息。";
+      ? "固定端口失败后已自动改用 PlatformIO 串口探测并刷入成功。下一步请去“手柄测试”页读取设备信息并确认连接状态。"
+      : "设备已经写入完成。下一步请去“手柄测试”页读取设备信息并确认连接状态。";
     setFirmwareResult({
       status: "success",
       title: "固件刷入成功",
@@ -3765,11 +3771,18 @@ function syncFirmwareUi() {
 
   if (switchModel && environment) {
     els.firmwareEnvHint.textContent = `${switchModel.description} 当前硬件环境：${environment.label}`;
+    els.firmwareWebFlasherHint.textContent =
+      `GitHub Pages 上也有在线刷固件的网站。若改用网页端，请刷入与当前选择的 ${switchModel.label} 对应的版本；刷完后再到“手柄测试”页继续连接。`;
     els.firmwareModelSelect.value = switchModel.id;
     els.firmwareEnvSelect.value = environment.id;
   } else if (environment) {
     els.firmwareEnvHint.textContent = environment.description;
+    els.firmwareWebFlasherHint.textContent =
+      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。";
     els.firmwareEnvSelect.value = environment.id;
+  } else {
+    els.firmwareWebFlasherHint.textContent =
+      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。";
   }
 
   const installStatus = state.firmwareTooling.install?.status ?? "idle";
