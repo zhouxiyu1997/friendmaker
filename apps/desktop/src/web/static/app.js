@@ -11,6 +11,25 @@ import {
 
 document.documentElement.dataset.platform = window.friendMakerWindow?.platform ?? "browser";
 
+function translateUiText(value) {
+  try {
+    return window.FriendMakerI18n?.translateText?.(value) ?? value;
+  } catch {
+    return value;
+  }
+}
+
+function translateUiBlock(value) {
+  return value
+    .split("\n")
+    .map((line) => translateUiText(line))
+    .join("\n");
+}
+
+function confirmUi(message) {
+  return window.confirm(translateUiText(message));
+}
+
 const PANEL_LAYOUT_STORAGE_KEY = "friendmaker.panelLayout.v1";
 const PANEL_LAYOUT_RATIO_MIN = 0.08;
 
@@ -1234,7 +1253,7 @@ els.stopExecutionButton.addEventListener("click", async () => {
 });
 
 els.resetExecutionButton.addEventListener("click", async () => {
-  const shouldReset = window.confirm(
+  const shouldReset = confirmUi(
     "这会强制清除当前卡住的绘制状态，不会继续等待当前命令自然结束。只有在“正在中断绘制”长时间不消失时才建议使用。确定继续吗？",
   );
 
@@ -2089,7 +2108,7 @@ async function startFirmwareToolingInstall() {
     return;
   }
 
-  const shouldInstall = window.confirm("刷入固件需要 PlatformIO，未检测到。是否现在安装？");
+  const shouldInstall = confirmUi("刷入固件需要 PlatformIO，未检测到。是否现在安装？");
   if (!shouldInstall) {
     appendLog(els.firmwareLogOutput, "已取消准备 PlatformIO。");
     return;
@@ -2102,7 +2121,7 @@ async function startFirmwareToolingInstall() {
       return;
     }
 
-    allowPythonDownload = window.confirm(
+    allowPythonDownload = confirmUi(
       "安装 PlatformIO 需要 Python。未检测到可用 Python，是否下载一个仅供 Friend Maker 使用的 Python 运行环境？",
     );
 
@@ -2225,7 +2244,7 @@ async function startWindowsSerialDriverInstall(driverId) {
   const installerNote = driverId === "ch341"
     ? "打开 WCH 安装器后请点击 INSTALL。"
     : "应用会调用 pnputil 安装 CP210x 驱动。";
-  const shouldInstall = window.confirm(
+  const shouldInstall = confirmUi(
     `即将安装 ${driverLabel} 串口驱动。Windows 会弹出管理员权限确认。${installerNote} 安装完成后请重新插拔 ESP32，再点击“刷新串口”。是否继续？`,
   );
   if (!shouldInstall) {
@@ -2469,7 +2488,7 @@ els.controllerClearLogButton.addEventListener("click", () => {
 });
 
 els.timingBenchmarkButton.addEventListener("click", async () => {
-  const shouldRun = window.confirm(TIMING_BENCHMARK_MODES.standard.confirmMessage);
+  const shouldRun = confirmUi(TIMING_BENCHMARK_MODES.standard.confirmMessage);
 
   if (!shouldRun) {
     return;
@@ -2479,7 +2498,7 @@ els.timingBenchmarkButton.addEventListener("click", async () => {
 });
 
 els.timingLongBenchmarkButton.addEventListener("click", async () => {
-  const shouldRun = window.confirm(TIMING_BENCHMARK_MODES.long.confirmMessage);
+  const shouldRun = confirmUi(TIMING_BENCHMARK_MODES.long.confirmMessage);
 
   if (!shouldRun) {
     return;
@@ -2489,7 +2508,7 @@ els.timingLongBenchmarkButton.addEventListener("click", async () => {
 });
 
 els.timingReproBenchmarkButton.addEventListener("click", async () => {
-  const shouldRun = window.confirm(TIMING_BENCHMARK_MODES.repro.confirmMessage);
+  const shouldRun = confirmUi(TIMING_BENCHMARK_MODES.repro.confirmMessage);
 
   if (!shouldRun) {
     return;
@@ -2937,7 +2956,7 @@ async function resumeRecoverySession(sessionId) {
     return;
   }
 
-  const shouldResume = window.confirm(
+  const shouldResume = confirmUi(
     "请确认：你已经先在 Switch 里保存当前画作，并且已经手动重新进入绘画页；从这里开始不要再手动改笔刷，也不要再移动页面。现在开始从恢复点继续吗？",
   );
 
@@ -2972,7 +2991,7 @@ async function resumeRecoverySession(sessionId) {
 }
 
 async function discardRecoverySession(sessionId) {
-  const shouldDiscard = window.confirm("放弃后会删除本地脚本和恢复记录。确定继续吗？");
+  const shouldDiscard = confirmUi("放弃后会删除本地脚本和恢复记录。确定继续吗？");
 
   if (!shouldDiscard) {
     return;
@@ -4659,13 +4678,64 @@ function summarizeFirmwareError(message) {
 
 function appendLog(element, message) {
   const time = new Date().toLocaleTimeString();
-  element.textContent = `${element.textContent}\n[${time}] ${message}`.trim();
+  const source = getLogSource(element);
+  const nextSource = `${source}\n[${time}] ${message}`.trim();
+  setLogSource(element, nextSource);
   element.scrollTop = element.scrollHeight;
 }
 
 function clearLog(element) {
-  element.textContent = element.dataset.emptyLog ?? "";
+  setLogSource(element, getEmptyLogSource(element));
   element.scrollTop = 0;
+}
+
+const logSources = new WeakMap();
+
+function getEmptyLogSource(element) {
+  if (element === els.studioLogOutput) {
+    return "等待生成命令...";
+  }
+
+  if (element === els.firmwareLogOutput) {
+    return "等待刷入固件...";
+  }
+
+  if (element === els.controllerLogOutput) {
+    return "等待开始测试...";
+  }
+
+  if (element === els.timingLogOutput) {
+    return "等待开始调试...";
+  }
+
+  return element.dataset.emptyLog ?? "";
+}
+
+function getLogSource(element) {
+  if (logSources.has(element)) {
+    return logSources.get(element) ?? "";
+  }
+
+  const source = getEmptyLogSource(element);
+  logSources.set(element, source);
+  return source;
+}
+
+function setLogSource(element, source) {
+  logSources.set(element, source);
+  element.textContent = translateUiBlock(source);
+}
+
+function refreshLogsForLanguage() {
+  [
+    els.studioLogOutput,
+    els.firmwareLogOutput,
+    els.controllerLogOutput,
+    els.timingLogOutput,
+  ].forEach((element) => {
+    const source = getLogSource(element);
+    element.textContent = translateUiBlock(source);
+  });
 }
 
 function getErrorMessage(error) {
@@ -5037,4 +5107,16 @@ async function init() {
   }
 }
 
-void init();
+window.FriendMakerI18n?.onLanguageChanged?.(() => refreshLogsForLanguage());
+
+async function startApp() {
+  try {
+    await window.FriendMakerI18n?.ready;
+  } catch (error) {
+    console.warn("Friend Maker i18n failed to initialize; continuing with source language.", error);
+  }
+
+  await init();
+}
+
+void startApp();

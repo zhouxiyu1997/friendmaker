@@ -11,7 +11,8 @@
     "verify:pages": "node scripts/verify-pages.mjs"
   },
   "dependencies": {
-    "esp-web-tools": "10.1.1"
+    "esp-web-tools": "10.1.1",
+    "i18next": "^26.1.0"
   },
   "devDependencies": {
     "typescript": "5.8.3",

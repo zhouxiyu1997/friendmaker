@@ -148,6 +148,19 @@ textarea:disabled {
   border-left: 1px solid var(--divider);
 }
 
+.language-switch {
+  -webkit-app-region: no-drag;
+  flex: 0 0 auto;
+}
+
+.language-switch select {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 26px 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
 .window-controls {
   display: flex;
   align-items: center;

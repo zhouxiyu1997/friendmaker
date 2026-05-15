@@ -25,10 +25,13 @@ test("firmware site rejects unsupported switch models", () => {
   );
 });
 
-test("firmware site page keeps the switch model wording aligned with desktop", async () => {
+test("firmware site page keeps the switch model wording internationalized and aligned with desktop", async () => {
   const pageSource = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const scriptSource = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
 
-  assert.match(pageSource, /Switch 型号/u);
+  assert.match(pageSource, /data-i18n="firmware\.switchModel"/u);
+  assert.match(scriptSource, /"firmware\.switchModel": "Switch model"/u);
+  assert.match(scriptSource, /"firmware\.switchModel": "Switch 型号"/u);
   assert.doesNotMatch(pageSource, /目标机型/u);
   assert.doesNotMatch(pageSource, /连接提示/u);
 });
