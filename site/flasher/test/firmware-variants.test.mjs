@@ -22,10 +22,9 @@ test("firmware site keeps the default switch manifest stable and maps Switch 2 e
   assert.equal(getFirmwareVariant("switch2").environmentId, "esp32dev_wireless_switch2");
   assert.equal(getFirmwareVariant("switch_lite").boardId, "esp32dev_wireless");
   assert.equal(getVersionedManifestPath("switch", "0.6.1"), "./firmware/0.6.1/manifest.json");
-  assert.equal(getVersionedManifestPath("switch2", "0.5.0"), "./firmware/0.5.0/manifest.switch2.json");
   assert.deepEqual(
     listFlasherReleases().map((release) => release.version),
-    ["0.6.1", "0.5.0"],
+    ["0.6.1"],
   );
 });
 
@@ -42,8 +41,10 @@ test("firmware site page keeps the switch model wording aligned with desktop", a
 
   assert.match(pageSource, /Switch 型号/u);
   assert.match(pageSource, /发布版本/u);
+  assert.doesNotMatch(pageSource, /0\.5\.0/u);
   assert.doesNotMatch(pageSource, /目标机型/u);
   assert.doesNotMatch(pageSource, /连接提示/u);
   assert.match(appSource, /DEFAULT_RELEASE_VERSION/u);
   assert.match(appSource, /release\.recommended \? `\$\{release\.version\}（推荐）` : release\.version/u);
+  assert.match(appSource, /firmwareReleaseField\.classList\.toggle\("hidden", FIRMWARE_RELEASES\.length <= 1\)/u);
 });

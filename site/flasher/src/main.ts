@@ -79,6 +79,7 @@ const els = {
   desktopDownloadLink: document.getElementById("desktop-download-link") as HTMLAnchorElement,
   desktopStepLabel: document.getElementById("desktop-step-label") as HTMLElement,
   desktopFlowLabel: document.getElementById("desktop-flow-label") as HTMLElement,
+  firmwareReleaseField: document.getElementById("firmware-release-field") as HTMLElement,
   firmwareReleaseVersion: document.getElementById("firmware-release-version") as HTMLSelectElement,
   firmwareVersion: document.getElementById("firmware-version") as HTMLElement,
   firmwareSwitchModel: document.getElementById("firmware-switch-model") as HTMLSelectElement,
@@ -126,6 +127,7 @@ function formatReleaseLabel(release: FirmwareReleaseOption): string {
 }
 
 function renderReleasePicker(): void {
+  els.firmwareReleaseField.classList.toggle("hidden", FIRMWARE_RELEASES.length <= 1);
   els.firmwareReleaseVersion.replaceChildren();
 
   for (const release of FIRMWARE_RELEASES) {
@@ -135,6 +137,7 @@ function renderReleasePicker(): void {
     els.firmwareReleaseVersion.append(option);
   }
 
+  selectedReleaseVersion = findRelease(selectedReleaseVersion).version;
   els.firmwareReleaseVersion.value = selectedReleaseVersion;
 }
 

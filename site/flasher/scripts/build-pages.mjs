@@ -30,15 +30,17 @@ async function main() {
   await assertFileExists(path.join(webBuildRoot, "index.html"));
   const firmwareReleases = listFlasherReleases();
   const firmwareVariants = listFirmwareVariants();
-  const firmwarePlanByModel = new Map();
+  const firmwarePlanByReleaseAndModel = new Map();
   const defaultReleaseVersion = getDefaultFirmwareReleaseVersion();
 
-  for (const variant of firmwareVariants) {
-    const firmwareParts = await readFirmwareFlashPlan(variant.switchModelId);
-    for (const part of firmwareParts) {
-      await assertFileExists(part.sourcePath);
+  for (const release of firmwareReleases) {
+    for (const variant of firmwareVariants) {
+      const firmwareParts = await readFirmwareFlashPlan(variant.switchModelId, release.version);
+      for (const part of firmwareParts) {
+        await assertFileExists(part.sourcePath);
+      }
+      firmwarePlanByReleaseAndModel.set(`${release.version}:${variant.switchModelId}`, firmwareParts);
     }
-    firmwarePlanByModel.set(variant.switchModelId, firmwareParts);
   }
 
   await rm(pagesRoot, { recursive: true, force: true });
@@ -49,7 +51,7 @@ async function main() {
       const firmwareOutputRoot = path.join(pagesRoot, "firmware", release.version, variant.environmentId);
       await mkdir(firmwareOutputRoot, { recursive: true });
 
-      for (const part of firmwarePlanByModel.get(variant.switchModelId) ?? []) {
+      for (const part of firmwarePlanByReleaseAndModel.get(`${release.version}:${variant.switchModelId}`) ?? []) {
         await cp(part.sourcePath, path.join(firmwareOutputRoot, part.publishFileName));
       }
     }

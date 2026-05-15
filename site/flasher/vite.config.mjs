@@ -87,7 +87,7 @@ function firmwareDevPlugin() {
           return;
         }
 
-        const firmwareParts = await readFirmwareFlashPlan(variant.switchModelId);
+        const firmwareParts = await readFirmwareFlashPlan(variant.switchModelId, releaseVersion);
         const part = firmwareParts.find((entry) => entry.publishFileName === publishFileName);
         if (!part) {
           response.statusCode = 404;

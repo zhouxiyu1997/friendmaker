@@ -37,7 +37,7 @@ async function main() {
       const publishedFirmwareRoot = path.join(pagesRoot, "firmware", release.version, variant.environmentId);
       await assertFileExists(manifestPath);
 
-      const flashPlan = await readFirmwareFlashPlan(variant.switchModelId);
+      const flashPlan = await readFirmwareFlashPlan(variant.switchModelId, release.version);
       for (const part of flashPlan) {
         await assertFileExists(path.join(publishedFirmwareRoot, part.publishFileName));
       }

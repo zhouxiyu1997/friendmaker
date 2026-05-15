@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url";
 import firmwareVariantConfig from "../shared/firmware-variants.json" with { type: "json" };
 import {
   getDefaultFirmwareReleaseVersion as readDefaultFirmwareReleaseVersion,
+  getFirmwareBuildBaseRoot,
   getFirmwareRelease,
   listFirmwareReleases,
   readReleaseInfo,
-  repoRoot,
 } from "./release-info.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -76,12 +76,12 @@ export function getVersionedManifestPath(switchModelId = defaultSwitchModelId, v
   return `./firmware/${release.version}/${variant.manifestFileName}`;
 }
 
-export function getFirmwareBuildRoot(environmentId) {
-  return path.join(repoRoot, "firmware", "esp32", ".pio", "build", environmentId);
+export function getFirmwareBuildRoot(environmentId, version = defaultFirmwareReleaseVersion) {
+  return path.join(getFirmwareBuildBaseRoot(version), environmentId);
 }
 
-export function getFlasherArgsPath(environmentId) {
-  return path.join(getFirmwareBuildRoot(environmentId), "flasher_args.json");
+export function getFlasherArgsPath(environmentId, version = defaultFirmwareReleaseVersion) {
+  return path.join(getFirmwareBuildRoot(environmentId, version), "flasher_args.json");
 }
 
 export function normalizePublishedFileName(sourceRelativePath) {
@@ -131,7 +131,7 @@ function firmwareSourcePathCandidates(firmwareBuildRoot, sourceRelativePath) {
 export function resolveFirmwareSourcePath(sourceRelativePath) {
   const defaultVariant = getFirmwareVariant(defaultSwitchModelId);
   return resolveFirmwareSourcePathForBuildRoot(
-    getFirmwareBuildRoot(defaultVariant.environmentId),
+    getFirmwareBuildRoot(defaultVariant.environmentId, defaultFirmwareReleaseVersion),
     sourceRelativePath,
   );
 }
@@ -146,10 +146,13 @@ export function resolveFirmwareSourcePathForBuildRoot(firmwareBuildRoot, sourceR
   throw new Error(`Missing required firmware file for flash part: ${sourceRelativePath}`);
 }
 
-export async function readFirmwareFlashPlan(switchModelId = defaultSwitchModelId) {
+export async function readFirmwareFlashPlanFromBuildRoot(
+  firmwareBuildBaseRoot,
+  switchModelId = defaultSwitchModelId,
+) {
   const variant = getFirmwareVariant(switchModelId);
-  const firmwareBuildRoot = getFirmwareBuildRoot(variant.environmentId);
-  const flasherArgsPath = getFlasherArgsPath(variant.environmentId);
+  const firmwareBuildRoot = path.join(firmwareBuildBaseRoot, variant.environmentId);
+  const flasherArgsPath = path.join(firmwareBuildRoot, "flasher_args.json");
   const flasherArgs = JSON.parse(await readFile(flasherArgsPath, "utf8"));
 
   return buildFirmwareFlashPlanFromArgs(flasherArgs).map((part) => ({
@@ -159,13 +162,23 @@ export async function readFirmwareFlashPlan(switchModelId = defaultSwitchModelId
   }));
 }
 
+export async function readFirmwareFlashPlan(
+  switchModelId = defaultSwitchModelId,
+  version = defaultFirmwareReleaseVersion,
+) {
+  return readFirmwareFlashPlanFromBuildRoot(getFirmwareBuildBaseRoot(version), switchModelId);
+}
+
 export async function sha256File(filePath) {
   const content = await readFile(filePath);
   return createHash("sha256").update(content).digest("hex");
 }
 
-export async function assertFirmwareFiles(switchModelId = defaultSwitchModelId) {
-  for (const part of await readFirmwareFlashPlan(switchModelId)) {
+export async function assertFirmwareFiles(
+  switchModelId = defaultSwitchModelId,
+  version = defaultFirmwareReleaseVersion,
+) {
+  for (const part of await readFirmwareFlashPlan(switchModelId, version)) {
     if (!existsSync(part.sourcePath)) {
       throw new Error(`Missing required firmware file: ${part.sourcePath}`);
     }
@@ -182,10 +195,10 @@ export async function createFirmwareManifestForRelease(
   options = {},
 ) {
   const variant = getFirmwareVariant(switchModelId);
-  await assertFirmwareFiles(switchModelId);
+  await assertFirmwareFiles(switchModelId, version);
   const release = getFlasherRelease(version);
   const { desktopReleaseUrl } = await readReleaseInfo(release.version);
-  const firmwareParts = await readFirmwareFlashPlan(switchModelId);
+  const firmwareParts = await readFirmwareFlashPlan(switchModelId, version);
   const sha256 = [];
   const partPathPrefix =
     typeof options.partPathPrefix === "string" && options.partPathPrefix.length > 0

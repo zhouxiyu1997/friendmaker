@@ -3,11 +3,8 @@
   "versions": [
     {
       "version": "0.6.1",
-      "recommended": true
-    },
-    {
-      "version": "0.5.0",
-      "recommended": false
+      "recommended": true,
+      "firmwareBuildRoot": "firmware/esp32/.pio/build"
     }
   ]
 }
