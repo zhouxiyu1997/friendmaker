@@ -7,23 +7,31 @@
       name="description"
       content="Friend Maker 固件刷机站：无需本地安装开发环境，直接用浏览器给主线 ESP32 刷入固件。"
     />
-    <title>Friend Maker Firmware Flasher</title>
+    <title>Friend Maker 固件刷写器</title>
   </head>
   <body>
     <div class="app-shell">
       <header class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Friend Maker Web Flasher</p>
-          <h1>打开网页，直接给 ESP32 刷固件</h1>
-          <p class="hero-body">
+          <div class="hero-topline">
+            <p class="eyebrow" data-i18n="hero.eyebrow">Friend Maker Web Flasher</p>
+            <label class="language-switch" aria-label="Language">
+              <select id="language-select">
+                <option value="en">English</option>
+                <option value="zh-CN">简体中文</option>
+              </select>
+            </label>
+          </div>
+          <h1 data-i18n="hero.title">打开网页，直接给 ESP32 刷固件</h1>
+          <p class="hero-body" data-i18n="hero.body">
             这个网站只做一件事：给主线 <code>ESP32-WROOM-32 / ESP-32S</code> 刷入 Friend Maker 固件。
             不需要用户本地安装 <code>Node</code>、<code>PlatformIO</code> 或其他开发环境。
           </p>
         </div>
         <div class="hero-meta">
-          <span class="hero-pill">Chrome / Edge 桌面端</span>
-          <span class="hero-pill subtle">GitHub Pages</span>
-          <span class="hero-pill subtle">ESP32-WROOM-32 / ESP-32S</span>
+          <span class="hero-pill" data-i18n="hero.browserPill">Chrome / Edge 桌面端</span>
+          <span class="hero-pill subtle" data-i18n="hero.pagesPill">GitHub Pages</span>
+          <span class="hero-pill subtle" data-i18n="hero.boardPill">ESP32-WROOM-32 / ESP-32S</span>
         </div>
       </header>
 
@@ -31,8 +39,8 @@
         <section class="panel-grid">
           <section class="panel">
             <div class="panel-head">
-              <h2>浏览器与设备要求</h2>
-              <p>首期只支持主线板型和支持 Web Serial 的桌面浏览器。</p>
+              <h2 data-i18n="support.heading">浏览器与设备要求</h2>
+              <p data-i18n="support.copy">首期只支持主线板型和支持 Web Serial 的桌面浏览器。</p>
             </div>
             <div id="support-card" class="status-card status-idle">
               <span id="support-pill" class="status-pill">检测中</span>
@@ -40,23 +48,23 @@
               <p id="support-detail" class="status-detail">页面会检查当前浏览器是否支持 Web Serial。</p>
             </div>
             <ul class="check-list">
-              <li>推荐浏览器：<code>Chrome</code> / <code>Edge</code> 桌面端</li>
-              <li>目标开发板：<code>ESP32-WROOM-32 / ESP-32S</code></li>
-              <li>准备一根可传数据的 USB 线</li>
+              <li data-i18n="support.browser">推荐浏览器：<code>Chrome</code> / <code>Edge</code> 桌面端</li>
+              <li data-i18n="support.board">目标开发板：<code>ESP32-WROOM-32 / ESP-32S</code></li>
+              <li data-i18n="support.cable">准备一根可传数据的 USB 线</li>
             </ul>
           </section>
 
           <section class="panel">
             <div class="panel-head">
-              <h2>固件版本</h2>
-              <p>这里展示当前站点提供的固件发布信息，并支持按 Switch、Switch 2、Switch Lite 切换对应固件。</p>
+              <h2 data-i18n="firmware.heading">固件版本</h2>
+              <p data-i18n="firmware.copy">这里展示当前站点提供的固件发布信息，可在 Switch、Switch 2 与 Switch Lite 间切换。</p>
             </div>
             <div id="firmware-release-field" class="field-row">
-              <label for="firmware-release-version">发布版本</label>
+              <label for="firmware-release-version" data-i18n="firmware.releaseVersion">发布版本</label>
               <select id="firmware-release-version"></select>
             </div>
             <div class="field-row">
-              <label for="firmware-switch-model">Switch 型号</label>
+              <label for="firmware-switch-model" data-i18n="firmware.switchModel">Switch 型号</label>
               <select id="firmware-switch-model"></select>
             </div>
             <p id="firmware-switch-model-description" class="field-help"></p>
@@ -75,7 +83,7 @@
               </div>
             </dl>
             <div>
-              <strong class="inline-title">刷写文件</strong>
+              <strong class="inline-title" data-i18n="firmware.parts">刷写文件</strong>
               <ul id="firmware-parts-list" class="simple-list"></ul>
             </div>
             <div>
@@ -87,8 +95,8 @@
 
         <section class="panel wide-panel">
           <div class="panel-head">
-            <h2>一键刷入固件</h2>
-            <p>通过 manifest 驱动的浏览器刷机流程，刷完固件后就可以进入桌面版继续连接板子并绘画。</p>
+            <h2 data-i18n="flash.heading">一键刷入固件</h2>
+            <p data-i18n="flash.copy">通过 manifest 驱动的浏览器刷机流程，刷完固件后就可以进入桌面版继续连接板子并绘画。</p>
           </div>
           <div class="install-box">
             <esp-web-install-button id="firmware-install-button"></esp-web-install-button>
@@ -101,8 +109,8 @@
         <section class="panel-grid">
           <section class="panel">
             <div class="panel-head">
-              <h2>下一步</h2>
-              <p>这个网站不负责连接手柄或发送绘画命令。刷完固件后，请直接进入成熟的桌面版流程。</p>
+              <h2 data-i18n="next.heading">下一步</h2>
+              <p data-i18n="next.copy">这个网站不负责连接手柄或发送绘画命令。刷完固件后，请直接进入成熟的桌面版流程。</p>
             </div>
             <div class="button-row">
               <a
@@ -116,21 +124,21 @@
               </a>
             </div>
             <ol class="step-list">
-              <li>先用本页给开发板刷入固件</li>
-              <li>下载并打开 <code id="desktop-step-label">Friend Maker Desktop 最新版</code></li>
-              <li>在桌面版里继续连接板子、配对手柄并开始绘画</li>
+              <li data-i18n="next.stepFlash">先用本页给开发板刷入固件</li>
+              <li data-i18n="next.stepDownload">下载并打开 <code id="desktop-step-label">Friend Maker Desktop 最新版</code></li>
+              <li data-i18n="next.stepDesktop">在桌面版里继续连接板子、配对手柄并开始绘画</li>
             </ol>
           </section>
 
           <section class="panel">
             <div class="panel-head">
-              <h2>为什么只做刷机</h2>
-              <p>当前网页端主目标是零环境刷机入口，把后续连接与绘画继续交给稳定的桌面版处理。</p>
+              <h2 data-i18n="why.heading">为什么只做刷机</h2>
+              <p data-i18n="why.copy">当前网页端主目标是零环境刷机入口，把后续连接与绘画继续交给稳定的桌面版处理。</p>
             </div>
             <ul class="check-list">
-              <li>用户不需要安装本地开发环境就能刷固件</li>
-              <li>后续绘画链路直接复用 <code id="desktop-flow-label">Friend Maker Desktop 最新版</code></li>
-              <li>网页端不承担实验性串口执行和控制器调试职责</li>
+              <li data-i18n="why.noEnv">用户不需要安装本地开发环境就能刷固件</li>
+              <li data-i18n="why.desktopFlow">后续绘画链路直接复用 <code id="desktop-flow-label">Friend Maker Desktop 最新版</code></li>
+              <li data-i18n="why.scope">网页端不承担实验性串口执行和控制器调试职责</li>
             </ul>
           </section>
         </section>

@@ -92,6 +92,7 @@
   },
   "dependencies": {
     "@serialport/parser-readline": "^13.0.0",
+    "i18next": "^26.1.0",
     "image-q": "^4.0.0",
     "serialport": "^13.0.0",
     "sharp": "^0.34.3",

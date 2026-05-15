@@ -27,6 +27,12 @@
             <span id="title-page-label">脚本生成</span>
           </div>
           <span id="title-port-status" class="titlebar-status">串口未选择</span>
+          <label class="language-switch" aria-label="Language">
+            <select id="language-select" data-language-select>
+              <option value="en">English</option>
+              <option value="zh-CN">简体中文</option>
+            </select>
+          </label>
         </div>
         <div class="window-controls" aria-label="窗口控制">
           <button id="window-minimize-button" class="window-control" type="button" title="最小化" aria-label="最小化">
@@ -1263,6 +1269,8 @@
       </footer>
     </div>
 
+    <script src="/vendor/i18next.min.js"></script>
+    <script src="/i18n.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

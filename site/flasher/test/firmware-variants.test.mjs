@@ -35,16 +35,21 @@ test("firmware site rejects unsupported switch models", () => {
   );
 });
 
-test("firmware site page keeps the switch model wording aligned with desktop", async () => {
+test("firmware site page keeps the switch model wording internationalized and aligned with desktop", async () => {
   const pageSource = await readFile(new URL("../index.html", import.meta.url), "utf8");
-  const appSource = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+  const scriptSource = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
 
-  assert.match(pageSource, /Switch 型号/u);
-  assert.match(pageSource, /发布版本/u);
+  assert.match(pageSource, /data-i18n="firmware\.releaseVersion"/u);
+  assert.match(pageSource, /data-i18n="firmware\.switchModel"/u);
+  assert.match(scriptSource, /"firmware\.releaseVersion": "Release version"/u);
+  assert.match(scriptSource, /"firmware\.releaseVersion": "发布版本"/u);
+  assert.match(scriptSource, /"firmware\.switchModel": "Switch model"/u);
+  assert.match(scriptSource, /"firmware\.switchModel": "Switch 型号"/u);
   assert.doesNotMatch(pageSource, /0\.5\.0/u);
   assert.doesNotMatch(pageSource, /目标机型/u);
   assert.doesNotMatch(pageSource, /连接提示/u);
-  assert.match(appSource, /DEFAULT_RELEASE_VERSION/u);
-  assert.match(appSource, /release\.recommended \? `\$\{release\.version\}（推荐）` : release\.version/u);
-  assert.match(appSource, /firmwareReleaseField\.classList\.toggle\("hidden", FIRMWARE_RELEASES\.length <= 1\)/u);
+  assert.match(scriptSource, /DEFAULT_RELEASE_VERSION/u);
+  assert.match(scriptSource, /"firmware\.releaseRecommended": "\{\{version\}\} \(recommended\)"/u);
+  assert.match(scriptSource, /"firmware\.releaseRecommended": "\{\{version\}\}（推荐）"/u);
+  assert.match(scriptSource, /firmwareReleaseField\.classList\.toggle\("hidden", FIRMWARE_RELEASES\.length <= 1\)/u);
 });
