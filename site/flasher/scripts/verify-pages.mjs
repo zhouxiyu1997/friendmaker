@@ -4,7 +4,9 @@ import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 
 import {
-  createFirmwareManifest,
+  createFirmwareManifestForRelease,
+  getDefaultFirmwareReleaseVersion,
+  listFlasherReleases,
   listFirmwareVariants,
   readFirmwareFlashPlan,
   siteRoot,
@@ -25,42 +27,63 @@ async function assertFileExists(filePath) {
 
 async function main() {
   await assertFileExists(path.join(pagesRoot, "index.html"));
+  const firmwareReleases = listFlasherReleases();
   const firmwareVariants = listFirmwareVariants();
+  const defaultReleaseVersion = getDefaultFirmwareReleaseVersion();
+
+  for (const release of firmwareReleases) {
+    for (const variant of firmwareVariants) {
+      const manifestPath = path.join(pagesRoot, "firmware", release.version, variant.manifestFileName);
+      const publishedFirmwareRoot = path.join(pagesRoot, "firmware", release.version, variant.environmentId);
+      await assertFileExists(manifestPath);
+
+      const flashPlan = await readFirmwareFlashPlan(variant.switchModelId);
+      for (const part of flashPlan) {
+        await assertFileExists(path.join(publishedFirmwareRoot, part.publishFileName));
+      }
+
+      const actualManifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const expectedManifest = await createFirmwareManifestForRelease(variant.switchModelId, release.version);
+
+      assert.equal(actualManifest.name, expectedManifest.name, "manifest name should match");
+      assert.equal(actualManifest.version, expectedManifest.version, "manifest version should match");
+      assert.equal(
+        actualManifest.metadata?.desktopReleaseUrl,
+        expectedManifest.metadata?.desktopReleaseUrl,
+        "desktop release URL should match the derived release info",
+      );
+      assert.deepEqual(
+        actualManifest.builds,
+        expectedManifest.builds,
+        "manifest firmware parts should match the normalized flash plan",
+      );
+      assert.deepEqual(
+        actualManifest.metadata?.sha256,
+        expectedManifest.metadata?.sha256,
+        "manifest SHA256 metadata should match the published firmware files",
+      );
+      assert.equal(
+        actualManifest.metadata?.switchModelId,
+        variant.switchModelId,
+        "manifest switch model should match variant",
+      );
+    }
+  }
 
   for (const variant of firmwareVariants) {
     const manifestPath = path.join(pagesRoot, "firmware", variant.manifestFileName);
-    const publishedFirmwareRoot = path.join(pagesRoot, "firmware", variant.environmentId);
     await assertFileExists(manifestPath);
 
-    const flashPlan = await readFirmwareFlashPlan(variant.switchModelId);
-    for (const part of flashPlan) {
-      await assertFileExists(path.join(publishedFirmwareRoot, part.publishFileName));
-    }
-
     const actualManifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    const expectedManifest = await createFirmwareManifest(variant.switchModelId);
+    const expectedManifest = await createFirmwareManifestForRelease(variant.switchModelId, defaultReleaseVersion, {
+      partPathPrefix: defaultReleaseVersion,
+    });
 
-    assert.equal(actualManifest.name, expectedManifest.name, "manifest name should match");
-    assert.equal(actualManifest.version, expectedManifest.version, "manifest version should match");
-    assert.equal(
-      actualManifest.metadata?.desktopReleaseUrl,
-      expectedManifest.metadata?.desktopReleaseUrl,
-      "desktop release URL should match the derived release info",
-    );
+    assert.equal(actualManifest.version, expectedManifest.version, "default manifest version should match");
     assert.deepEqual(
       actualManifest.builds,
       expectedManifest.builds,
-      "manifest firmware parts should match the normalized flash plan",
-    );
-    assert.deepEqual(
-      actualManifest.metadata?.sha256,
-      expectedManifest.metadata?.sha256,
-      "manifest SHA256 metadata should match the published firmware files",
-    );
-    assert.equal(
-      actualManifest.metadata?.switchModelId,
-      variant.switchModelId,
-      "manifest switch model should match variant",
+      "default manifest should point at the default release firmware paths",
     );
   }
 }
