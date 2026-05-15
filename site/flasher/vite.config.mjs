@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 import {
-  createFirmwareManifest,
+  createFirmwareManifestForRelease,
+  getDefaultFirmwareReleaseVersion,
+  listFlasherReleases,
   listFirmwareVariants,
   readFirmwareFlashPlan,
 } from "./scripts/firmware-site.mjs";
@@ -15,10 +17,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function firmwareDevPlugin() {
+  const defaultReleaseVersion = getDefaultFirmwareReleaseVersion();
+  const releases = listFlasherReleases();
   const variants = listFirmwareVariants();
-  const variantByManifestPath = new Map(
-    variants.map((variant) => [`/firmware/${variant.manifestFileName}`, variant]),
+  const manifestRequestMap = new Map(
+    releases.flatMap((release) =>
+      variants.map((variant) => [
+        `/firmware/${release.version}/${variant.manifestFileName}`,
+        { releaseVersion: release.version, switchModelId: variant.switchModelId, partPathPrefix: null },
+      ]),
+    ),
   );
+  for (const variant of variants) {
+    manifestRequestMap.set(`/firmware/${variant.manifestFileName}`, {
+      releaseVersion: defaultReleaseVersion,
+      switchModelId: variant.switchModelId,
+      partPathPrefix: defaultReleaseVersion,
+    });
+  }
   const variantByEnvironmentId = new Map(
     variants.map((variant) => [variant.environmentId, variant]),
   );
@@ -28,11 +44,17 @@ function firmwareDevPlugin() {
     configureServer(server) {
       server.middlewares.use(async (request, response, next) => {
         const url = request.url?.split("?")[0] ?? "";
-        const manifestVariant = variantByManifestPath.get(url);
+        const manifestRequest = manifestRequestMap.get(url);
 
-        if (manifestVariant) {
+        if (manifestRequest) {
           try {
-            const manifest = await createFirmwareManifest(manifestVariant.switchModelId);
+            const manifest = await createFirmwareManifestForRelease(
+              manifestRequest.switchModelId,
+              manifestRequest.releaseVersion,
+              manifestRequest.partPathPrefix
+                ? { partPathPrefix: manifestRequest.partPathPrefix }
+                : {},
+            );
             response.statusCode = 200;
             response.setHeader("Content-Type", "application/json; charset=utf-8");
             response.end(`${JSON.stringify(manifest, null, 2)}\n`);
@@ -45,10 +67,16 @@ function firmwareDevPlugin() {
           return;
         }
 
-        const match = /^\/firmware\/([^/]+)\/([^/]+)$/u.exec(url);
-        const environmentId = match?.[1];
-        const publishFileName = match?.[2];
-        if (!environmentId || !publishFileName) {
+        const match = /^\/firmware\/([^/]+)\/([^/]+)\/([^/]+)$/u.exec(url);
+        const releaseVersion = match?.[1];
+        const environmentId = match?.[2];
+        const publishFileName = match?.[3];
+        if (!releaseVersion || !environmentId || !publishFileName) {
+          next();
+          return;
+        }
+
+        if (!releases.some((release) => release.version === releaseVersion)) {
           next();
           return;
         }
@@ -59,7 +87,7 @@ function firmwareDevPlugin() {
           return;
         }
 
-        const firmwareParts = await readFirmwareFlashPlan(variant.switchModelId);
+        const firmwareParts = await readFirmwareFlashPlan(variant.switchModelId, releaseVersion);
         const part = firmwareParts.find((entry) => entry.publishFileName === publishFileName);
         if (!part) {
           response.statusCode = 404;

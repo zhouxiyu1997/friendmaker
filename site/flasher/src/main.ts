@@ -1,4 +1,5 @@
 import "esp-web-tools/dist/web/install-button.js";
+import firmwareReleaseConfig from "../shared/firmware-releases.json";
 import firmwareVariantConfig from "../shared/firmware-variants.json";
 import "./styles.css";
 
@@ -32,22 +33,35 @@ type InstallButtonElement = HTMLElement & {
   eraseFirst: boolean | undefined;
 };
 
+type FirmwareReleaseDefinition = (typeof firmwareReleaseConfig.versions)[number];
 type FirmwareVariantDefinition = (typeof firmwareVariantConfig.variants)[number];
 type SwitchModelId = FirmwareVariantDefinition["switchModelId"];
+type FirmwareReleaseVersion = FirmwareReleaseDefinition["version"];
+
+interface FirmwareReleaseOption {
+  version: FirmwareReleaseVersion;
+  recommended: boolean;
+}
 
 interface SwitchModelDefinition {
   id: SwitchModelId;
   label: string;
   description: string;
-  manifestPath: string;
+  manifestFileName: string;
   boardLabel: string;
 }
 
+const FIRMWARE_RELEASES: FirmwareReleaseOption[] = firmwareReleaseConfig.versions.map((release) => ({
+  version: release.version as FirmwareReleaseVersion,
+  recommended: release.recommended === true,
+}));
+const RELEASE_BY_VERSION = new Map(FIRMWARE_RELEASES.map((release) => [release.version, release]));
+const DEFAULT_RELEASE_VERSION = firmwareReleaseConfig.defaultVersion as FirmwareReleaseVersion;
 const SWITCH_MODELS: SwitchModelDefinition[] = firmwareVariantConfig.variants.map((variant) => ({
   id: variant.switchModelId,
   label: variant.switchModelLabel,
   description: variant.switchModelDescription,
-  manifestPath: `./firmware/${variant.manifestFileName}`,
+  manifestFileName: variant.manifestFileName,
   boardLabel: variant.boardLabel,
 }));
 
@@ -65,6 +79,8 @@ const els = {
   desktopDownloadLink: document.getElementById("desktop-download-link") as HTMLAnchorElement,
   desktopStepLabel: document.getElementById("desktop-step-label") as HTMLElement,
   desktopFlowLabel: document.getElementById("desktop-flow-label") as HTMLElement,
+  firmwareReleaseField: document.getElementById("firmware-release-field") as HTMLElement,
+  firmwareReleaseVersion: document.getElementById("firmware-release-version") as HTMLSelectElement,
   firmwareVersion: document.getElementById("firmware-version") as HTMLElement,
   firmwareSwitchModel: document.getElementById("firmware-switch-model") as HTMLSelectElement,
   firmwareSwitchModelDescription: document.getElementById("firmware-switch-model-description") as HTMLElement,
@@ -81,16 +97,48 @@ const fallbackDesktopStepLabel = els.desktopStepLabel.textContent ?? "Friend Mak
 const fallbackDesktopFlowLabel = els.desktopFlowLabel.textContent ?? "Friend Maker Desktop 最新版";
 const fallbackFlashHint =
   els.flashHint.textContent ?? "如果刷机后串口重新枚举或临时断开，这是正常现象。下一步请下载桌面版继续使用。";
+let selectedReleaseVersion: FirmwareReleaseVersion = DEFAULT_RELEASE_VERSION;
 let selectedSwitchModelId: SwitchModelId = DEFAULT_SWITCH_MODEL_ID;
 let activeManifestLoadRequestId = 0;
 let activeManifestLoadController: AbortController | null = null;
+
+function findRelease(version: string): FirmwareReleaseOption {
+  return RELEASE_BY_VERSION.get(version as FirmwareReleaseVersion) ?? FIRMWARE_RELEASES[0]!;
+}
 
 function findSwitchModel(modelId: string): SwitchModelDefinition {
   return SWITCH_MODEL_BY_ID.get(modelId as SwitchModelId) ?? DEFAULT_SWITCH_MODEL;
 }
 
+function getSelectedRelease(): FirmwareReleaseOption {
+  return findRelease(selectedReleaseVersion);
+}
+
 function getSelectedSwitchModel(): SwitchModelDefinition {
   return findSwitchModel(selectedSwitchModelId);
+}
+
+function buildManifestPath(releaseVersion: FirmwareReleaseVersion, switchModel: SwitchModelDefinition): string {
+  return `./firmware/${releaseVersion}/${switchModel.manifestFileName}`;
+}
+
+function formatReleaseLabel(release: FirmwareReleaseOption): string {
+  return release.recommended ? `${release.version}（推荐）` : release.version;
+}
+
+function renderReleasePicker(): void {
+  els.firmwareReleaseField.classList.toggle("hidden", FIRMWARE_RELEASES.length <= 1);
+  els.firmwareReleaseVersion.replaceChildren();
+
+  for (const release of FIRMWARE_RELEASES) {
+    const option = document.createElement("option");
+    option.value = release.version;
+    option.textContent = formatReleaseLabel(release);
+    els.firmwareReleaseVersion.append(option);
+  }
+
+  selectedReleaseVersion = findRelease(selectedReleaseVersion).version;
+  els.firmwareReleaseVersion.value = selectedReleaseVersion;
 }
 
 function renderSwitchModelPicker(): void {
@@ -171,7 +219,7 @@ function renderFallbackDesktopRelease(): void {
 function renderManifest(manifest: FirmwareManifest, switchModel: SwitchModelDefinition): void {
   els.firmwareVersion.textContent = manifest.version;
   els.firmwareBoardLabel.textContent = manifest.metadata?.label ?? "ESP32-WROOM-32 / ESP-32S";
-  els.firmwareManifestPath.textContent = switchModel.manifestPath;
+  els.firmwareManifestPath.textContent = buildManifestPath(selectedReleaseVersion, switchModel);
   els.firmwareSwitchModelDescription.textContent =
     manifest.metadata?.switchModelDescription ?? switchModel.description;
   els.firmwarePartsList.innerHTML = "";
@@ -191,13 +239,13 @@ function renderManifest(manifest: FirmwareManifest, switchModel: SwitchModelDefi
 
   renderDesktopRelease(manifest.version, manifest.metadata?.desktopReleaseUrl ?? fallbackDesktopReleaseUrl);
   renderBrowserSupport(manifest.version);
-  setInstallButtonManifest(switchModel.manifestPath);
+  setInstallButtonManifest(buildManifestPath(selectedReleaseVersion, switchModel));
 }
 
 function renderManifestLoading(switchModel: SwitchModelDefinition): void {
   els.firmwareVersion.textContent = "加载中";
   els.firmwareBoardLabel.textContent = switchModel.boardLabel;
-  els.firmwareManifestPath.textContent = switchModel.manifestPath;
+  els.firmwareManifestPath.textContent = buildManifestPath(selectedReleaseVersion, switchModel);
   els.firmwareSwitchModelDescription.textContent = switchModel.description;
   els.firmwarePartsList.innerHTML = "";
   els.firmwareShaList.innerHTML = "";
@@ -207,9 +255,10 @@ function renderManifestLoading(switchModel: SwitchModelDefinition): void {
 }
 
 function renderManifestLoadError(message: string, switchModel: SwitchModelDefinition): void {
-  els.firmwareVersion.textContent = `${message} (${switchModel.manifestPath})`;
+  const manifestPath = buildManifestPath(selectedReleaseVersion, switchModel);
+  els.firmwareVersion.textContent = `${message} (${manifestPath})`;
   els.firmwareBoardLabel.textContent = switchModel.boardLabel;
-  els.firmwareManifestPath.textContent = switchModel.manifestPath;
+  els.firmwareManifestPath.textContent = manifestPath;
   els.firmwareSwitchModelDescription.textContent = switchModel.description;
   els.firmwarePartsList.innerHTML = "";
   els.firmwareShaList.innerHTML = "";
@@ -219,6 +268,7 @@ function renderManifestLoadError(message: string, switchModel: SwitchModelDefini
 }
 
 async function loadManifest(): Promise<void> {
+  const release = getSelectedRelease();
   const switchModel = getSelectedSwitchModel();
   const requestId = ++activeManifestLoadRequestId;
   activeManifestLoadController?.abort();
@@ -227,7 +277,7 @@ async function loadManifest(): Promise<void> {
   renderManifestLoading(switchModel);
 
   try {
-    const response = await fetch(switchModel.manifestPath, { signal: controller.signal });
+    const response = await fetch(buildManifestPath(release.version, switchModel), { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -254,7 +304,13 @@ async function loadManifest(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   renderBrowserSupport();
+  renderReleasePicker();
   renderSwitchModelPicker();
+
+  els.firmwareReleaseVersion.addEventListener("change", () => {
+    selectedReleaseVersion = findRelease(els.firmwareReleaseVersion.value).version;
+    void loadManifest();
+  });
 
   els.firmwareSwitchModel.addEventListener("change", () => {
     selectedSwitchModelId = findSwitchModel(els.firmwareSwitchModel.value).id;

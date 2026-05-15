@@ -75,7 +75,7 @@ const COMPLETED_SESSION_RETENTION_MS = 7 * DAY_IN_MS;
 const FAILED_SESSION_RETENTION_MS = 14 * DAY_IN_MS;
 const RECOVERABLE_SESSION_RETENTION_MS = 30 * DAY_IN_MS;
 const STALE_ACTIVE_SESSION_MESSAGE =
-  "The previous drawing session ended unexpectedly. Re-enter the drawing page on your Switch and resume from the saved recovery point.";
+  "The previous drawing session ended unexpectedly. Re-enter the drawing page on your Switch and resume from the saved recovery point; the app will switch back to the saved brush automatically.";
 
 function sanitizeLabelSegment(value: string): string {
   const normalized = value

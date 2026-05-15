@@ -175,7 +175,7 @@ If the issue disappears after pressing `EN`, it is more likely that the board st
 Check these first:
 
 - whether you already ran `Timing Tune / Benchmark`
-- whether the brush size in `Switch` matches the value in the web UI
+- whether the brush selected in `Script Studio` is the one you actually want to run; real drawing switches to that selected brush automatically
 - whether the cursor really starts from the `canvas center`
 - whether the controller or touchscreen was touched again after drawing started
 

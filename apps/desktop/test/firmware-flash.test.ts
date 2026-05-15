@@ -261,7 +261,11 @@ test("firmware flasher keeps the Switch model selector plus Switch 2 and Switch 
   );
 
   assert.match(pageSource, /Switch 型号/u);
+  assert.match(pageSource, /zhouxiyu1997\.github\.io\/friendmaker\//u);
+  assert.match(pageSource, /前往手柄测试/u);
   assert.match(appSource, /switchModelId:\s*"switch"/u);
+  assert.match(appSource, /firmwareWebFlasherHint/u);
+  assert.match(appSource, /若改用网页端，请刷入与当前选择的 .* 对应的版本/u);
   assert.match(
     appSource,
     /state\.firmwareSwitchModels = Array\.isArray\(payload\.switchModels\) \? payload\.switchModels : \[\]/u,

@@ -378,8 +378,10 @@ const els = {
   firmwareStopButton: document.getElementById("firmware-stop-button"),
   firmwarePlatformIoHint: document.getElementById("firmware-platformio-hint"),
   firmwareEnvHint: document.getElementById("firmware-env-hint"),
+  firmwareWebFlasherHint: document.getElementById("firmware-web-flasher-hint"),
   windowsDriverPanel: document.getElementById("windows-driver-panel"),
   windowsDriverHint: document.getElementById("windows-driver-hint"),
+  firmwareOpenControllerButton: document.getElementById("firmware-open-controller-button"),
   installCp210xDriverButton: document.getElementById("install-cp210x-driver-button"),
   installCh341DriverButton: document.getElementById("install-ch341-driver-button"),
   firmwareStatusCard: document.getElementById("firmware-status-card"),
@@ -513,7 +515,7 @@ const TIMING_BENCHMARK_MODES = {
     pattern: "square-spiral",
     spiralDepth: 6,
     confirmMessage:
-      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。现在开始运行快速检查（标准方圈）吗？",
+      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具；这组测速不会自动切笔刷，最好先手动切到 1 号笔。画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。现在开始运行快速检查（标准方圈）吗？",
     runningDetail:
       "正在跑快速检查（标准方圈）。请观察拐角会不会失真、转向会不会歪，以及有没有明显漏笔、跳笔或漂移。",
     successDetail:
@@ -525,7 +527,7 @@ const TIMING_BENCHMARK_MODES = {
     pattern: "square-spiral",
     spiralDepth: 12,
     confirmMessage:
-      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。现在开始运行累计漂移检查（长程方圈）吗？",
+      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具；这组测速不会自动切笔刷，最好先手动切到 1 号笔。画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。现在开始运行累计漂移检查（长程方圈）吗？",
     runningDetail:
       "正在跑累计漂移检查（长程方圈）。请重点看长一点之后会不会越跑越偏，拐角会不会越来越不规整。",
     successDetail:
@@ -539,7 +541,7 @@ const TIMING_BENCHMARK_MODES = {
     columnCount: 240,
     centerAroundCurrent: true,
     confirmMessage:
-      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具、最好切到 1 号笔、画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。这个基准会先以当前中心为中线左移到起画点，再连续画 6 行 x 240 点，共 1440 次落笔、2998 条动作，专门复现长直线和蛇形换行后的慢性偏移。现在开始运行 6 行 x 240 点阵复现基准吗？",
+      "开始前请确认：Switch 已经进入绘画页、当前是画笔工具；这组测速不会自动切笔刷，最好先手动切到 1 号笔。画笔停在画布中心，并且从现在开始不要再碰手柄或屏幕。这个基准会先以当前中心为中线左移到起画点，再连续画 6 行 x 240 点，共 1440 次落笔、2998 条动作，专门复现长直线和蛇形换行后的慢性偏移。现在开始运行 6 行 x 240 点阵复现基准吗？",
     runningDetail:
       "正在跑真实长程复现（以中心为基准的 6 行 x 240 点阵）。请重点观察每行后半段、换行后的首点，以及长时间连续落笔后有没有慢性累积偏移。",
     successDetail:
@@ -1151,6 +1153,10 @@ els.refreshPortsButton.addEventListener("click", async () => {
 });
 
 els.studioOpenControllerButton.addEventListener("click", () => {
+  switchPage("controller");
+});
+
+els.firmwareOpenControllerButton.addEventListener("click", () => {
   switchPage("controller");
 });
 
@@ -1965,8 +1971,8 @@ function updateFirmwareResultFromFlashSnapshot(flash) {
 
   if (flash?.status === "completed") {
     const detail = flash.fallbackToAutoDetect
-      ? "固定端口失败后已自动改用 PlatformIO 串口探测并刷入成功，可以继续去手柄测试页读取设备信息。"
-      : "设备已经写入完成，可以继续去手柄测试页读取设备信息。";
+      ? "固定端口失败后已自动改用 PlatformIO 串口探测并刷入成功。下一步请去“手柄测试”页读取设备信息并确认连接状态。"
+      : "设备已经写入完成。下一步请去“手柄测试”页读取设备信息并确认连接状态。";
     setFirmwareResult({
       status: "success",
       title: "固件刷入成功",
@@ -2942,7 +2948,7 @@ async function resumeRecoverySession(sessionId) {
   }
 
   const shouldResume = window.confirm(
-    "请确认：你已经先在 Switch 里保存当前画作，并且已经手动重新进入绘画页；从这里开始不要再手动改笔刷，也不要再移动页面。现在开始从恢复点继续吗？",
+    "请确认：你已经先在 Switch 里保存当前画作，并且已经手动重新进入绘画页；恢复时会自动重新切到这次任务保存的笔刷。从这里开始不要再手动改笔刷，也不要再移动页面。现在开始从恢复点继续吗？",
   );
 
   if (!shouldResume) {
@@ -3445,10 +3451,10 @@ function renderStudioExecutionStatus() {
       els.studioExecutionStatus.textContent = `绘制已完成：${execution.completedCommands} / ${execution.totalCommands}`;
       break;
     case "stopped":
-      els.studioExecutionStatus.textContent = `绘制已中断并保存恢复点：${execution.completedCommands} / ${execution.totalCommands}。请先在 Switch 里保存，再手动重新进入绘画页后继续。`;
+      els.studioExecutionStatus.textContent = `绘制已中断并保存恢复点：${execution.completedCommands} / ${execution.totalCommands}。请先在 Switch 里保存，再手动重新进入绘画页后继续；恢复时会自动重新切到上次保存的笔刷。`;
       break;
     case "failed":
-      els.studioExecutionStatus.textContent = `绘制异常中断：${execution.error ?? "请查看执行日志。"} 请先在 Switch 里保存，再手动重新进入绘画页后，从下方恢复任务继续。`;
+      els.studioExecutionStatus.textContent = `绘制异常中断：${execution.error ?? "请查看执行日志。"} 请先在 Switch 里保存，再手动重新进入绘画页后，从下方恢复任务继续；恢复时会自动重新切到上次保存的笔刷。`;
       break;
     default:
       els.studioExecutionStatus.textContent = "当前未开始绘制。";
@@ -3765,11 +3771,18 @@ function syncFirmwareUi() {
 
   if (switchModel && environment) {
     els.firmwareEnvHint.textContent = `${switchModel.description} 当前硬件环境：${environment.label}`;
+    els.firmwareWebFlasherHint.textContent =
+      `GitHub Pages 上也有在线刷固件的网站。若改用网页端，请刷入与当前选择的 ${switchModel.label} 对应的版本；刷完后再到“手柄测试”页继续连接。`;
     els.firmwareModelSelect.value = switchModel.id;
     els.firmwareEnvSelect.value = environment.id;
   } else if (environment) {
     els.firmwareEnvHint.textContent = environment.description;
+    els.firmwareWebFlasherHint.textContent =
+      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。";
     els.firmwareEnvSelect.value = environment.id;
+  } else {
+    els.firmwareWebFlasherHint.textContent =
+      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。";
   }
 
   const installStatus = state.firmwareTooling.install?.status ?? "idle";
