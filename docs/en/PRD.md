@@ -201,7 +201,7 @@ The current alpha should satisfy at least the following:
 2. Confirm controller status quickly
 3. Import a new image
 4. Choose `mono drawing`, `official palette drawing`, or `custom multicolor`
-5. Confirm brush size, center-start assumption, template selection, and official-palette slot assumptions
+5. Confirm the selected web brush preset, center-start assumption, template selection, and official-palette slot assumptions
 6. Start drawing and watch progress through logs and recovery state
 
 ## 9. Technical and scene assumptions
@@ -209,8 +209,8 @@ The current alpha should satisfy at least the following:
 The current mainline is built on these fixed assumptions:
 
 - the target canvas is modeled as `256x256` script coordinates
+- before drawing starts, Friend Maker switches to the brush selected in the web UI automatically
 - before drawing starts, the brush / cursor is already at the center of the canvas
-- the brush size inside `Switch` has already been changed manually to match the web UI
 - using the square brush is recommended
 - `A` performs drawing
 - the D-pad performs one-cell movement
