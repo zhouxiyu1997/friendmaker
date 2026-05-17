@@ -21,10 +21,10 @@ test("firmware site keeps the default switch manifest stable and maps Switch 2 e
   assert.equal(getFirmwareVariant().switchModelLabel, "Switch");
   assert.equal(getFirmwareVariant("switch2").environmentId, "esp32dev_wireless_switch2");
   assert.equal(getFirmwareVariant("switch_lite").boardId, "esp32dev_wireless");
-  assert.equal(getVersionedManifestPath("switch", "0.6.1"), "./firmware/0.6.1/manifest.json");
+  assert.equal(getVersionedManifestPath("switch", "0.6.2"), "./firmware/0.6.2/manifest.json");
   assert.deepEqual(
     listFlasherReleases().map((release) => release.version),
-    ["0.6.1"],
+    ["0.6.2"],
   );
 });
 

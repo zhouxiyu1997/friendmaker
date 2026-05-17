@@ -20,20 +20,20 @@ test("release info derives tag and desktop release URL from the root version", (
 });
 
 test("flasher release catalog only exposes versions backed by a declared firmware build root", () => {
-  assert.equal(getDefaultFirmwareReleaseVersion(), "0.6.1");
+  assert.equal(getDefaultFirmwareReleaseVersion(), "0.6.2");
   assert.deepEqual(
     listFirmwareReleases().map((release) => release.version),
-    ["0.6.1"],
+    ["0.6.2"],
   );
   assert.equal(
-    getFirmwareRelease("0.6.1").desktopReleaseUrl,
-    "https://github.com/zhouxiyu1997/friendmaker/releases/tag/v0.6.1",
+    getFirmwareRelease("0.6.2").desktopReleaseUrl,
+    "https://github.com/zhouxiyu1997/friendmaker/releases/tag/v0.6.2",
   );
   assert.equal(
-    getFirmwareRelease("0.6.1").firmwareBuildRoot,
+    getFirmwareRelease("0.6.2").firmwareBuildRoot,
     "firmware/esp32/.pio/build",
   );
   assert.ok(
-    getFirmwareBuildBaseRoot("0.6.1").endsWith(path.join("firmware", "esp32", ".pio", "build")),
+    getFirmwareBuildBaseRoot("0.6.2").endsWith(path.join("firmware", "esp32", ".pio", "build")),
   );
 });
