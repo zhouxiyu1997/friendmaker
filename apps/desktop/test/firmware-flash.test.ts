@@ -182,7 +182,7 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
   );
   assert.match(
     firmwareSource,
-    /#elif defined\(SWITCH_2\)[\s\S]*kBluetoothTimingProfile = "switch2"[\s\S]*kHidCongestionRetryBudgetMs = 800[\s\S]*kAttemptVirtualCableOnAuthComplete = true[\s\S]*kIdlePrePairingReportIntervalMs = 60[\s\S]*kIdleConnectedReportIntervalMs = 30/u,
+    /#elif defined\(SWITCH_2\)[\s\S]*kBluetoothTimingProfile = "switch2"[\s\S]*kHidCongestionRetryBudgetMs = 800[\s\S]*kHidCongestionRetryDelayMs = 120[\s\S]*kPostOpenReportQuietMs = 1000[\s\S]*kModeChangeReportQuietMs = 300[\s\S]*kExplicitInputRepeatIntervalMs = 40[\s\S]*kAttemptVirtualCableOnAuthComplete = true[\s\S]*kIdlePrePairingReportIntervalMs = 60[\s\S]*kIdleConnectedReportIntervalMs = 30/u,
   );
   assert.match(
     firmwareSource,
@@ -198,7 +198,27 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
   );
   assert.match(
     firmwareSource,
-    /sendTaskTrampoline[\s\S]*if \(kSendTaskStartupDelayMs > 0\)[\s\S]*if \(kUseFixedSendInterval\) \{[\s\S]*kFixedSendTaskIntervalMs[\s\S]*transport->idleSendIntervalMs\(\)/u,
+    /sendTaskTrampoline[\s\S]*if \(kSendTaskStartupDelayMs > 0\)[\s\S]*!transport->explicitInputActive_ && !transport->shouldDelayInputReports\(\)[\s\S]*if \(kUseFixedSendInterval\) \{[\s\S]*kFixedSendTaskIntervalMs[\s\S]*transport->idleSendIntervalMs\(\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /ESP_HIDD_OPEN_EVT[\s\S]*kPostOpenReportQuietMs > 0[\s\S]*inputReportsQuietUntilMs_ = millis\(\) \+ kPostOpenReportQuietMs[\s\S]*if \(!shouldDelayInputReports\(\)\) \{[\s\S]*sendCurrentInputReport\(false\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /ESP_BT_GAP_MODE_CHG_EVT[\s\S]*param->mode_chg\.mode != ESP_BT_PM_MD_ACTIVE[\s\S]*inputReportsQuietUntilMs_ = millis\(\) \+ kModeChangeReportQuietMs/u,
+  );
+  assert.match(
+    firmwareSource,
+    /repeatCurrentInputReport[\s\S]*delay\(kHidCongestionRetryDelayMs\)[\s\S]*delay\(remaining < kExplicitInputRepeatIntervalMs \? remaining : kExplicitInputRepeatIntervalMs\)/u,
+  );
+  assert.match(
+    firmwareSource,
+    /repeatCurrentInputReport[\s\S]*uint32_t firstAcceptedAt = 0[\s\S]*if \(firstAcceptedAt == 0\) \{[\s\S]*firstAcceptedAt = millis\(\)[\s\S]*const uint32_t elapsed = millis\(\) - firstAcceptedAt/u,
+  );
+  assert.match(
+    firmwareSource,
+    /repeatCurrentInputReport[\s\S]*while \(shouldDelayInputReports\(\)\) \{[\s\S]*delay\(1\);[\s\S]*sendCurrentInputReport\(logFailure, waitForSendEvent\)/u,
   );
   assert.match(
     firmwareSource,

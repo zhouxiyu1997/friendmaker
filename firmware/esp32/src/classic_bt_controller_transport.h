@@ -38,6 +38,8 @@ class ClassicBtControllerTransport : public ControllerTransport {
       bool waitForSendEvent,
       uint16_t congestionRetryBudgetMs);
   bool shouldRetryAfterTransientSendFailure() const;
+  bool shouldDelayInputReports() const;
+  uint32_t inputReportsQuietUntilMs() const;
   bool waitForInputReportAccepted(uint32_t expectedEventCount, bool logFailure);
   bool waitForInputReportDrain(uint32_t timeoutMs, bool logFailure);
   bool beginExplicitInput(bool waitForDrain);
@@ -89,6 +91,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   volatile uint32_t inputReportSendEventCount_ = 0;
   volatile int lastInputReportStatus_ = -1;
   volatile uint8_t lastInputReportReason_ = 0;
+  uint32_t inputReportsQuietUntilMs_ = 0;
   uint8_t lastPeerAddress_[6] = {};
   bool hasPeerAddress_ = false;
   bool hasReconnectablePeer_ = false;

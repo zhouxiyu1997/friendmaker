@@ -30,12 +30,15 @@ constexpr uint8_t kStickMax = 255;
 // is congested, so a short retry window is safe and avoids aborting the whole
 // draw on a transient queue backup.
 constexpr uint8_t kHidErrCongested = 8;
-constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
 #if defined(SWITCH_LITE)
 constexpr const char *kBluetoothTimingProfile = "switch-lite";
 // Switch Lite needs a wider retry window during transient L2CAP congestion.
 constexpr uint16_t kHidCongestionRetryBudgetMs = 300;
+constexpr uint16_t kHidCongestionRetryDelayMs = 45;
 constexpr uint16_t kSendTaskStartupDelayMs = 1000;
+constexpr uint16_t kPostOpenReportQuietMs = 1000;
+constexpr uint16_t kModeChangeReportQuietMs = 250;
+constexpr uint16_t kExplicitInputRepeatIntervalMs = 24;
 constexpr bool kUseFixedSendInterval = true;
 constexpr bool kWaitForExplicitInputSendEvent = true;
 constexpr bool kWaitForExplicitInputDrain = true;
@@ -51,7 +54,11 @@ constexpr const char *kBluetoothTimingProfile = "switch2";
 // Switch 2 is still under characterization, so keep its idle/report cadence
 // conservative until we understand its Classic BT pairing behavior better.
 constexpr uint16_t kHidCongestionRetryBudgetMs = 800;
+constexpr uint16_t kHidCongestionRetryDelayMs = 120;
 constexpr uint16_t kSendTaskStartupDelayMs = 1000;
+constexpr uint16_t kPostOpenReportQuietMs = 1000;
+constexpr uint16_t kModeChangeReportQuietMs = 300;
+constexpr uint16_t kExplicitInputRepeatIntervalMs = 40;
 constexpr bool kUseFixedSendInterval = true;
 constexpr bool kWaitForExplicitInputSendEvent = true;
 constexpr bool kWaitForExplicitInputDrain = true;
@@ -65,7 +72,11 @@ constexpr uint16_t kIdleConnectedReportIntervalMs = 30;
 #else
 constexpr const char *kBluetoothTimingProfile = "switch";
 constexpr uint16_t kHidCongestionRetryBudgetMs = HID_REPEAT_INTERVAL_MS * 4;
+constexpr uint16_t kHidCongestionRetryDelayMs = HID_REPEAT_INTERVAL_MS;
 constexpr uint16_t kSendTaskStartupDelayMs = 0;
+constexpr uint16_t kPostOpenReportQuietMs = 0;
+constexpr uint16_t kModeChangeReportQuietMs = 0;
+constexpr uint16_t kExplicitInputRepeatIntervalMs = HID_REPEAT_INTERVAL_MS;
 constexpr bool kUseFixedSendInterval = false;
 constexpr bool kWaitForExplicitInputSendEvent = false;
 constexpr bool kWaitForExplicitInputDrain = false;
@@ -472,6 +483,7 @@ void ClassicBtControllerTransport::clearConnectionState() {
   stackStarted_ = false;
   timer_ = 0;
   explicitInputActive_ = false;
+  inputReportsQuietUntilMs_ = 0;
   resetInputReportTracking();
   initStep_ = "idle";
   initError_ = "none";
@@ -691,13 +703,26 @@ uint16_t ClassicBtControllerTransport::idleSendIntervalMs() const {
   return kIdleConnectedReportIntervalMs;
 }
 
+uint32_t ClassicBtControllerTransport::inputReportsQuietUntilMs() const {
+  if (kPostOpenReportQuietMs == 0 && kModeChangeReportQuietMs == 0) {
+    return 0;
+  }
+
+  return inputReportsQuietUntilMs_;
+}
+
+bool ClassicBtControllerTransport::shouldDelayInputReports() const {
+  const uint32_t quietUntil = inputReportsQuietUntilMs();
+  return quietUntil != 0 && static_cast<int32_t>(quietUntil - millis()) > 0;
+}
+
 void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
   auto *transport = static_cast<ClassicBtControllerTransport *>(param);
   if (kSendTaskStartupDelayMs > 0) {
     vTaskDelay(pdMS_TO_TICKS(kSendTaskStartupDelayMs));
   }
   while (true) {
-    if (!transport->explicitInputActive_) {
+    if (!transport->explicitInputActive_ && !transport->shouldDelayInputReports()) {
       transport->sendCurrentInputReport(false);
     }
     if (kUseFixedSendInterval) {
@@ -917,6 +942,7 @@ void ClassicBtControllerTransport::enterReconnectableState(const char *reason) {
   discoverable_ = true;
   reportCongested_ = false;
   consecutiveSendReportFailures_ = 0;
+  inputReportsQuietUntilMs_ = 0;
   lastDropReason_ = reason;
   clearInputs();
 
@@ -1147,6 +1173,9 @@ bool ClassicBtControllerTransport::beginExplicitInput(bool waitForDrain) {
   }
 
   xSemaphoreTakeRecursive(inputReportSendMutex_, portMAX_DELAY);
+  while (shouldDelayInputReports()) {
+    delay(1);
+  }
   if (!isControllerInputReady()) {
     Serial.printf(
         "WARN bt explicit_input blocked connected=%s paired=%s ready=%s\n",
@@ -1194,11 +1223,15 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
     bool logFailure,
     bool waitForSendEvent,
     uint16_t congestionRetryBudgetMs) {
-  const uint32_t startedAt = millis();
+  uint32_t firstAcceptedAt = 0;
   uint32_t congestionStartedAt = 0;
   bool loggedCongestionRetry = false;
 
   while (true) {
+    while (shouldDelayInputReports()) {
+      delay(1);
+    }
+
     if (!sendCurrentInputReport(logFailure, waitForSendEvent)) {
       if (shouldRetryAfterTransientSendFailure()) {
         if (congestionStartedAt == 0) {
@@ -1224,13 +1257,17 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
     congestionStartedAt = 0;
     loggedCongestionRetry = false;
 
-    const uint32_t elapsed = millis() - startedAt;
+    if (firstAcceptedAt == 0) {
+      firstAcceptedAt = millis();
+    }
+
+    const uint32_t elapsed = millis() - firstAcceptedAt;
     if (elapsed >= durationMs) {
       break;
     }
 
     const uint32_t remaining = durationMs - elapsed;
-    delay(remaining < HID_REPEAT_INTERVAL_MS ? remaining : HID_REPEAT_INTERVAL_MS);
+    delay(remaining < kExplicitInputRepeatIntervalMs ? remaining : kExplicitInputRepeatIntervalMs);
   }
 
   return true;
@@ -1497,6 +1534,10 @@ void ClassicBtControllerTransport::handleGapEvent(int event, void *rawParam) {
     }
     case ESP_BT_GAP_MODE_CHG_EVT:
       Serial.printf("INFO bt mode-change mode=%u\n", param->mode_chg.mode);
+      if (connected_ && kModeChangeReportQuietMs > 0 &&
+          param->mode_chg.mode != ESP_BT_PM_MD_ACTIVE) {
+        inputReportsQuietUntilMs_ = millis() + kModeChangeReportQuietMs;
+      }
       break;
     case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
       Serial.printf("INFO bt acl-connect status=%u\n", param->acl_conn_cmpl_stat.stat);
@@ -1572,6 +1613,9 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
       reportCongested_ = false;
       consecutiveSendReportFailures_ = 0;
       if (connected_) {
+        if (kPostOpenReportQuietMs > 0) {
+          inputReportsQuietUntilMs_ = millis() + kPostOpenReportQuietMs;
+        }
         const bool samePeer =
             hasPeerAddress_ &&
             std::memcmp(lastPeerAddress_, param->open.bd_addr, sizeof(lastPeerAddress_)) == 0;
@@ -1582,7 +1626,9 @@ void ClassicBtControllerTransport::handleHidEvent(int event, void *rawParam) {
         }
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
         ensureSendTask();
-        sendCurrentInputReport(false);
+        if (!shouldDelayInputReports()) {
+          sendCurrentInputReport(false);
+        }
       }
       Serial.printf(
           "INFO bt hid event=open status=%d conn=%d peer=%s\n",
@@ -1772,6 +1818,8 @@ bool ClassicBtControllerTransport::sendCurrentInputReport(bool logFailure, bool 
   return false;
 }
 bool ClassicBtControllerTransport::shouldRetryAfterTransientSendFailure() const { return false; }
+bool ClassicBtControllerTransport::shouldDelayInputReports() const { return false; }
+uint32_t ClassicBtControllerTransport::inputReportsQuietUntilMs() const { return 0; }
 bool ClassicBtControllerTransport::waitForInputReportAccepted(
     uint32_t expectedEventCount, bool logFailure) {
   (void)expectedEventCount;
