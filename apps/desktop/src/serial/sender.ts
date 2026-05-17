@@ -944,6 +944,13 @@ export class SerialCommandSession {
     try {
       await openingPromise;
     } catch (error) {
+      if (port.isOpen) {
+        await closePort(port).catch(() => {
+          // Preserve the original open/probe error; the session is already
+          // considered unusable and will be discarded below.
+        });
+      }
+
       if (this.port === port) {
         if (this.parser) {
           this.detachParserDataHandler(this.parser);
