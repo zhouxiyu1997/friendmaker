@@ -37,6 +37,34 @@ function parseLineCommand(line: string): { dx: number; dy: number; stride: numbe
   return { dx, dy, stride };
 }
 
+function parseStickCommand(line: string): { x: number; y: number; ms: number } | null {
+  const parts = line.trim().split(/\s+/u);
+
+  if (parts.length !== 4 || parts[0] !== "STICK") {
+    return null;
+  }
+
+  const x = Number.parseInt(parts[1] ?? "", 10);
+  const y = Number.parseInt(parts[2] ?? "", 10);
+  const ms = Number.parseInt(parts[3] ?? "", 10);
+
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(ms) ||
+    x < -1 ||
+    x > 1 ||
+    y < -1 ||
+    y > 1 ||
+    (x === 0 && y === 0) ||
+    ms <= 0
+  ) {
+    return null;
+  }
+
+  return { x, y, ms };
+}
+
 function parseButtonCommand(line: string): string | null {
   const parts = line.trim().split(/\s+/u);
 
@@ -308,6 +336,18 @@ export class SimulatedDevice {
       this.state.x += parsed.dx;
       this.state.y += parsed.dy;
       this.state.drawCount += metrics.drawCount;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
+    if (trimmed.startsWith("STICK ")) {
+      const parsed = parseStickCommand(trimmed);
+
+      if (!parsed) {
+        await delay(options.ackDelayMs);
+        return this.cacheAndReturn(frame, this.makeError(frame, "invalid stick"), lines);
+      }
+
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }

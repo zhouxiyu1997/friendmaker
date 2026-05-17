@@ -4,6 +4,7 @@ export type DrawCommand =
   | { type: "inputConfig"; buttonPressMs: number; inputDelayMs: number; homeMs: number }
   | { type: "home" }
   | { type: "move"; dx: number; dy: number }
+  | { type: "stick"; x: -1 | 0 | 1; y: -1 | 0 | 1; ms: number }
   | { type: "line"; dx: number; dy: number; stride?: number }
   | { type: "draw"; button: ControllerButton }
   | { type: "press"; button: ControllerButton }
@@ -30,6 +31,10 @@ export function inputConfigCommand(
 
 export function moveCommand(dx: number, dy: number): DrawCommand {
   return { type: "move", dx, dy };
+}
+
+export function stickCommand(x: -1 | 0 | 1, y: -1 | 0 | 1, ms: number): DrawCommand {
+  return { type: "stick", x, y, ms };
 }
 
 export function lineCommand(dx: number, dy: number, stride = 1): DrawCommand {

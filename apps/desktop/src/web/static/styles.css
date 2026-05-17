@@ -923,6 +923,7 @@ button:disabled {
 .template-picker-card,
 .template-preview-card,
 .checkbox-card,
+.recenter-card,
 .preview-select-card,
 .studio-connection-card,
 .recovery-panel,
@@ -1290,6 +1291,10 @@ input[type="range"] {
   align-items: center;
   gap: 10px;
   padding: 10px;
+}
+
+.recenter-card {
+  background: var(--surface-muted);
 }
 
 .checkbox-card input {

@@ -161,3 +161,91 @@ test("square large brushes emit stride-aware line runs for contiguous rows", () 
   assert.ok(strideLine && strideLine.type === "line");
   assert.equal(estimateRuntimeMs([strideLine], profile), estimateRuntimeMs(equivalentDiscreteSequence, profile));
 });
+
+test("time-saving recenter strategy inserts recenter macro before costly hops", () => {
+  const profile = makeProfile({
+    canvasWidth: 256,
+    canvasHeight: 1,
+    inputDelay: 45,
+    buttonPressDuration: 65,
+  });
+  const pixelMap = makePixelMap(256, 1, [
+    { x: 255, y: 0 },
+    { x: 0, y: 0 },
+  ]);
+
+  const offPlan = generateScanlinePlan(pixelMap, profile, "scanline", "off");
+  const recenterPlan = generateScanlinePlan(pixelMap, profile, "scanline", "time-saving");
+  const serialized = serializeCommands(recenterPlan.commands);
+  const macroStart = serialized.indexOf("STICK -1 0 2000");
+
+  assert.ok(macroStart >= 0, "expected recenter macro to be inserted");
+  assert.deepEqual(serialized.slice(macroStart, macroStart + 7), [
+    "STICK -1 0 2000",
+    "W 500",
+    "BTN X",
+    "W 500",
+    "BTN X",
+    "W 500",
+    "BTN A",
+  ]);
+  assert.ok(serialized.includes("M -128 0"), "expected movement from center after recenter");
+  assert.equal(recenterPlan.recenterStats.recenterCount, 1);
+  assert.equal(recenterPlan.recenterStats.recenterCandidates, 1);
+  assert.ok(recenterPlan.recenterStats.recenterSavedMs > 0);
+  assert.ok(estimateRuntimeMs(recenterPlan.commands, profile) < estimateRuntimeMs(offPlan.commands, profile));
+});
+
+test("time-saving recenter strategy skips nearby hops", () => {
+  const profile = makeProfile({
+    canvasWidth: 256,
+    canvasHeight: 1,
+    inputDelay: 45,
+    buttonPressDuration: 65,
+  });
+  const pixelMap = makePixelMap(256, 1, [
+    { x: 160, y: 0 },
+    { x: 170, y: 0 },
+  ]);
+
+  const recenterPlan = generateScanlinePlan(pixelMap, profile, "scanline", "time-saving");
+  const serialized = serializeCommands(recenterPlan.commands);
+
+  assert.equal(serialized.some((command) => command.startsWith("STICK ")), false);
+  assert.equal(recenterPlan.recenterStats.recenterCount, 0);
+  assert.equal(recenterPlan.recenterStats.recenterCandidates, 0);
+});
+
+test("recenter thresholds follow the active input timing", () => {
+  const fastProfile = makeProfile({
+    inputDelay: 45,
+    buttonPressDuration: 65,
+  });
+  const slowProfile = makeProfile({
+    inputDelay: 100,
+    buttonPressDuration: 100,
+  });
+  const pixelMap = makePixelMap(256, 1, [{ x: 128, y: 0 }]);
+
+  const fastPlan = generateScanlinePlan(pixelMap, fastProfile, "scanline", "time-saving");
+  const slowPlan = generateScanlinePlan(pixelMap, slowProfile, "scanline", "time-saving");
+
+  assert.equal(fastPlan.recenterStats.recenterThresholdSteps, 35);
+  assert.equal(slowPlan.recenterStats.recenterThresholdSteps, 21);
+  assert.equal(fastPlan.recenterStats.recenterMacroMs, 3830);
+  assert.equal(slowPlan.recenterStats.recenterMacroMs, 4100);
+});
+
+test("recenter strategy stays disabled by default", () => {
+  const profile = makeProfile({ canvasWidth: 256, canvasHeight: 1 });
+  const pixelMap = makePixelMap(256, 1, [
+    { x: 255, y: 0 },
+    { x: 0, y: 0 },
+  ]);
+
+  const defaultPlan = generateScanlinePlan(pixelMap, profile, "scanline");
+  const offPlan = generateScanlinePlan(pixelMap, profile, "scanline", "off");
+
+  assert.deepEqual(serializeCommands(defaultPlan.commands), serializeCommands(offPlan.commands));
+  assert.equal(defaultPlan.recenterStats.recenterCount, 0);
+});

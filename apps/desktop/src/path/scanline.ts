@@ -17,26 +17,50 @@ import {
   lineCommand,
   moveCommand,
   paletteConfigCommand,
+  pressButtonCommand,
   type DrawCommand,
+  stickCommand,
+  waitCommand,
 } from "../protocol/commands.js";
 import { getLineCommandMetrics } from "../protocol/lineMetrics.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
 
 export type PathStrategy = "scanline" | "nearest";
+export type RecenterStrategy = "off" | "time-saving";
+
+export interface RecenterStats {
+  recenterCount: number;
+  recenterSavedMs: number;
+  recenterMacroMs: number;
+  recenterThresholdSteps: number;
+  recenterCandidates: number;
+}
+
 export interface GeneratedScanlinePlan {
   commands: DrawCommand[];
   resumePlan: ResumePlan;
+  recenterStats: RecenterStats;
 }
 
 const PALETTE_SLOT_COUNT = 9;
 const EXACT_COMPONENT_ORDER_LIMIT = 6;
 const EXACT_COMPONENT_PIXEL_LIMIT = 300;
+const RECENTER_STICK_HOLD_MS = 2_000;
+const RECENTER_UI_SETTLE_WAIT_MS = 500;
 const NEIGHBOR_OFFSETS = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
   { dx: 0, dy: 1 },
   { dx: 0, dy: -1 },
 ];
+
+interface RecenterPlanner {
+  strategy: RecenterStrategy;
+  center: { x: number; y: number };
+  stepMs: number;
+  macroMs: number;
+  stats: RecenterStats;
+}
 
 function groupPixelsByColor(pixelMap: PixelMap): Map<number, Pixel[]> {
   const byColor = new Map<number, Pixel[]>();
@@ -495,20 +519,84 @@ function toCanvasPosition(
   return gridCellToCanvasCenter(grid, point);
 }
 
+function manhattanDistance(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+): number {
+  return Math.abs(left.x - right.x) + Math.abs(left.y - right.y);
+}
+
+function createRecenterMacroCommands(): DrawCommand[] {
+  return [
+    stickCommand(-1, 0, RECENTER_STICK_HOLD_MS),
+    waitCommand(RECENTER_UI_SETTLE_WAIT_MS),
+    pressButtonCommand("X"),
+    waitCommand(RECENTER_UI_SETTLE_WAIT_MS),
+    pressButtonCommand("X"),
+    waitCommand(RECENTER_UI_SETTLE_WAIT_MS),
+    pressButtonCommand("A"),
+  ];
+}
+
+function createRecenterPlanner(
+  profile: DrawingProfile,
+  strategy: RecenterStrategy,
+): RecenterPlanner {
+  const stepMs = profile.buttonPressDuration + profile.inputDelay;
+  const macroMs = RECENTER_STICK_HOLD_MS + 3 * stepMs + 3 * RECENTER_UI_SETTLE_WAIT_MS;
+
+  return {
+    strategy,
+    center: {
+      x: Math.floor(profile.canvasWidth / 2),
+      y: Math.floor(profile.canvasHeight / 2),
+    },
+    stepMs,
+    macroMs,
+    stats: {
+      recenterCount: 0,
+      recenterSavedMs: 0,
+      recenterMacroMs: macroMs,
+      recenterThresholdSteps: Math.floor(macroMs / stepMs) + 1,
+      recenterCandidates: 0,
+    },
+  };
+}
+
 function moveTo(
+  commands: DrawCommand[],
   current: { x: number; y: number },
   target: { x: number; y: number },
   grid: BrushGrid,
-): DrawCommand[] {
+  recenterPlanner: RecenterPlanner,
+): { x: number; y: number } {
   const canvasTarget = toCanvasPosition(target, grid);
-  const dx = canvasTarget.x - current.x;
-  const dy = canvasTarget.y - current.y;
+  let moveOrigin = current;
 
-  if (dx === 0 && dy === 0) {
-    return [];
+  if (recenterPlanner.strategy === "time-saving") {
+    const directSteps = manhattanDistance(current, canvasTarget);
+    const recenteredSteps = manhattanDistance(recenterPlanner.center, canvasTarget);
+    const directCost = directSteps * recenterPlanner.stepMs;
+    const recenterCost = recenterPlanner.macroMs + recenteredSteps * recenterPlanner.stepMs;
+
+    if (directCost > recenterCost) {
+      recenterPlanner.stats.recenterCandidates += 1;
+      recenterPlanner.stats.recenterCount += 1;
+      recenterPlanner.stats.recenterSavedMs += directCost - recenterCost;
+      commands.push(...createRecenterMacroCommands());
+      moveOrigin = recenterPlanner.center;
+    }
   }
 
-  return [moveCommand(dx, dy)];
+  const dx = canvasTarget.x - moveOrigin.x;
+  const dy = canvasTarget.y - moveOrigin.y;
+
+  if (dx === 0 && dy === 0) {
+    return canvasTarget;
+  }
+
+  commands.push(moveCommand(dx, dy));
+  return canvasTarget;
 }
 
 function estimateTravelDistance(
@@ -605,15 +693,17 @@ function appendPixelRun(
   current: { x: number; y: number },
   profile: DrawingProfile,
   grid: BrushGrid,
-): { x: number; y: number } {
+  recenterPlanner: RecenterPlanner,
+): { position: { x: number; y: number }; paintCommandIndex: number | null } {
   const firstPixel = run[0];
   const lastPixel = run[run.length - 1];
 
   if (!firstPixel || !lastPixel) {
-    return current;
+    return { position: current, paintCommandIndex: null };
   }
 
-  commands.push(...moveTo(current, firstPixel, grid));
+  moveTo(commands, current, firstPixel, grid, recenterPlanner);
+  const paintCommandIndex = commands.length;
 
   if (run.length === 1) {
     commands.push(drawCommand(profile.drawButton));
@@ -631,7 +721,7 @@ function appendPixelRun(
     );
   }
 
-  return toCanvasPosition(lastPixel, grid);
+  return { position: toCanvasPosition(lastPixel, grid), paintCommandIndex };
 }
 
 function appendOrderedPixels(
@@ -640,9 +730,11 @@ function appendOrderedPixels(
   current: { x: number; y: number },
   profile: DrawingProfile,
   grid: BrushGrid,
-): { x: number; y: number } {
+  recenterPlanner: RecenterPlanner,
+): { position: { x: number; y: number }; firstPaintCommandIndex: number | null } {
   let currentPosition = current;
   let run: Pixel[] = [];
+  let firstPaintCommandIndex: number | null = null;
 
   for (const pixel of orderedPixels) {
     if (canExtendRun(run, pixel)) {
@@ -650,11 +742,32 @@ function appendOrderedPixels(
       continue;
     }
 
-    currentPosition = appendPixelRun(commands, run, currentPosition, profile, grid);
+    const appendedRun = appendPixelRun(
+      commands,
+      run,
+      currentPosition,
+      profile,
+      grid,
+      recenterPlanner,
+    );
+    currentPosition = appendedRun.position;
+    firstPaintCommandIndex ??= appendedRun.paintCommandIndex;
     run = [pixel];
   }
 
-  return appendPixelRun(commands, run, currentPosition, profile, grid);
+  const appendedRun = appendPixelRun(
+    commands,
+    run,
+    currentPosition,
+    profile,
+    grid,
+    recenterPlanner,
+  );
+  firstPaintCommandIndex ??= appendedRun.paintCommandIndex;
+  return {
+    position: appendedRun.position,
+    firstPaintCommandIndex,
+  };
 }
 
 function buildResumeLabel(
@@ -681,6 +794,7 @@ function appendResumeSegment(
   current: { x: number; y: number },
   profile: DrawingProfile,
   grid: BrushGrid,
+  recenterPlanner: RecenterPlanner,
   meta: {
     segmentIndex: number;
     colorHex: string | null;
@@ -695,10 +809,14 @@ function appendResumeSegment(
   }
 
   const firstCanvasPosition = toCanvasPosition(firstPixel, grid);
-  const needsInitialMove =
-    firstCanvasPosition.x !== current.x || firstCanvasPosition.y !== current.y;
-  const bodyStartCommandIndex = commands.length + (needsInitialMove ? 1 : 0);
-  const nextPosition = appendOrderedPixels(commands, orderedPixels, current, profile, grid);
+  const appendedPixels = appendOrderedPixels(
+    commands,
+    orderedPixels,
+    current,
+    profile,
+    grid,
+    recenterPlanner,
+  );
 
   resumeSegments.push({
     segmentIndex: meta.segmentIndex,
@@ -707,20 +825,22 @@ function appendResumeSegment(
     slotIndex: meta.slotIndex,
     resumePrefixCommands: serializeCommands(meta.resumePrefixCommands),
     firstCanvasPosition,
-    bodyStartCommandIndex,
+    bodyStartCommandIndex: appendedPixels.firstPaintCommandIndex ?? commands.length,
     commandEndExclusive: commands.length,
   });
 
-  return nextPosition;
+  return appendedPixels.position;
 }
 
 export function generateScanlinePlan(
   pixelMap: PixelMap,
   profile: DrawingProfile,
   pathStrategy: PathStrategy = "scanline",
+  recenterStrategy: RecenterStrategy = "off",
 ): GeneratedScanlinePlan {
   const commands: DrawCommand[] = [];
   const grid = createBrushGrid(profile);
+  const recenterPlanner = createRecenterPlanner(profile, recenterStrategy);
   const resumeSegments: ResumeSegment[] = [];
   const brushSetupCommands = buildAutomaticBrushSetupCommands(profile);
   let current = { x: 0, y: 0 };
@@ -771,6 +891,7 @@ export function generateScanlinePlan(
         current,
         profile,
         grid,
+        recenterPlanner,
         {
           segmentIndex,
           colorHex: orderedPixels[0]?.colorHex ?? null,
@@ -809,6 +930,7 @@ export function generateScanlinePlan(
           current,
           profile,
           grid,
+          recenterPlanner,
           {
             segmentIndex,
             colorHex: color.colorHex,
@@ -856,6 +978,7 @@ export function generateScanlinePlan(
           current,
           profile,
           grid,
+          recenterPlanner,
           {
             segmentIndex,
             colorHex: color.colorHex,
@@ -876,6 +999,7 @@ export function generateScanlinePlan(
   commands.push(endCommand());
   return {
     commands,
+    recenterStats: recenterPlanner.stats,
     resumePlan: {
       inputConfigCommand: serializeCommand(inputConfig),
       initialCursor,
@@ -888,8 +1012,9 @@ export function generateScanlineCommands(
   pixelMap: PixelMap,
   profile: DrawingProfile,
   pathStrategy: PathStrategy = "scanline",
+  recenterStrategy: RecenterStrategy = "off",
 ): DrawCommand[] {
-  return generateScanlinePlan(pixelMap, profile, pathStrategy).commands;
+  return generateScanlinePlan(pixelMap, profile, pathStrategy, recenterStrategy).commands;
 }
 
 export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfile): number {
@@ -916,6 +1041,8 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
           (Math.abs(command.dx) + Math.abs(command.dy)) *
             (timing.buttonPressMs + timing.inputDelayMs)
         );
+      case "stick":
+        return total + command.ms + timing.inputDelayMs;
       case "line":
         {
           const metrics = getLineCommandMetrics(command.dx, command.dy, command.stride ?? 1);

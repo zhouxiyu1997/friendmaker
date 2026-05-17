@@ -168,6 +168,7 @@ const state = {
     imageOffsetXPercent: 0,
     imageOffsetYPercent: 0,
     previewGuideMode: "none",
+    recenterStrategy: "off",
     colorMode: "mono",
     colorCount: 32,
     colorCountByMode: {
@@ -199,6 +200,7 @@ const state = {
       imageScalePercent: 100,
       imageOffsetXPercent: 0,
       imageOffsetYPercent: 0,
+      recenterStrategy: "off",
     },
     execution: {
       id: null,
@@ -350,6 +352,7 @@ const els = {
   offsetXInput: document.getElementById("offset-x-input"),
   offsetYRange: document.getElementById("offset-y-range"),
   offsetYInput: document.getElementById("offset-y-input"),
+  recenterStrategyCheckbox: document.getElementById("recenter-strategy-checkbox"),
   studioPortSelect: document.getElementById("studio-port-select"),
   refreshPortsButton: document.getElementById("refresh-ports-button"),
   executionHint: document.getElementById("execution-hint"),
@@ -605,6 +608,10 @@ function isRoundLargeBrushSelection(brushShape, brushSize) {
   return normalizeBrushShapeValue(brushShape) === "round" && Number(brushSize) > 1;
 }
 
+function normalizeRecenterStrategy(value) {
+  return value === "time-saving" ? "time-saving" : "off";
+}
+
 function setStudioBrushSelection(brushShape, brushSize) {
   state.studio.brushShape = normalizeBrushShapeValue(brushShape);
   state.studio.brushSize = Number(brushSize);
@@ -622,6 +629,7 @@ function buildCurrentStudioProfileSummary() {
     imageScalePercent: state.studio.imageScalePercent,
     imageOffsetXPercent: state.studio.imageOffsetXPercent,
     imageOffsetYPercent: state.studio.imageOffsetYPercent,
+    recenterStrategy: normalizeRecenterStrategy(state.studio.recenterStrategy),
   };
 }
 
@@ -640,6 +648,7 @@ function getGeneratedStudioProfileSummary() {
       state.studio.profile.imageOffsetXPercent ?? state.studio.imageOffsetXPercent,
     imageOffsetYPercent:
       state.studio.profile.imageOffsetYPercent ?? state.studio.imageOffsetYPercent,
+    recenterStrategy: normalizeRecenterStrategy(state.studio.profile.recenterStrategy),
   };
 }
 
@@ -1045,6 +1054,12 @@ els.offsetXRange.addEventListener("input", () => {
 
 els.offsetYRange.addEventListener("input", () => {
   setStudioImageOffsetYPercent(els.offsetYRange.value);
+});
+
+els.recenterStrategyCheckbox.addEventListener("change", () => {
+  state.studio.recenterStrategy = els.recenterStrategyCheckbox.checked ? "time-saving" : "off";
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
 });
 
 els.scaleInput.addEventListener("change", () => {
@@ -1504,6 +1519,9 @@ async function generateStudioCommands({ logPrefix }) {
       els.studioLogOutput,
       `生成完成：${payload.stats.commandCount} 条命令，预计耗时 ${payload.stats.estimatedRuntimeLabel}`,
     );
+    if (normalizeRecenterStrategy(payload.profile?.recenterStrategy) === "time-saving") {
+      appendLog(els.studioLogOutput, `回中优化：${formatRecenterStats(payload.stats.pathStats)}`);
+    }
     return true;
   } catch (error) {
     appendLog(els.studioLogOutput, `生成失败：${getErrorMessage(error)}`);
@@ -1531,6 +1549,7 @@ function buildStudioGeneratePayload() {
     removeBackground: state.studio.removeBackground,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
+    recenterStrategy: normalizeRecenterStrategy(state.studio.recenterStrategy),
   };
 }
 
@@ -1584,6 +1603,7 @@ function applyGeneratedStudioPayload(payload) {
       payload.profile.imageOffsetXPercent ?? state.studio.imageOffsetXPercent,
     imageOffsetYPercent:
       payload.profile.imageOffsetYPercent ?? state.studio.imageOffsetYPercent,
+    recenterStrategy: normalizeRecenterStrategy(payload.profile.recenterStrategy),
   };
   state.studio.brushSize = payload.profile.brushSize ?? state.studio.brushSize;
   state.studio.brushShape = normalizeBrushShapeValue(payload.profile.brushShape);
@@ -1619,8 +1639,13 @@ function applyGeneratedStudioPayload(payload) {
     els.statColors.textContent = `${payload.stats.usedColorIndexes.length} / ${state.studio.colorCount} 自动量化色`;
   }
   els.statPixels.textContent = String(payload.stats.totalPixels);
+  const recenterStrategy = normalizeRecenterStrategy(payload.profile?.recenterStrategy);
+  const recenterStatsLabel =
+    recenterStrategy === "time-saving" && payload.stats.pathStats
+      ? ` · ${formatRecenterStats(payload.stats.pathStats)}`
+      : "";
   els.statCommands.textContent = payload.stats.pathStats
-    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}`
+    ? `${payload.stats.commandCount} · L ${payload.stats.pathStats.lineRunCount}${recenterStatsLabel}`
     : String(payload.stats.commandCount);
   els.statRuntime.textContent = payload.stats.estimatedRuntimeLabel;
   void updatePreviewBounds(payload);
@@ -2694,6 +2719,7 @@ function setStudioBusy(isBusy) {
   els.scaleRange.disabled = isBusy;
   els.offsetXRange.disabled = isBusy;
   els.offsetYRange.disabled = isBusy;
+  els.recenterStrategyCheckbox.disabled = isBusy;
   els.sizeSelect.disabled = isBusy;
   els.brushSizeSelect.disabled = isBusy;
   els.copyButton.disabled = isBusy || state.commands.length === 0;
@@ -3639,6 +3665,8 @@ function syncStudioUi() {
   els.offsetXInput.value = String(state.studio.imageOffsetXPercent);
   els.offsetYRange.value = String(state.studio.imageOffsetYPercent);
   els.offsetYInput.value = String(state.studio.imageOffsetYPercent);
+  els.recenterStrategyCheckbox.checked =
+    normalizeRecenterStrategy(state.studio.recenterStrategy) === "time-saving";
   els.previewGuideSelect.value = state.studio.previewGuideMode;
   els.previewCanvas.dataset.guide = state.studio.previewGuideMode;
   els.colorModeSelect.value = state.studio.colorMode;
@@ -3647,6 +3675,10 @@ function syncStudioUi() {
   const backgroundHint = state.studio.removeBackground
     ? "自动扣背景已开启。"
     : "自动扣背景关闭。";
+  const recenterHint =
+    normalizeRecenterStrategy(state.studio.recenterStrategy) === "time-saving"
+      ? "回中优化已开启，只在预计更快时插入回中动作。"
+      : "回中优化关闭。";
   const brushShapeHint =
     normalizeBrushShapeValue(state.studio.brushShape) === "square"
       ? `${selectedBrushPresetLabel}。开始绘制会自动切笔刷，期间不要手动操作。`
@@ -3666,17 +3698,17 @@ function syncStudioUi() {
     els.studioModeHint.textContent =
       unsupportedSelectedBrush
         ? `${brushShapeHint} ${templateHint} ${scaleHint} ${positionHint} ${backgroundHint}`
-        : `单色模式：深色绘制，浅色留白。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint}`;
+        : `单色模式：深色绘制，浅色留白。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint} ${recenterHint}`;
   } else if (state.studio.colorMode === "official") {
     els.studioModeHint.textContent =
       unsupportedSelectedBrush
         ? `${brushShapeHint} ${templateHint} ${scaleHint} ${positionHint} ${backgroundHint}`
-        : `官方色模式：最多 ${state.studio.colorCount} 色，映射到 7x12 官方色盘。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint}`;
+        : `官方色模式：最多 ${state.studio.colorCount} 色，映射到 7x12 官方色盘。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint} ${recenterHint}`;
   } else {
     els.studioModeHint.textContent =
       unsupportedSelectedBrush
         ? `${brushShapeHint} ${templateHint} ${scaleHint} ${positionHint} ${backgroundHint}`
-        : `自定义多色：最多 ${state.studio.colorCount} 色，按 9 个自定义色槽分批绘制。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint}`;
+        : `自定义多色：最多 ${state.studio.colorCount} 色，按 9 个自定义色槽分批绘制。${templateHint} ${scaleHint} ${positionHint} ${brushShapeHint} ${backgroundHint} ${recenterHint}`;
   }
   els.studioPortSelect.disabled = state.studio.busy || executionActive;
   els.refreshPortsButton.disabled = state.studio.busy || executionActive;
@@ -3692,6 +3724,7 @@ function syncStudioUi() {
   els.offsetYRange.disabled = state.studio.busy || executionActive;
   els.offsetYInput.disabled = state.studio.busy || executionActive;
   els.colorModeSelect.disabled = state.studio.busy || executionActive;
+  els.recenterStrategyCheckbox.disabled = state.studio.busy || executionActive;
   els.autoRemoveBackgroundCheckbox.disabled = state.studio.busy || executionActive;
   els.previewGuideSelect.disabled = false;
   els.colorCountSelect.disabled =
@@ -4900,6 +4933,20 @@ function formatTimingBenchmarkSummary(mode, timing) {
   const actionCount = getTimingBenchmarkActionCount(mode);
   const totalMs = actionCount * (timing.buttonPressDuration + timing.inputDelay);
   return `${formatApproxDuration(totalMs)} · ${actionCount} 动作`;
+}
+
+function formatRecenterStats(pathStats) {
+  const recenterCount = Number(pathStats?.recenterCount ?? 0);
+  const recenterSavedMs = Number(pathStats?.recenterSavedMs ?? 0);
+  const recenterThresholdSteps = Number(pathStats?.recenterThresholdSteps ?? 0);
+
+  if (recenterCount <= 0) {
+    return recenterThresholdSteps > 0
+      ? `回中 0 次 · 阈值 ${recenterThresholdSteps} 格`
+      : "回中 0 次";
+  }
+
+  return `回中 ${recenterCount} 次 · 省 ${formatApproxDuration(recenterSavedMs)} · 阈值 ${recenterThresholdSteps} 格`;
 }
 
 function buildSharedTimingConfigCommand() {

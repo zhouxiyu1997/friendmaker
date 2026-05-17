@@ -41,3 +41,20 @@ test("page switches reset the shared preview column scroll state", async () => {
   assert.match(appSource, /workspaceContent\s*&&\s*\(els\.workspaceContent\.scrollLeft = 0\)/u);
   assert.match(appSource, /querySelectorAll\("\.panel, \.preview-column"\)/u);
 });
+
+test("studio recenter optimization toggle is wired into generation stats", async () => {
+  const [indexSource, stylesSource, appSource] = await Promise.all([
+    readFile(path.join(webStaticRoot, "index.html"), "utf8"),
+    readFile(path.join(webStaticRoot, "styles.css"), "utf8"),
+    readFile(path.join(webStaticRoot, "app.js"), "utf8"),
+  ]);
+
+  assert.match(indexSource, /id="recenter-strategy-checkbox"/u);
+  assert.match(indexSource, /回中优化（实验）/u);
+  assert.match(stylesSource, /\.recenter-card\s*\{/u);
+  assert.match(appSource, /recenterStrategy:\s*"off"/u);
+  assert.match(appSource, /recenterStrategyCheckbox:\s*document\.getElementById\("recenter-strategy-checkbox"\)/u);
+  assert.match(appSource, /els\.recenterStrategyCheckbox\.addEventListener\("change"/u);
+  assert.match(appSource, /recenterStrategy:\s*normalizeRecenterStrategy\(state\.studio\.recenterStrategy\)/u);
+  assert.match(appSource, /formatRecenterStats\(payload\.stats\.pathStats\)/u);
+});

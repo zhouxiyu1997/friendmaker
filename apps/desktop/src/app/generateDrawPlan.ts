@@ -3,7 +3,13 @@ import { getUnsupportedBrushShapeMessageForProfile } from "../brushBehavior.js";
 import { createBrushGrid, gridCellBounds, isGridCellInBounds } from "../brushGrid.js";
 import { pixelizeImage } from "../image/pixelize.js";
 import { renderPreviewToBuffer } from "../image/renderPreview.js";
-import { estimateRuntimeMs, generateScanlinePlan, type PathStrategy } from "../path/scanline.js";
+import {
+  estimateRuntimeMs,
+  generateScanlinePlan,
+  type PathStrategy,
+  type RecenterStats,
+  type RecenterStrategy,
+} from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
 import type { CanvasBounds, DrawingMask, DrawingProfile, PixelMap, ResumePlan } from "../types.js";
@@ -14,6 +20,11 @@ export interface DrawPlanPathStats {
   longMoveOver50: number;
   longMoveOver100: number;
   longMoveOver200: number;
+  recenterCount: number;
+  recenterSavedMs: number;
+  recenterMacroMs: number;
+  recenterThresholdSteps: number;
+  recenterCandidates: number;
 }
 
 export interface DrawPlan {
@@ -40,6 +51,7 @@ export async function generateDrawPlan(
     removeBackground?: boolean;
     drawingMask?: DrawingMask | null;
     pathStrategy?: PathStrategy;
+    recenterStrategy?: RecenterStrategy;
   },
 ): Promise<DrawPlan> {
   const unsupportedBrushShapeMessage = getUnsupportedBrushShapeMessageForProfile(profile);
@@ -50,10 +62,15 @@ export async function generateDrawPlan(
 
   const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
-  const scanlinePlan = generateScanlinePlan(pixelMap, profile, options?.pathStrategy);
+  const scanlinePlan = generateScanlinePlan(
+    pixelMap,
+    profile,
+    options?.pathStrategy,
+    options?.recenterStrategy,
+  );
   const drawCommands = scanlinePlan.commands;
   const imageBounds = calculateCanvasBounds(pixelMap, profile);
-  const pathStats = calculatePathStats(drawCommands);
+  const pathStats = calculatePathStats(drawCommands, scanlinePlan.recenterStats);
   const paletteHexes = Array.from(
     pixelMap
       .flatMap((row) =>
@@ -128,7 +145,10 @@ export function calculateCanvasBounds(pixelMap: PixelMap, profile: DrawingProfil
   };
 }
 
-export function calculatePathStats(commands: DrawCommand[]): DrawPlanPathStats {
+export function calculatePathStats(
+  commands: DrawCommand[],
+  recenterStats?: RecenterStats,
+): DrawPlanPathStats {
   let lineRunCount = 0;
   let maxMoveSteps = 0;
   let longMoveOver50 = 0;
@@ -167,5 +187,10 @@ export function calculatePathStats(commands: DrawCommand[]): DrawPlanPathStats {
     longMoveOver50,
     longMoveOver100,
     longMoveOver200,
+    recenterCount: recenterStats?.recenterCount ?? 0,
+    recenterSavedMs: recenterStats?.recenterSavedMs ?? 0,
+    recenterMacroMs: recenterStats?.recenterMacroMs ?? 0,
+    recenterThresholdSteps: recenterStats?.recenterThresholdSteps ?? 0,
+    recenterCandidates: recenterStats?.recenterCandidates ?? 0,
   };
 }

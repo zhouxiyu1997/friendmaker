@@ -1318,6 +1318,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     removeBackground?: boolean;
     inputDelay?: number;
     buttonPressDuration?: number;
+    recenterStrategy?: "off" | "time-saving";
   };
 
   if (!body.imageDataUrl) {
@@ -1374,6 +1375,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       imageOffsetYPercent,
       removeBackground: body.removeBackground === true,
       drawingMask,
+      recenterStrategy: body.recenterStrategy === "time-saving" ? "time-saving" : "off",
     },
   );
 
@@ -1399,6 +1401,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       inputDelay: profile.inputDelay,
       buttonPressDuration: profile.buttonPressDuration,
       homeDuration: profile.homeDuration,
+      recenterStrategy: body.recenterStrategy === "time-saving" ? "time-saving" : "off",
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,

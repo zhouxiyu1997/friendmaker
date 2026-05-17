@@ -8,6 +8,8 @@ export function serializeCommand(command: DrawCommand): string {
       return "H";
     case "move":
       return `M ${command.dx} ${command.dy}`;
+    case "stick":
+      return `STICK ${command.x} ${command.y} ${command.ms}`;
     case "line":
       return command.stride && command.stride > 1
         ? `L ${command.dx} ${command.dy} ${command.stride}`
