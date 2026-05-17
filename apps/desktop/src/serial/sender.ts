@@ -30,7 +30,7 @@ const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
 const COLOR_PALETTE_SLOT_COUNT = 9;
 const COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
 const COLOR_PALETTE_MENU_PRESS_DURATION_MS = 90;
-const COLOR_PALETTE_MENU_INPUT_DELAY_MS = 90;
+const COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500;
 const COLOR_PALETTE_MENU_OPEN_SETTLE_MS = 180;
 const COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS = 180;
 const COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS = 2_500;
@@ -42,6 +42,8 @@ const COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3_000;
 const COLOR_PALETTE_EDITOR_MOVE_STEP_MS = 20;
 const COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
 const COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS = 12;
+const BASIC_COLOR_GRID_ROWS = 7;
+const BASIC_COLOR_GRID_COLS = 12;
 const BASIC_COLOR_TAB_SETTLE_MS = 140;
 const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
 
@@ -134,6 +136,18 @@ function splitPaletteValueDropSteps(valueDropSteps: number): {
   };
 }
 
+function estimatePaletteSlotSelectionDurationMs(slotIndex: number): number {
+  const normalizedSlot = clampPaletteSlotIndex(slotIndex);
+  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
+
+  return (
+    menuPressMs + // open palette with Y
+    COLOR_PALETTE_MENU_OPEN_SETTLE_MS +
+    COLOR_PALETTE_RESET_TO_BOTTOM_STEPS * menuPressMs +
+    (COLOR_PALETTE_SLOT_COUNT - 1 - normalizedSlot) * menuPressMs
+  );
+}
+
 function estimatePaletteConfigDurationMs(
   slotIndex: number,
   red: number,
@@ -152,10 +166,7 @@ function estimatePaletteConfigDurationMs(
   const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
 
   return (
-    generalPressMs + // open palette with Y
-    COLOR_PALETTE_MENU_OPEN_SETTLE_MS +
-    COLOR_PALETTE_RESET_TO_BOTTOM_STEPS * menuPressMs +
-    (COLOR_PALETTE_SLOT_COUNT - 1 - normalizedSlot) * menuPressMs +
+    estimatePaletteSlotSelectionDurationMs(normalizedSlot) +
     menuPressMs + // enter slot with Y
     COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS +
     menuPressMs + // switch to custom tab with R
@@ -172,7 +183,40 @@ function estimatePaletteConfigDurationMs(
       ? coarseValueSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs
       : 0) +
     fineValueSteps * generalPressMs +
-    3 * generalPressMs + // B, A, B
+    3 * menuPressMs + // B, A, B
+    timing.inputDelayMs +
+    PALETTE_CONFIG_TIMEOUT_MARGIN_MS
+  );
+}
+
+function estimateColorSelectDurationMs(slotIndex: number, timing: InputTiming): number {
+  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
+
+  return (
+    estimatePaletteSlotSelectionDurationMs(slotIndex) +
+    2 * menuPressMs + // A, B
+    timing.inputDelayMs +
+    PALETTE_CONFIG_TIMEOUT_MARGIN_MS
+  );
+}
+
+function estimateBasicPaletteConfigDurationMs(
+  slotIndex: number,
+  _targetRow: number,
+  _targetCol: number,
+  timing: InputTiming,
+): number {
+  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
+  const maxRowSteps = BASIC_COLOR_GRID_ROWS - 1;
+  const maxColSteps = BASIC_COLOR_GRID_COLS - 1;
+
+  return (
+    estimatePaletteSlotSelectionDurationMs(slotIndex) +
+    menuPressMs + // enter slot with Y
+    COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS +
+    menuPressMs + // switch to basic tab with L
+    BASIC_COLOR_TAB_SETTLE_MS +
+    (maxRowSteps + maxColSteps + 1) * menuPressMs + // worst-case grid movement plus A
     timing.inputDelayMs +
     PALETTE_CONFIG_TIMEOUT_MARGIN_MS
   );
@@ -482,16 +526,34 @@ export function getAckTimeoutForCommand(
   }
 
   if (trimmed.startsWith("C ")) {
-    // Palette slot switching walks through the in-game color menu before
-    // returning to the canvas, so it needs substantially more time than a
-    // simple button press.
-    return Math.max(baseTimeoutMs, 7_000);
+    const match = /^C\s+(-?\d+)$/u.exec(trimmed);
+
+    if (!match?.[1]) {
+      return Math.max(baseTimeoutMs, 20_000);
+    }
+
+    return Math.max(
+      baseTimeoutMs,
+      estimateColorSelectDurationMs(Number.parseInt(match[1], 10), timing),
+    );
   }
 
   if (trimmed.startsWith("BC ")) {
-    // Official/basic color configuration traverses multiple menu layers and a
-    // wrapped 7x12 grid before returning to the canvas.
-    return Math.max(baseTimeoutMs, 15_000);
+    const match = /^BC\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/u.exec(trimmed);
+
+    if (!match?.[1] || !match[2] || !match[3]) {
+      return Math.max(baseTimeoutMs, 20_000);
+    }
+
+    return Math.max(
+      baseTimeoutMs,
+      estimateBasicPaletteConfigDurationMs(
+        Number.parseInt(match[1], 10),
+        Number.parseInt(match[2], 10),
+        Number.parseInt(match[3], 10),
+        timing,
+      ),
+    );
   }
 
   if (trimmed.startsWith("PC ")) {

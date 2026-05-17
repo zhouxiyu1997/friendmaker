@@ -170,11 +170,11 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
   );
   assert.match(
     firmwareSource,
-    /beginExplicitInput\(\)[\s\S]*WARN bt explicit_input blocked connected=%s paired=%s ready=%s[\s\S]*inputReportSendEventCount_ < inputReportSubmitCount_[\s\S]*if \(kWaitForExplicitInputDrain\) \{[\s\S]*kExplicitInputDrainBudgetMs[\s\S]*inputReportSubmitCount_ = inputReportSendEventCount_/u,
+    /beginExplicitInput\(bool waitForDrain\)[\s\S]*WARN bt explicit_input blocked connected=%s paired=%s ready=%s[\s\S]*inputReportSendEventCount_ < inputReportSubmitCount_[\s\S]*if \(waitForDrain\) \{[\s\S]*kExplicitInputDrainBudgetMs[\s\S]*inputReportSubmitCount_ = inputReportSendEventCount_/u,
   );
   assert.match(
     firmwareSource,
-    /repeatCurrentInputReport\([\s\S]*sendCurrentInputReport\(logFailure, kWaitForExplicitInputSendEvent\)/u,
+    /repeatCurrentInputReport\([\s\S]*bool waitForSendEvent[\s\S]*sendCurrentInputReport\(logFailure, waitForSendEvent\)/u,
   );
   assert.match(
     firmwareSource,
@@ -215,6 +215,52 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
   assert.doesNotMatch(
     firmwareSource,
     /else if \(hasPeerAddress_\)[\s\S]*attemptVirtualCablePlug\(lastPeerAddress_, "register-app-last-peer"\)/u,
+  );
+});
+
+test("controller firmware routes palette menu navigation through reliable input", async () => {
+  const controllerSource = await readFile(
+    new URL("../../../firmware/esp32/src/controller.cpp", import.meta.url),
+    "utf8",
+  );
+  const transportHeaderSource = await readFile(
+    new URL("../../../firmware/esp32/src/controller_transport.h", import.meta.url),
+    "utf8",
+  );
+  const classicTransportSource = await readFile(
+    new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
+    "utf8",
+  );
+  const configSource = await readFile(
+    new URL("../../../firmware/esp32/src/config.h", import.meta.url),
+    "utf8",
+  );
+  const senderSource = await readFile(
+    new URL("../src/serial/sender.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(configSource, /COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500/u);
+  assert.match(senderSource, /const COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500/u);
+  assert.match(
+    transportHeaderSource,
+    /virtual bool pressButtonsReliable[\s\S]*return pressButtons\(buttonsMask, holdMs, settleMs\);[\s\S]*pressButtonReliable/u,
+  );
+  assert.match(
+    classicTransportSource,
+    /pressButtonsReliable[\s\S]*beginExplicitInput\(true\)[\s\S]*repeatCurrentInputReport\([\s\S]*true,\s*kReliableInputCongestionRetryBudgetMs/u,
+  );
+  assert.match(
+    classicTransportSource,
+    /pressButtons\([\s\S]*beginExplicitInput\(kWaitForExplicitInputDrain\)[\s\S]*repeatCurrentInputReport\([\s\S]*kWaitForExplicitInputSendEvent,\s*kHidCongestionRetryBudgetMs/u,
+  );
+  assert.match(
+    controllerSource,
+    /pressPaletteMenuButton[\s\S]*transport\.pressButtonReliable[\s\S]*COLOR_PALETTE_MENU_INPUT_DELAY_MS/u,
+  );
+  assert.match(
+    controllerSource,
+    /moveCursor[\s\S]*transport_\.pressButton\(horizontalButton, buttonPressMs_, inputDelayMs_\)/u,
   );
 });
 

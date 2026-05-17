@@ -94,7 +94,7 @@ HsvColor rgbToHsv(uint8_t red, uint8_t green, uint8_t blue) {
 }
 
 bool pressPaletteMenuButton(ControllerTransport &transport, ControllerButton button) {
-  return transport.pressButton(
+  return transport.pressButtonReliable(
       button, COLOR_PALETTE_MENU_PRESS_DURATION_MS, COLOR_PALETTE_MENU_INPUT_DELAY_MS);
 }
 
@@ -256,7 +256,7 @@ bool SwitchController::selectColor(int index) {
   // 3. Up moves back to the requested palette slot.
   // 3. A applies the current slot.
   // 4. B closes the palette selector and returns to drawing.
-  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+  if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
     return false;
   }
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
@@ -299,7 +299,7 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
   const uint8_t coarseValueSteps = valueDropSteps - fineValueSteps;
 
   // Palette selection page.
-  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+  if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
     return false;
   }
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);
@@ -375,9 +375,9 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
   }
 
   // Exit editor, apply the slot, then go back to drawing mode.
-  if (!transport_.pressButton(ControllerButton::B, buttonPressMs_, inputDelayMs_) ||
-      !transport_.pressButton(ControllerButton::A, buttonPressMs_, inputDelayMs_) ||
-      !transport_.pressButton(ControllerButton::B, buttonPressMs_, inputDelayMs_)) {
+  if (!pressPaletteMenuButton(transport_, ControllerButton::B) ||
+      !pressPaletteMenuButton(transport_, ControllerButton::A) ||
+      !pressPaletteMenuButton(transport_, ControllerButton::B)) {
     return false;
   }
   delay(inputDelayMs_);
@@ -395,7 +395,7 @@ bool SwitchController::configureBasicPaletteSlot(int index, uint8_t row, uint8_t
   const int rowDelta = basicColorDelta(currentRow, targetRow);
   const int colDelta = basicColorDelta(currentCol, targetCol);
 
-  if (!transport_.pressButton(ControllerButton::Y, buttonPressMs_, inputDelayMs_)) {
+  if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
     return false;
   }
   delay(COLOR_PALETTE_MENU_OPEN_SETTLE_MS);

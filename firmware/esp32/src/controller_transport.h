@@ -72,6 +72,9 @@ class ControllerTransport {
 
   virtual void begin() = 0;
   virtual bool pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) = 0;
+  virtual bool pressButtonsReliable(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
+    return pressButtons(buttonsMask, holdMs, settleMs);
+  }
   virtual bool moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) = 0;
   virtual bool resetConnection(bool reconnectLastPeer = false) = 0;
   virtual bool clearStoredPeer() = 0;
@@ -80,5 +83,9 @@ class ControllerTransport {
 
   bool pressButton(ControllerButton button, uint16_t holdMs, uint16_t settleMs) {
     return pressButtons(controllerButtonMask(button), holdMs, settleMs);
+  }
+
+  bool pressButtonReliable(ControllerButton button, uint16_t holdMs, uint16_t settleMs) {
+    return pressButtonsReliable(controllerButtonMask(button), holdMs, settleMs);
   }
 };

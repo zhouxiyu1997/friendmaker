@@ -23,6 +23,11 @@ import {
   waitCommand,
 } from "../protocol/commands.js";
 import { getLineCommandMetrics } from "../protocol/lineMetrics.js";
+import {
+  estimateBasicPaletteConfigDurationMs,
+  estimateColorSelectDurationMs,
+  estimatePaletteConfigDurationMs,
+} from "../protocol/paletteTiming.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
 
 export type PathStrategy = "scanline" | "nearest";
@@ -1053,11 +1058,21 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
       case "press":
         return total + timing.buttonPressMs + timing.inputDelayMs;
       case "color":
-        return total + profile.colorChangeDuration;
+        return total + estimateColorSelectDurationMs(command.index, timing);
       case "paletteConfig":
-        return total + profile.colorChangeDuration * 6;
+        {
+          const hex = command.colorHex.replace(/^#/u, "");
+          const red = Number.parseInt(hex.slice(0, 2), 16);
+          const green = Number.parseInt(hex.slice(2, 4), 16);
+          const blue = Number.parseInt(hex.slice(4, 6), 16);
+
+          return total + estimatePaletteConfigDurationMs(command.slot, red, green, blue, timing);
+        }
       case "basicPaletteConfig":
-        return total + profile.colorChangeDuration * 4;
+        return (
+          total +
+          estimateBasicPaletteConfigDurationMs(command.slot, command.row, command.col, timing)
+        );
       case "basicPaletteReset":
         return total + timing.inputDelayMs;
       case "wait":

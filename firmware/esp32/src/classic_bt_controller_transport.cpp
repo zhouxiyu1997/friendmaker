@@ -80,6 +80,8 @@ constexpr uint16_t kIdleConnectedReportIntervalMs = 15;
 constexpr uint16_t kFixedSendTaskIntervalMs = 100;
 constexpr uint16_t kExplicitInputDrainBudgetMs = 100;
 constexpr uint16_t kIdleDisconnectedReportIntervalMs = 100;
+constexpr uint16_t kReliableInputCongestionRetryBudgetMs =
+    kHidCongestionRetryBudgetMs > 300 ? kHidCongestionRetryBudgetMs : 300;
 
 uint8_t kHidDescriptor[] = {
     0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0x06, 0x01, 0xff, 0x85, 0x21, 0x09,
@@ -694,14 +696,34 @@ void ClassicBtControllerTransport::sendTaskTrampoline(void *param) {
 
 bool ClassicBtControllerTransport::pressButtons(
     uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
-  if (!beginExplicitInput()) {
+  if (!beginExplicitInput(kWaitForExplicitInputDrain)) {
     return false;
   }
   setButtonBits(buttonsMask);
   updateInputReport();
-  bool ok = repeatCurrentInputReport(holdMs, true);
+  bool ok = repeatCurrentInputReport(
+      holdMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs);
   clearInputs();
-  if (!repeatCurrentInputReport(settleMs, true)) {
+  if (!repeatCurrentInputReport(
+          settleMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs)) {
+    ok = false;
+  }
+  endExplicitInput();
+  return ok;
+}
+
+bool ClassicBtControllerTransport::pressButtonsReliable(
+    uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
+  if (!beginExplicitInput(true)) {
+    return false;
+  }
+  setButtonBits(buttonsMask);
+  updateInputReport();
+  bool ok = repeatCurrentInputReport(
+      holdMs, true, true, kReliableInputCongestionRetryBudgetMs);
+  clearInputs();
+  if (!repeatCurrentInputReport(
+          settleMs, true, true, kReliableInputCongestionRetryBudgetMs)) {
     ok = false;
   }
   endExplicitInput();
@@ -710,7 +732,7 @@ bool ClassicBtControllerTransport::pressButtons(
 
 bool ClassicBtControllerTransport::moveDirection(
     int x, int y, uint16_t holdMs, uint16_t settleMs) {
-  if (!beginExplicitInput()) {
+  if (!beginExplicitInput(kWaitForExplicitInputDrain)) {
     return false;
   }
   buttonsRight_ = 0;
@@ -718,9 +740,11 @@ bool ClassicBtControllerTransport::moveDirection(
   buttonsLeft_ = 0;
   setLeftStickFromVector(x, y);
   updateInputReport();
-  bool ok = repeatCurrentInputReport(holdMs, true);
+  bool ok = repeatCurrentInputReport(
+      holdMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs);
   clearInputs();
-  if (!repeatCurrentInputReport(settleMs, true)) {
+  if (!repeatCurrentInputReport(
+          settleMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs)) {
     ok = false;
   }
   endExplicitInput();
@@ -1085,7 +1109,7 @@ bool ClassicBtControllerTransport::waitForInputReportDrain(uint32_t timeoutMs, b
   return true;
 }
 
-bool ClassicBtControllerTransport::beginExplicitInput() {
+bool ClassicBtControllerTransport::beginExplicitInput(bool waitForDrain) {
   explicitInputActive_ = true;
 
   if (inputReportSendMutex_ == nullptr) {
@@ -1118,7 +1142,7 @@ bool ClassicBtControllerTransport::beginExplicitInput() {
   // earlier idle-send callbacks to the new explicit send window.
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
     uint32_t drainElapsedMs = 0;
-    if (kWaitForExplicitInputDrain) {
+    if (waitForDrain) {
       // The more conservative profiles can report SEND_REPORT_EVT later than
       // expected under transient congestion, so briefly wait before re-aligning.
       const uint32_t drainStart = millis();
@@ -1146,13 +1170,16 @@ void ClassicBtControllerTransport::endExplicitInput() {
 }
 
 bool ClassicBtControllerTransport::repeatCurrentInputReport(
-    uint16_t durationMs, bool logFailure) {
+    uint16_t durationMs,
+    bool logFailure,
+    bool waitForSendEvent,
+    uint16_t congestionRetryBudgetMs) {
   const uint32_t startedAt = millis();
   uint32_t congestionStartedAt = 0;
   bool loggedCongestionRetry = false;
 
   while (true) {
-    if (!sendCurrentInputReport(logFailure, kWaitForExplicitInputSendEvent)) {
+    if (!sendCurrentInputReport(logFailure, waitForSendEvent)) {
       if (shouldRetryAfterTransientSendFailure()) {
         if (congestionStartedAt == 0) {
           congestionStartedAt = millis();
@@ -1162,10 +1189,10 @@ bool ClassicBtControllerTransport::repeatCurrentInputReport(
           loggedCongestionRetry = true;
           Serial.printf(
               "WARN bt send_report congested retry_window=%u\n",
-              kHidCongestionRetryBudgetMs);
+              congestionRetryBudgetMs);
         }
 
-        if ((millis() - congestionStartedAt) < kHidCongestionRetryBudgetMs) {
+        if ((millis() - congestionStartedAt) < congestionRetryBudgetMs) {
           delay(kHidCongestionRetryDelayMs);
           continue;
         }
@@ -1676,6 +1703,11 @@ bool ClassicBtControllerTransport::pressButtons(
   return false;
 }
 
+bool ClassicBtControllerTransport::pressButtonsReliable(
+    uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) {
+  return pressButtons(buttonsMask, holdMs, settleMs);
+}
+
 bool ClassicBtControllerTransport::moveDirection(
     int x, int y, uint16_t holdMs, uint16_t settleMs) {
   (void)x;
@@ -1727,11 +1759,20 @@ bool ClassicBtControllerTransport::waitForInputReportDrain(uint32_t timeoutMs, b
   (void)logFailure;
   return false;
 }
-bool ClassicBtControllerTransport::beginExplicitInput() { return false; }
+bool ClassicBtControllerTransport::beginExplicitInput(bool waitForDrain) {
+  (void)waitForDrain;
+  return false;
+}
 void ClassicBtControllerTransport::endExplicitInput() {}
-bool ClassicBtControllerTransport::repeatCurrentInputReport(uint16_t durationMs, bool logFailure) {
+bool ClassicBtControllerTransport::repeatCurrentInputReport(
+    uint16_t durationMs,
+    bool logFailure,
+    bool waitForSendEvent,
+    uint16_t congestionRetryBudgetMs) {
   (void)durationMs;
   (void)logFailure;
+  (void)waitForSendEvent;
+  (void)congestionRetryBudgetMs;
   return false;
 }
 void ClassicBtControllerTransport::resetInputReportTracking() {}

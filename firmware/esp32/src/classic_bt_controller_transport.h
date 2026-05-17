@@ -10,6 +10,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
  public:
   void begin() override;
   bool pressButtons(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) override;
+  bool pressButtonsReliable(uint32_t buttonsMask, uint16_t holdMs, uint16_t settleMs) override;
   bool moveDirection(int x, int y, uint16_t holdMs, uint16_t settleMs) override;
   bool resetConnection(bool reconnectLastPeer = false) override;
   bool clearStoredPeer() override;
@@ -30,11 +31,15 @@ class ClassicBtControllerTransport : public ControllerTransport {
   bool isHidReportChannelOpen() const;
   bool isControllerInputReady() const;
   bool sendCurrentInputReport(bool logFailure, bool waitForSendEvent = false);
-  bool repeatCurrentInputReport(uint16_t durationMs, bool logFailure);
+  bool repeatCurrentInputReport(
+      uint16_t durationMs,
+      bool logFailure,
+      bool waitForSendEvent,
+      uint16_t congestionRetryBudgetMs);
   bool shouldRetryAfterTransientSendFailure() const;
   bool waitForInputReportAccepted(uint32_t expectedEventCount, bool logFailure);
   bool waitForInputReportDrain(uint32_t timeoutMs, bool logFailure);
-  bool beginExplicitInput();
+  bool beginExplicitInput(bool waitForDrain);
   void endExplicitInput();
   void resetInputReportTracking();
   bool clearBondedPeerDevices();
