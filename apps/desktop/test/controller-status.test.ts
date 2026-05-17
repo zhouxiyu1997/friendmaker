@@ -238,7 +238,7 @@ test("controller page exposes fixed recenter diagnostic scripts", async () => {
     readFile(new URL("../src/web/static/app.js", import.meta.url), "utf8"),
   ]);
 
-  assert.match(indexSource, /回中诊断/u);
+  assert.match(indexSource, /class="test-block wide hidden"[\s\S]*回中诊断/u);
   assert.match(indexSource, /data-controller-action="recenter-stick-only"/u);
   assert.match(indexSource, /data-controller-action="recenter-stick-wait"/u);
   assert.match(indexSource, /data-controller-action="recenter-full"/u);

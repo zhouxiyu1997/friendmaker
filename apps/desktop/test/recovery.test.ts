@@ -101,17 +101,17 @@ function expectedBrushSetupPrefix(
   } as const;
   const dx = columnsBySize[brushSize] - 2;
   const dy = rowsByShape[brushShape];
-  const commands = ["BTN X", "W 500", "BTN X", "W 500"];
+  const commands = ["BTN X", "W 150", "BTN X", "W 150"];
 
   if (dx !== 0 || dy !== 0) {
     commands.push(`M ${dx} ${dy}`);
-    commands.push("W 500");
+    commands.push("W 150");
   }
 
   commands.push("BTN A");
-  commands.push("W 500");
+  commands.push("W 150");
   commands.push("BTN A");
-  commands.push("W 500");
+  commands.push("W 150");
   commands.push("BTN A");
   commands.push("W 3000");
   return commands;

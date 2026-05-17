@@ -288,7 +288,7 @@ test("controller firmware routes palette menu navigation through reliable input"
     "utf8",
   );
 
-  assert.match(configSource, /COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500/u);
+  assert.match(configSource, /COLOR_PALETTE_MENU_INPUT_DELAY_MS = 150/u);
   assert.match(senderSource, /from "\.\.\/protocol\/paletteTiming\.js"/u);
   assert.match(
     transportHeaderSource,

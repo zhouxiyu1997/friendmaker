@@ -135,15 +135,15 @@ test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
   assert.equal(commands[0], "CFG INPUT 65 170 2400");
   assert.deepEqual(commands.slice(1, 13), [
     "BTN X",
-    "W 500",
+    "W 150",
     "BTN X",
-    "W 500",
+    "W 150",
     "M -1 1",
-    "W 500",
+    "W 150",
     "BTN A",
-    "W 500",
+    "W 150",
     "BTN A",
-    "W 500",
+    "W 150",
     "BTN A",
     "W 3000",
   ]);
@@ -151,15 +151,15 @@ test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
   assert.equal(recoveryPlan.commands[0], "CFG INPUT 65 170 2400");
   assert.deepEqual(recoveryPlan.commands.slice(1, 13), [
     "BTN X",
-    "W 500",
+    "W 150",
     "BTN X",
-    "W 500",
+    "W 150",
     "M -1 1",
-    "W 500",
+    "W 150",
     "BTN A",
-    "W 500",
+    "W 150",
     "BTN A",
-    "W 500",
+    "W 150",
     "BTN A",
     "W 3000",
   ]);
@@ -231,7 +231,7 @@ test("official basic palette timing follows current slot position and BC RESET",
     basicPaletteState: state,
   });
 
-  assert.equal(initialDefaultSlotDuration, 18_300);
+  assert.equal(initialDefaultSlotDuration, 7_800);
 
   const movedDuration = estimateBasicPaletteConfigDurationMs(0, 0, 11, timing, {
     basicPaletteState: state,
@@ -241,8 +241,8 @@ test("official basic palette timing follows current slot position and BC RESET",
     basicPaletteState: state,
   });
 
-  assert.equal(movedDuration, 28_330);
-  assert.equal(sameCellDuration, 18_300);
+  assert.equal(movedDuration, 11_880);
+  assert.equal(sameCellDuration, 7_800);
 
   resetBasicPaletteTimingState(state);
   assert.equal(
@@ -260,7 +260,7 @@ test("estimated runtime keeps official basic palette state between BC commands",
     basicPaletteConfigCommand(0, 0, 11),
   ];
 
-  assert.equal(estimateRuntimeMs(commands, profile), 46_730);
+  assert.equal(estimateRuntimeMs(commands, profile), 19_780);
 });
 
 test("/api/generate rejects unsupported round large-brush requests", async (t) => {

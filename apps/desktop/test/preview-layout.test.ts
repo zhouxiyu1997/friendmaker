@@ -49,7 +49,7 @@ test("studio recenter optimization toggle is wired into generation stats", async
     readFile(path.join(webStaticRoot, "app.js"), "utf8"),
   ]);
 
-  assert.match(indexSource, /id="recenter-strategy-checkbox"/u);
+  assert.match(indexSource, /class="checkbox-card recenter-card hidden"[\s\S]*id="recenter-strategy-checkbox"/u);
   assert.match(indexSource, /回中优化（实验）/u);
   assert.match(stylesSource, /\.recenter-card\s*\{/u);
   assert.match(appSource, /recenterStrategy:\s*"off"/u);

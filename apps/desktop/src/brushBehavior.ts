@@ -2,7 +2,7 @@ import { moveCommand, pressButtonCommand, waitCommand, type DrawCommand } from "
 import type { BrushShape, BrushSize, DrawingProfile } from "./types.js";
 
 const BRUSH_PICKER_EXIT_SETTLE_MS = 3_000;
-const BRUSH_PICKER_UI_SETTLE_MS = 500;
+const BRUSH_PICKER_UI_SETTLE_MS = 150;
 const DEFAULT_BRUSH_SELECTOR_COLUMN = 2;
 const DEFAULT_BRUSH_SELECTOR_ROW = 0;
 const BRUSH_SELECTOR_ROW_BY_SHAPE: Record<BrushShape, number> = {
