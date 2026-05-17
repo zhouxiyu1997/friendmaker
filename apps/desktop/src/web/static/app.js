@@ -3833,11 +3833,11 @@ function syncFirmwareUi() {
   } else if (environment) {
     els.firmwareEnvHint.textContent = environment.description;
     els.firmwareWebFlasherHint.textContent =
-      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。";
+      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前固件版本对应的版本，刷完后再到“手柄测试”页继续连接。";
     els.firmwareEnvSelect.value = environment.id;
   } else {
     els.firmwareWebFlasherHint.textContent =
-      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前 Switch 型号对应的版本，刷完后再到“手柄测试”页继续连接。";
+      "GitHub Pages 上也有在线刷固件的网站。请在网页端刷入与当前固件版本对应的版本，刷完后再到“手柄测试”页继续连接。";
   }
 
   const installStatus = state.firmwareTooling.install?.status ?? "idle";

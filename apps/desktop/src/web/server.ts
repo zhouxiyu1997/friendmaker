@@ -177,8 +177,8 @@ const FIRMWARE_ENVIRONMENTS = [
 const SWITCH_MODELS = [
   {
     id: "switch",
-    label: "Switch",
-    description: "标准 Switch 固件行为。",
+    label: "老版固件",
+    description: "用于旧版 Switch 兼容路径，保持原有蓝牙 HID 时序。",
     recommended: true,
   },
   {

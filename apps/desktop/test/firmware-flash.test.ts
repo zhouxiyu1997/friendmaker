@@ -340,7 +340,7 @@ test("controller firmware logs and auto-accepts bluetooth pairing prompts", asyn
   );
 });
 
-test("firmware flasher keeps the Switch model selector plus Switch 2 and Switch Lite upload mappings", async () => {
+test("firmware flasher keeps the firmware version selector plus Switch 2 and Switch Lite upload mappings", async () => {
   const pageSource = await readFile(
     new URL("../src/web/static/index.html", import.meta.url),
     "utf8",
@@ -354,7 +354,7 @@ test("firmware flasher keeps the Switch model selector plus Switch 2 and Switch 
     "utf8",
   );
 
-  assert.match(pageSource, /Switch 型号/u);
+  assert.match(pageSource, /固件版本/u);
   assert.match(pageSource, /zhouxiyu1997\.github\.io\/friendmaker\//u);
   assert.match(pageSource, /前往手柄测试/u);
   assert.match(appSource, /switchModelId:\s*"switch"/u);
@@ -365,7 +365,7 @@ test("firmware flasher keeps the Switch model selector plus Switch 2 and Switch 
     /state\.firmwareSwitchModels = Array\.isArray\(payload\.switchModels\) \? payload\.switchModels : \[\]/u,
   );
   assert.match(serverSource, /switchModels:\s*SWITCH_MODELS/u);
-  assert.match(serverSource, /id:\s*"switch"[\s\S]*label:\s*"Switch"/u);
+  assert.match(serverSource, /id:\s*"switch"[\s\S]*label:\s*"老版固件"/u);
   assert.doesNotMatch(serverSource, /label:\s*"Switch \/ OLED \/ V2"/u);
   assert.match(serverSource, /id:\s*"switch2"[\s\S]*label:\s*"Switch 2"/u);
   assert.match(
