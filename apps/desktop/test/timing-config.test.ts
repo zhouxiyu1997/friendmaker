@@ -328,9 +328,11 @@ test("/api/generate can enable time-saving recenter strategy", async (t) => {
 
   const macroStart = payload.commands.indexOf("STICK -1 0 2000");
   assert.ok(macroStart >= 0, "expected generated command list to include recenter macro");
-  assert.deepEqual(payload.commands.slice(macroStart, macroStart + 7), [
+  assert.deepEqual(payload.commands.slice(macroStart, macroStart + 9), [
     "STICK -1 0 2000",
-    "W 500",
+    "W 1000",
+    "STICK 0 -1 2000",
+    "W 1000",
     "BTN X",
     "W 500",
     "BTN X",
@@ -339,8 +341,8 @@ test("/api/generate can enable time-saving recenter strategy", async (t) => {
   ]);
   assert.equal(payload.stats.pathStats.recenterCount, 1);
   assert.equal(payload.stats.pathStats.recenterCandidates, 1);
-  assert.equal(payload.stats.pathStats.recenterMacroMs, 3830);
-  assert.equal(payload.stats.pathStats.recenterThresholdSteps, 35);
+  assert.equal(payload.stats.pathStats.recenterMacroMs, 7330);
+  assert.equal(payload.stats.pathStats.recenterThresholdSteps, 67);
   assert.ok(payload.stats.pathStats.recenterSavedMs > 0);
 });
 

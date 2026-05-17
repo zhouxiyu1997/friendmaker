@@ -646,6 +646,20 @@ void ClassicBtControllerTransport::updateInputReport() {
   dummyReport_[0] = timer_;
 }
 
+void ClassicBtControllerTransport::logInputReport(const char *command, const char *phase) const {
+  Serial.printf(
+      "INFO input_report command=%s phase=%s buttonsRight=0x%02X buttonsShared=0x%02X buttonsLeft=0x%02X leftStickX=%u leftStickY=%u rightStickX=%u rightStickY=%u\n",
+      command,
+      phase,
+      buttonsRight_,
+      buttonsShared_,
+      buttonsLeft_,
+      leftStickX_,
+      leftStickY_,
+      rightStickX_,
+      rightStickY_);
+}
+
 void ClassicBtControllerTransport::ensureSendTask() {
   if (sendTaskHandle_ != nullptr) {
     return;
@@ -701,9 +715,11 @@ bool ClassicBtControllerTransport::pressButtons(
   }
   setButtonBits(buttonsMask);
   updateInputReport();
+  logInputReport("button", "press");
   bool ok = repeatCurrentInputReport(
       holdMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs);
   clearInputs();
+  logInputReport("button", "release");
   if (!repeatCurrentInputReport(
           settleMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs)) {
     ok = false;
@@ -719,9 +735,11 @@ bool ClassicBtControllerTransport::pressButtonsReliable(
   }
   setButtonBits(buttonsMask);
   updateInputReport();
+  logInputReport("button-reliable", "press");
   bool ok = repeatCurrentInputReport(
       holdMs, true, true, kReliableInputCongestionRetryBudgetMs);
   clearInputs();
+  logInputReport("button-reliable", "release");
   if (!repeatCurrentInputReport(
           settleMs, true, true, kReliableInputCongestionRetryBudgetMs)) {
     ok = false;
@@ -740,9 +758,11 @@ bool ClassicBtControllerTransport::moveDirection(
   buttonsLeft_ = 0;
   setLeftStickFromVector(x, y);
   updateInputReport();
+  logInputReport("stick", "press");
   bool ok = repeatCurrentInputReport(
       holdMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs);
   clearInputs();
+  logInputReport("stick", "release");
   if (!repeatCurrentInputReport(
           settleMs, true, kWaitForExplicitInputSendEvent, kHidCongestionRetryBudgetMs)) {
     ok = false;
@@ -1739,6 +1759,10 @@ void ClassicBtControllerTransport::setLeftStickFromVector(int x, int y) {
   (void)y;
 }
 void ClassicBtControllerTransport::updateInputReport() {}
+void ClassicBtControllerTransport::logInputReport(const char *command, const char *phase) const {
+  (void)command;
+  (void)phase;
+}
 void ClassicBtControllerTransport::ensureSendTask() {}
 bool ClassicBtControllerTransport::isHidReportChannelOpen() const { return false; }
 bool ClassicBtControllerTransport::isControllerInputReady() const { return false; }

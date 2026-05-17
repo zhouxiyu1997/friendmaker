@@ -54,7 +54,9 @@ const PALETTE_SLOT_COUNT = 9;
 const EXACT_COMPONENT_ORDER_LIMIT = 6;
 const EXACT_COMPONENT_PIXEL_LIMIT = 300;
 const RECENTER_STICK_HOLD_MS = 2_000;
+const RECENTER_RELEASE_SETTLE_WAIT_MS = 1_000;
 const RECENTER_UI_SETTLE_WAIT_MS = 500;
+const COLOR_SELECT_CANVAS_SETTLE_WAIT_MS = 500;
 const NEIGHBOR_OFFSETS = [
   { dx: 1, dy: 0 },
   { dx: -1, dy: 0 },
@@ -537,7 +539,9 @@ function manhattanDistance(
 function createRecenterMacroCommands(): DrawCommand[] {
   return [
     stickCommand(-1, 0, RECENTER_STICK_HOLD_MS),
-    waitCommand(RECENTER_UI_SETTLE_WAIT_MS),
+    waitCommand(RECENTER_RELEASE_SETTLE_WAIT_MS),
+    stickCommand(0, -1, RECENTER_STICK_HOLD_MS),
+    waitCommand(RECENTER_RELEASE_SETTLE_WAIT_MS),
     pressButtonCommand("X"),
     waitCommand(RECENTER_UI_SETTLE_WAIT_MS),
     pressButtonCommand("X"),
@@ -551,7 +555,11 @@ function createRecenterPlanner(
   strategy: RecenterStrategy,
 ): RecenterPlanner {
   const stepMs = profile.buttonPressDuration + profile.inputDelay;
-  const macroMs = RECENTER_STICK_HOLD_MS + 3 * stepMs + 3 * RECENTER_UI_SETTLE_WAIT_MS;
+  const macroMs =
+    2 * RECENTER_STICK_HOLD_MS +
+    2 * RECENTER_RELEASE_SETTLE_WAIT_MS +
+    3 * stepMs +
+    2 * RECENTER_UI_SETTLE_WAIT_MS;
 
   return {
     strategy,
@@ -577,11 +585,13 @@ function moveTo(
   target: { x: number; y: number },
   grid: BrushGrid,
   recenterPlanner: RecenterPlanner,
+  options: { allowRecenter?: boolean } = {},
 ): { x: number; y: number } {
   const canvasTarget = toCanvasPosition(target, grid);
+  const allowRecenter = options.allowRecenter ?? true;
   let moveOrigin = current;
 
-  if (recenterPlanner.strategy === "time-saving") {
+  if (allowRecenter && recenterPlanner.strategy === "time-saving") {
     const directSteps = manhattanDistance(current, canvasTarget);
     const recenteredSteps = manhattanDistance(recenterPlanner.center, canvasTarget);
     const directCost = directSteps * recenterPlanner.stepMs;
@@ -702,6 +712,7 @@ function appendPixelRun(
   profile: DrawingProfile,
   grid: BrushGrid,
   recenterPlanner: RecenterPlanner,
+  options: { allowInitialRecenter?: boolean } = {},
 ): { position: { x: number; y: number }; paintCommandIndex: number | null } {
   const firstPixel = run[0];
   const lastPixel = run[run.length - 1];
@@ -710,7 +721,9 @@ function appendPixelRun(
     return { position: current, paintCommandIndex: null };
   }
 
-  moveTo(commands, current, firstPixel, grid, recenterPlanner);
+  moveTo(commands, current, firstPixel, grid, recenterPlanner, {
+    allowRecenter: options.allowInitialRecenter ?? true,
+  });
   const paintCommandIndex = commands.length;
 
   if (run.length === 1) {
@@ -739,10 +752,12 @@ function appendOrderedPixels(
   profile: DrawingProfile,
   grid: BrushGrid,
   recenterPlanner: RecenterPlanner,
+  options: { allowInitialRecenter?: boolean } = {},
 ): { position: { x: number; y: number }; firstPaintCommandIndex: number | null } {
   let currentPosition = current;
   let run: Pixel[] = [];
   let firstPaintCommandIndex: number | null = null;
+  let isFirstRun = true;
 
   for (const pixel of orderedPixels) {
     if (canExtendRun(run, pixel)) {
@@ -757,10 +772,12 @@ function appendOrderedPixels(
       profile,
       grid,
       recenterPlanner,
+      { allowInitialRecenter: !isFirstRun || (options.allowInitialRecenter ?? true) },
     );
     currentPosition = appendedRun.position;
     firstPaintCommandIndex ??= appendedRun.paintCommandIndex;
     run = [pixel];
+    isFirstRun = false;
   }
 
   const appendedRun = appendPixelRun(
@@ -770,6 +787,7 @@ function appendOrderedPixels(
     profile,
     grid,
     recenterPlanner,
+    { allowInitialRecenter: !isFirstRun || (options.allowInitialRecenter ?? true) },
   );
   firstPaintCommandIndex ??= appendedRun.paintCommandIndex;
   return {
@@ -808,6 +826,7 @@ function appendResumeSegment(
     colorHex: string | null;
     slotIndex: number | null;
     resumePrefixCommands: DrawCommand[];
+    allowInitialRecenter?: boolean;
   },
 ): { x: number; y: number } {
   const firstPixel = orderedPixels[0];
@@ -824,6 +843,7 @@ function appendResumeSegment(
     profile,
     grid,
     recenterPlanner,
+    { allowInitialRecenter: meta.allowInitialRecenter ?? true },
   );
 
   resumeSegments.push({
@@ -886,9 +906,13 @@ export function generateScanlinePlan(
     let selectedColor: number | null = profile.startColorIndex;
 
     for (const colorIndex of usedColorIndexes) {
+      let didSelectColor = false;
+
       if (selectedColor !== colorIndex) {
         commands.push(colorCommand(colorIndex));
+        commands.push(waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS));
         selectedColor = colorIndex;
+        didSelectColor = true;
       }
 
       const orderedPixels = getOrderedPixelsForColor(pixelsByColor, colorIndex, current, profile, grid, pathStrategy);
@@ -906,8 +930,14 @@ export function generateScanlinePlan(
           slotIndex: null,
           resumePrefixCommands: [
             ...brushSetupCommands,
-            ...(profile.startColorIndex === 0 ? [] : [colorCommand(profile.startColorIndex)]),
+            ...(profile.startColorIndex === 0
+              ? []
+              : [
+                  colorCommand(profile.startColorIndex),
+                  waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS),
+                ]),
           ],
+          allowInitialRecenter: !didSelectColor,
         },
       );
       segmentIndex += 1;
@@ -925,9 +955,13 @@ export function generateScanlinePlan(
       commands.push(...batchPrefixCommands);
 
       for (const [slotIndex, color] of batch.entries()) {
+        let didSelectColor = false;
+
         if (selectedSlot !== slotIndex) {
           commands.push(colorCommand(slotIndex));
+          commands.push(waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS));
           selectedSlot = slotIndex;
+          didSelectColor = true;
         }
 
         const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
@@ -947,7 +981,9 @@ export function generateScanlinePlan(
               ...brushSetupCommands,
               ...batchPrefixCommands.slice(slotIndex),
               colorCommand(slotIndex),
+              waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS),
             ],
+            allowInitialRecenter: !didSelectColor,
           },
         );
         segmentIndex += 1;
@@ -973,9 +1009,13 @@ export function generateScanlinePlan(
       commands.push(...batchConfigCommands);
 
       for (const [slotIndex, color] of batch.entries()) {
+        let didSelectColor = false;
+
         if (selectedSlot !== slotIndex) {
           commands.push(colorCommand(slotIndex));
+          commands.push(waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS));
           selectedSlot = slotIndex;
+          didSelectColor = true;
         }
 
         const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
@@ -996,7 +1036,9 @@ export function generateScanlinePlan(
               basicPaletteResetCommand(),
               ...batchConfigCommands.slice(slotIndex),
               colorCommand(slotIndex),
+              waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS),
             ],
+            allowInitialRecenter: !didSelectColor,
           },
         );
         segmentIndex += 1;

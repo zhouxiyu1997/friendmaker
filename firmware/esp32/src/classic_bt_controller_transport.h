@@ -26,6 +26,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
   void setButtonBits(uint32_t buttonsMask);
   void setLeftStickFromVector(int x, int y);
   void updateInputReport();
+  void logInputReport(const char *command, const char *phase) const;
   void ensureSendTask();
   uint16_t idleSendIntervalMs() const;
   bool isHidReportChannelOpen() const;

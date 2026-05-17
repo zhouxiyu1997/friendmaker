@@ -33,6 +33,9 @@ function confirmUi(message) {
 const PANEL_LAYOUT_STORAGE_KEY = "friendmaker.panelLayout.v1";
 const PANEL_LAYOUT_RATIO_MIN = 0.08;
 const STUDIO_PREVIEW_COLUMN_MIN_PX = 568;
+const RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND = "CFG INPUT 65 45 1800";
+const RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND = "STICK -1 0 2000";
+const RECENTER_DIAGNOSTIC_STICK_UP_COMMAND = "STICK 0 -1 2000";
 
 const PANEL_LAYOUTS = {
   studio: {
@@ -4100,6 +4103,10 @@ async function runExecution({
 }
 
 function prependSharedTimingCommand(commands) {
+  if (commands[0]?.startsWith("CFG INPUT ")) {
+    return commands;
+  }
+
   return [buildSharedTimingConfigCommand(), ...commands];
 }
 
@@ -4366,6 +4373,30 @@ function mapControllerActionToCommands(action, step) {
       return ["BTN RS"];
     case "pair-lr":
       return ["BTN L+R"];
+    case "recenter-stick-only":
+      return [
+        RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND,
+        RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND,
+      ];
+    case "recenter-stick-wait":
+      return [
+        RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND,
+        RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND,
+        "W 500",
+      ];
+    case "recenter-full":
+      return [
+        RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND,
+        RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND,
+        "W 1000",
+        RECENTER_DIAGNOSTIC_STICK_UP_COMMAND,
+        "W 1000",
+        "BTN X",
+        "W 500",
+        "BTN X",
+        "W 500",
+        "BTN A",
+      ];
     default:
       return [];
   }

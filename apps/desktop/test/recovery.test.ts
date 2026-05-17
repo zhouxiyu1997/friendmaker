@@ -158,7 +158,11 @@ test("mono resume segments keep the first draw command when the segment already 
 
   assert.ok(segment);
   assert.deepEqual(scanlinePlan.resumePlan.initialCursor, { x: 2, y: 0 });
-  assert.deepEqual(segment.resumePrefixCommands, [...expectedBrushSetupPrefix(1, "square"), "C 1"]);
+  assert.deepEqual(segment.resumePrefixCommands, [
+    ...expectedBrushSetupPrefix(1, "square"),
+    "C 1",
+    "W 500",
+  ]);
   assert.deepEqual(segment.firstCanvasPosition, { x: 2, y: 0 });
   assert.equal(segment.bodyStartCommandIndex, 13);
   assert.equal(commands[segment.bodyStartCommandIndex], "P");
@@ -201,9 +205,10 @@ test("official and palette resume segments rebuild only unfinished color slots",
     false,
   );
   assert.equal(
-    officialSegments[1]?.resumePrefixCommands[officialSegments[1].resumePrefixCommands.length - 1],
+    officialSegments[1]?.resumePrefixCommands.at(-2),
     "C 1",
   );
+  assert.equal(officialSegments[1]?.resumePrefixCommands.at(-1), "W 500");
   assert.equal(officialCommands[officialSegments[1]?.bodyStartCommandIndex ?? 0], "P");
 
   const paletteProfile = makeProfile({
@@ -233,9 +238,10 @@ test("official and palette resume segments rebuild only unfinished color slots",
     false,
   );
   assert.equal(
-    paletteSegments[1]?.resumePrefixCommands[paletteSegments[1].resumePrefixCommands.length - 1],
+    paletteSegments[1]?.resumePrefixCommands.at(-2),
     "C 1",
   );
+  assert.equal(paletteSegments[1]?.resumePrefixCommands.at(-1), "W 500");
 });
 
 test("recovery execution plan redraws the current failed color segment and still reaches the original total", async () => {

@@ -218,6 +218,34 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
   );
 });
 
+test("controller firmware logs HID input reports around stick and button commands", async () => {
+  const classicTransportSource = await readFile(
+    new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    classicTransportSource,
+    /INFO input_report command=%s phase=%s buttonsRight=0x%02X buttonsShared=0x%02X buttonsLeft=0x%02X leftStickX=%u leftStickY=%u rightStickX=%u rightStickY=%u/u,
+  );
+  assert.match(
+    classicTransportSource,
+    /pressButtons\([\s\S]*setButtonBits\(buttonsMask\);[\s\S]*updateInputReport\(\);[\s\S]*logInputReport\("button", "press"\)[\s\S]*clearInputs\(\);[\s\S]*logInputReport\("button", "release"\)/u,
+  );
+  assert.match(
+    classicTransportSource,
+    /pressButtonsReliable\([\s\S]*logInputReport\("button-reliable", "press"\)[\s\S]*clearInputs\(\);[\s\S]*logInputReport\("button-reliable", "release"\)/u,
+  );
+  assert.match(
+    classicTransportSource,
+    /moveDirection\([\s\S]*buttonsRight_ = 0;[\s\S]*buttonsShared_ = 0;[\s\S]*buttonsLeft_ = 0;[\s\S]*setLeftStickFromVector\(x, y\);[\s\S]*updateInputReport\(\);[\s\S]*logInputReport\("stick", "press"\)[\s\S]*clearInputs\(\);[\s\S]*logInputReport\("stick", "release"\)/u,
+  );
+  assert.match(
+    classicTransportSource,
+    /ControllerButton::LStick[\s\S]*buttonsShared_ \|= 1u << 3/u,
+  );
+});
+
 test("controller firmware routes palette menu navigation through reliable input", async () => {
   const controllerSource = await readFile(
     new URL("../../../firmware/esp32/src/controller.cpp", import.meta.url),

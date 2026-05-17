@@ -231,3 +231,34 @@ test("controller status updates also resync the controller action buttons", asyn
     /updateControllerStatusFromLines\(payload\.lines \?\? \[\]\);[\s\S]*appendControllerStatusDiagnosticLines\(payload\.lines\);/u,
   );
 });
+
+test("controller page exposes fixed recenter diagnostic scripts", async () => {
+  const [indexSource, appSource] = await Promise.all([
+    readFile(new URL("../src/web/static/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../src/web/static/app.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(indexSource, /回中诊断/u);
+  assert.match(indexSource, /data-controller-action="recenter-stick-only"/u);
+  assert.match(indexSource, /data-controller-action="recenter-stick-wait"/u);
+  assert.match(indexSource, /data-controller-action="recenter-full"/u);
+  assert.match(appSource, /RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND\s*=\s*"CFG INPUT 65 45 1800"/u);
+  assert.match(appSource, /RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND\s*=\s*"STICK -1 0 2000"/u);
+  assert.match(appSource, /RECENTER_DIAGNOSTIC_STICK_UP_COMMAND\s*=\s*"STICK 0 -1 2000"/u);
+  assert.match(
+    appSource,
+    /case "recenter-stick-only":[\s\S]*RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND[\s\S]*RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND[\s\S]*case "recenter-stick-wait"/u,
+  );
+  assert.match(
+    appSource,
+    /case "recenter-stick-wait":[\s\S]*"W 500"[\s\S]*case "recenter-full"/u,
+  );
+  assert.match(
+    appSource,
+    /case "recenter-full":[\s\S]*RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND[\s\S]*RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND[\s\S]*"W 1000"[\s\S]*RECENTER_DIAGNOSTIC_STICK_UP_COMMAND[\s\S]*"W 1000"[\s\S]*"BTN X"[\s\S]*"BTN X"[\s\S]*"BTN A"/u,
+  );
+  assert.match(
+    appSource,
+    /function prependSharedTimingCommand\(commands\)\s*\{[\s\S]*commands\[0\]\?\.startsWith\("CFG INPUT "\)[\s\S]*return commands/u,
+  );
+});
