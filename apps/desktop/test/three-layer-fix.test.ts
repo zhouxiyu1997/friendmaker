@@ -493,8 +493,8 @@ test("palette menu commands get conservative timeouts for reliable navigation", 
 
   assert.equal(getAckTimeoutForCommand("C 0", 20_000, timing), 20_000);
   assert.equal(getAckTimeoutForCommand("C 8", 20_000, timing), 20_000);
-  assert.equal(getAckTimeoutForCommand("BC 0 6 11", 20_000, timing), 30_330);
-  assert.equal(getAckTimeoutForCommand("BC 8 0 0", 20_000, timing), 25_610);
+  assert.equal(getAckTimeoutForCommand("BC 0 6 11", 20_000, timing), 26_790);
+  assert.equal(getAckTimeoutForCommand("BC 8 0 0", 20_000, timing), 20_000);
 });
 
 test("controller input report failures are not retried", async () => {

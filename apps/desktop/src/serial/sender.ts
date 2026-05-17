@@ -4,6 +4,15 @@ import { SerialPort } from "serialport";
 import { preferSerialPath } from "./listPorts.js";
 import { getLineCommandMetrics } from "../protocol/lineMetrics.js";
 import {
+  createBasicPaletteTimingState,
+  estimateBasicPaletteConfigDurationMs,
+  estimateColorSelectDurationMs,
+  estimatePaletteConfigDurationMs,
+  resetBasicPaletteTimingState,
+  updateBasicPaletteTimingState,
+  type BasicPaletteTimingState,
+} from "../protocol/paletteTiming.js";
+import {
   createSessionId,
   formatSequencedCommand,
   parseSequencedAck,
@@ -27,25 +36,6 @@ export const SERIAL_OPEN_READY_PROBE_TIMEOUT_MS = 3_000;
 export const SERIAL_OPEN_RESET_PULSE_MS = 120;
 const PASSIVE_DEVICE_LINE_BUFFER_LIMIT = 200;
 const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
-const COLOR_PALETTE_SLOT_COUNT = 9;
-const COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
-const COLOR_PALETTE_MENU_PRESS_DURATION_MS = 90;
-const COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500;
-const COLOR_PALETTE_MENU_OPEN_SETTLE_MS = 180;
-const COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS = 180;
-const COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS = 2_500;
-const COLOR_PALETTE_EDITOR_HUE_STEP_COUNT = 200;
-const COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT = 213;
-const COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT = 112;
-const COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS = 1_500;
-const COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3_000;
-const COLOR_PALETTE_EDITOR_MOVE_STEP_MS = 20;
-const COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
-const COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS = 12;
-const BASIC_COLOR_GRID_ROWS = 7;
-const BASIC_COLOR_GRID_COLS = 12;
-const BASIC_COLOR_TAB_SETTLE_MS = 140;
-const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
 
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
@@ -64,162 +54,6 @@ export interface SerialSessionSnapshot {
   busy: boolean;
   idleTimeoutMs: number;
   lastUsedAt: number | null;
-}
-
-interface HsvColor {
-  hue: number;
-  saturation: number;
-  value: number;
-}
-
-function clampPaletteSlotIndex(index: number): number {
-  if (index < 0) {
-    return 0;
-  }
-
-  if (index >= COLOR_PALETTE_SLOT_COUNT) {
-    return COLOR_PALETTE_SLOT_COUNT - 1;
-  }
-
-  return index;
-}
-
-function scaleChannelToSteps(value: number, steps: number): number {
-  if (steps <= 0) {
-    return 0;
-  }
-
-  const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
-  return Math.round(clamped * steps);
-}
-
-function rgbToHsv(red: number, green: number, blue: number): HsvColor {
-  const r = red / 255;
-  const g = green / 255;
-  const b = blue / 255;
-  const maxChannel = Math.max(r, g, b);
-  const minChannel = Math.min(r, g, b);
-  const delta = maxChannel - minChannel;
-  let hue = 0;
-
-  if (delta > 0) {
-    if (maxChannel === r) {
-      hue = 60 * (((g - b) / delta) % 6);
-    } else if (maxChannel === g) {
-      hue = 60 * (((b - r) / delta) + 2);
-    } else {
-      hue = 60 * (((r - g) / delta) + 4);
-    }
-  }
-
-  if (hue < 0) {
-    hue += 360;
-  }
-
-  return {
-    hue,
-    saturation: maxChannel <= 0 ? 0 : delta / maxChannel,
-    value: maxChannel,
-  };
-}
-
-function splitPaletteValueDropSteps(valueDropSteps: number): {
-  coarseValueSteps: number;
-  fineValueSteps: number;
-} {
-  const normalizedSteps = valueDropSteps < 0 ? 0 : valueDropSteps;
-  const fineValueSteps = Math.min(normalizedSteps, COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS);
-
-  return {
-    coarseValueSteps: normalizedSteps - fineValueSteps,
-    fineValueSteps,
-  };
-}
-
-function estimatePaletteSlotSelectionDurationMs(slotIndex: number): number {
-  const normalizedSlot = clampPaletteSlotIndex(slotIndex);
-  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
-
-  return (
-    menuPressMs + // open palette with Y
-    COLOR_PALETTE_MENU_OPEN_SETTLE_MS +
-    COLOR_PALETTE_RESET_TO_BOTTOM_STEPS * menuPressMs +
-    (COLOR_PALETTE_SLOT_COUNT - 1 - normalizedSlot) * menuPressMs
-  );
-}
-
-function estimatePaletteConfigDurationMs(
-  slotIndex: number,
-  red: number,
-  green: number,
-  blue: number,
-  timing: InputTiming,
-): number {
-  const normalizedSlot = clampPaletteSlotIndex(slotIndex);
-  const hsv = rgbToHsv(red, green, blue);
-  const hueRatio = hsv.hue <= 0 ? 0 : (360 - hsv.hue) / 360;
-  const hueSteps = Math.round(hueRatio * COLOR_PALETTE_EDITOR_HUE_STEP_COUNT);
-  const saturationSteps = scaleChannelToSteps(hsv.saturation, COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT);
-  const valueDropSteps = scaleChannelToSteps(1 - hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
-  const { coarseValueSteps, fineValueSteps } = splitPaletteValueDropSteps(valueDropSteps);
-  const generalPressMs = timing.buttonPressMs + timing.inputDelayMs;
-  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
-
-  return (
-    estimatePaletteSlotSelectionDurationMs(normalizedSlot) +
-    menuPressMs + // enter slot with Y
-    COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS +
-    menuPressMs + // switch to custom tab with R
-    BASIC_COLOR_TAB_SETTLE_MS +
-    (COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS + timing.inputDelayMs) +
-    (COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS + timing.inputDelayMs) +
-    (COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS + timing.inputDelayMs) +
-    COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS +
-    hueSteps * generalPressMs +
-    (saturationSteps > 0
-      ? saturationSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs
-      : 0) +
-    (coarseValueSteps > 0
-      ? coarseValueSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs
-      : 0) +
-    fineValueSteps * generalPressMs +
-    3 * menuPressMs + // B, A, B
-    timing.inputDelayMs +
-    PALETTE_CONFIG_TIMEOUT_MARGIN_MS
-  );
-}
-
-function estimateColorSelectDurationMs(slotIndex: number, timing: InputTiming): number {
-  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
-
-  return (
-    estimatePaletteSlotSelectionDurationMs(slotIndex) +
-    2 * menuPressMs + // A, B
-    timing.inputDelayMs +
-    PALETTE_CONFIG_TIMEOUT_MARGIN_MS
-  );
-}
-
-function estimateBasicPaletteConfigDurationMs(
-  slotIndex: number,
-  _targetRow: number,
-  _targetCol: number,
-  timing: InputTiming,
-): number {
-  const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
-  const maxRowSteps = BASIC_COLOR_GRID_ROWS - 1;
-  const maxColSteps = BASIC_COLOR_GRID_COLS - 1;
-
-  return (
-    estimatePaletteSlotSelectionDurationMs(slotIndex) +
-    menuPressMs + // enter slot with Y
-    COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS +
-    menuPressMs + // switch to basic tab with L
-    BASIC_COLOR_TAB_SETTLE_MS +
-    (maxRowSteps + maxColSteps + 1) * menuPressMs + // worst-case grid movement plus A
-    timing.inputDelayMs +
-    PALETTE_CONFIG_TIMEOUT_MARGIN_MS
-  );
 }
 
 function isRecognizedDeviceLine(line: string): boolean {
@@ -422,6 +256,7 @@ export function getAckTimeoutForCommand(
   command: string,
   baseTimeoutMs: number,
   timing: InputTiming = DEFAULT_SAFE_INPUT_TIMING,
+  basicPaletteState: BasicPaletteTimingState = createBasicPaletteTimingState(),
 ): number {
   const trimmed = command.trim();
   const simplePressTimeoutMs = 1_000 + timing.buttonPressMs + timing.inputDelayMs;
@@ -534,7 +369,9 @@ export function getAckTimeoutForCommand(
 
     return Math.max(
       baseTimeoutMs,
-      estimateColorSelectDurationMs(Number.parseInt(match[1], 10), timing),
+      estimateColorSelectDurationMs(Number.parseInt(match[1], 10), timing, {
+        includeTimeoutMargin: true,
+      }),
     );
   }
 
@@ -552,6 +389,10 @@ export function getAckTimeoutForCommand(
         Number.parseInt(match[2], 10),
         Number.parseInt(match[3], 10),
         timing,
+        {
+          basicPaletteState,
+          includeTimeoutMargin: true,
+        },
       ),
     );
   }
@@ -571,11 +412,38 @@ export function getAckTimeoutForCommand(
 
     return Math.max(
       baseTimeoutMs,
-      estimatePaletteConfigDurationMs(slotIndex, red, green, blue, timing),
+      estimatePaletteConfigDurationMs(slotIndex, red, green, blue, timing, {
+        includeTimeoutMargin: true,
+      }),
     );
   }
 
   return baseTimeoutMs;
+}
+
+export function updateBasicPaletteStateForCommand(
+  command: string,
+  basicPaletteState: BasicPaletteTimingState,
+): void {
+  const trimmed = command.trim();
+
+  if (trimmed === "BC RESET") {
+    resetBasicPaletteTimingState(basicPaletteState);
+    return;
+  }
+
+  const match = /^BC\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/u.exec(trimmed);
+
+  if (!match?.[1] || !match[2] || !match[3]) {
+    return;
+  }
+
+  updateBasicPaletteTimingState(
+    basicPaletteState,
+    Number.parseInt(match[1], 10),
+    Number.parseInt(match[2], 10),
+    Number.parseInt(match[3], 10),
+  );
 }
 
 function writeLine(port: SerialPort, line: string): Promise<void> {
@@ -1120,6 +988,7 @@ export class SerialCommandSession {
     }
 
     let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
+    const basicPaletteState = createBasicPaletteTimingState();
     this.flushPassiveDeviceLines(options.onDeviceLine);
 
     for (const [index, command] of commands.entries()) {
@@ -1143,7 +1012,12 @@ export class SerialCommandSession {
             await waitForAck(
               this.parser,
               this.port,
-              getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming),
+              getAckTimeoutForCommand(
+                command,
+                options.ackTimeoutMs,
+                inputTiming,
+                basicPaletteState,
+              ),
               {
                 sessionId: this.sessionId,
                 sequence: commandSequence,
@@ -1188,6 +1062,7 @@ export class SerialCommandSession {
         command,
       });
       inputTiming = parseInputConfigCommand(command) ?? inputTiming;
+      updateBasicPaletteStateForCommand(command, basicPaletteState);
       this.sequence += 1;
       this.lastUsedAtValue = Date.now();
     }

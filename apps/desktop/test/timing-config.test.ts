@@ -9,7 +9,18 @@ import sharp from "sharp";
 import { buildRecoveryExecutionPlan } from "../src/app/recovery.js";
 import { DEFAULT_ACK_TIMEOUT_MS } from "../src/config/defaultProfile.js";
 import { loadProfile } from "../src/config/loadProfile.js";
-import { generateScanlinePlan } from "../src/path/scanline.js";
+import { estimateRuntimeMs, generateScanlinePlan } from "../src/path/scanline.js";
+import {
+  basicPaletteConfigCommand,
+  basicPaletteResetCommand,
+  inputConfigCommand,
+} from "../src/protocol/commands.js";
+import {
+  createBasicPaletteTimingState,
+  estimateBasicPaletteConfigDurationMs,
+  resetBasicPaletteTimingState,
+  updateBasicPaletteTimingState,
+} from "../src/protocol/paletteTiming.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import type { DrawingProfile, Pixel, PixelMap } from "../src/types.js";
 import { startWebServer } from "../src/web/server.js";
@@ -211,6 +222,45 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
     overridePayload.stats.estimatedRuntimeMs < defaultPayload.stats.estimatedRuntimeMs,
     "expected faster timing overrides to reduce estimated runtime",
   );
+});
+
+test("official basic palette timing follows current slot position and BC RESET", () => {
+  const timing = { buttonPressMs: 100, inputDelayMs: 100, homeMs: 1800 };
+  const state = createBasicPaletteTimingState();
+  const initialDefaultSlotDuration = estimateBasicPaletteConfigDurationMs(0, 6, 0, timing, {
+    basicPaletteState: state,
+  });
+
+  assert.equal(initialDefaultSlotDuration, 18_300);
+
+  const movedDuration = estimateBasicPaletteConfigDurationMs(0, 0, 11, timing, {
+    basicPaletteState: state,
+  });
+  updateBasicPaletteTimingState(state, 0, 0, 11);
+  const sameCellDuration = estimateBasicPaletteConfigDurationMs(0, 0, 11, timing, {
+    basicPaletteState: state,
+  });
+
+  assert.equal(movedDuration, 28_330);
+  assert.equal(sameCellDuration, 18_300);
+
+  resetBasicPaletteTimingState(state);
+  assert.equal(
+    estimateBasicPaletteConfigDurationMs(0, 6, 0, timing, { basicPaletteState: state }),
+    initialDefaultSlotDuration,
+  );
+});
+
+test("estimated runtime keeps official basic palette state between BC commands", () => {
+  const profile = makeProfile({ inputDelay: 100, buttonPressDuration: 100 });
+  const commands = [
+    inputConfigCommand(100, 100, 1800),
+    basicPaletteResetCommand(),
+    basicPaletteConfigCommand(0, 0, 11),
+    basicPaletteConfigCommand(0, 0, 11),
+  ];
+
+  assert.equal(estimateRuntimeMs(commands, profile), 46_730);
 });
 
 test("/api/generate rejects unsupported round large-brush requests", async (t) => {

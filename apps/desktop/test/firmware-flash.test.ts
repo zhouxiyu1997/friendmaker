@@ -241,7 +241,7 @@ test("controller firmware routes palette menu navigation through reliable input"
   );
 
   assert.match(configSource, /COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500/u);
-  assert.match(senderSource, /const COLOR_PALETTE_MENU_INPUT_DELAY_MS = 500/u);
+  assert.match(senderSource, /from "\.\.\/protocol\/paletteTiming\.js"/u);
   assert.match(
     transportHeaderSource,
     /virtual bool pressButtonsReliable[\s\S]*return pressButtons\(buttonsMask, holdMs, settleMs\);[\s\S]*pressButtonReliable/u,

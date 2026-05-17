@@ -24,9 +24,12 @@ import {
 } from "../protocol/commands.js";
 import { getLineCommandMetrics } from "../protocol/lineMetrics.js";
 import {
+  createBasicPaletteTimingState,
   estimateBasicPaletteConfigDurationMs,
   estimateColorSelectDurationMs,
   estimatePaletteConfigDurationMs,
+  resetBasicPaletteTimingState,
+  updateBasicPaletteTimingState,
 } from "../protocol/paletteTiming.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
 
@@ -1028,6 +1031,7 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
     inputDelayMs: profile.inputDelay,
     homeMs: profile.homeDuration,
   };
+  const basicPaletteState = createBasicPaletteTimingState();
 
   return commands.reduce((total, command) => {
     switch (command.type) {
@@ -1069,11 +1073,24 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
           return total + estimatePaletteConfigDurationMs(command.slot, red, green, blue, timing);
         }
       case "basicPaletteConfig":
-        return (
-          total +
-          estimateBasicPaletteConfigDurationMs(command.slot, command.row, command.col, timing)
-        );
+        {
+          const estimatedDuration = estimateBasicPaletteConfigDurationMs(
+            command.slot,
+            command.row,
+            command.col,
+            timing,
+            { basicPaletteState },
+          );
+          updateBasicPaletteTimingState(
+            basicPaletteState,
+            command.slot,
+            command.row,
+            command.col,
+          );
+          return total + estimatedDuration;
+        }
       case "basicPaletteReset":
+        resetBasicPaletteTimingState(basicPaletteState);
         return total + timing.inputDelayMs;
       case "wait":
         return total + command.ms;

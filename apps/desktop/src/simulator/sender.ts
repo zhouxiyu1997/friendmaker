@@ -9,7 +9,8 @@ import {
   isControllerInputReportFailure,
   parseInputConfigCommand,
 } from "../protocol/timing.js";
-import { getAckTimeoutForCommand } from "../serial/sender.js";
+import { createBasicPaletteTimingState } from "../protocol/paletteTiming.js";
+import { getAckTimeoutForCommand, updateBasicPaletteStateForCommand } from "../serial/sender.js";
 import { SimulatedDevice } from "./device.js";
 
 function delay(ms: number): Promise<void> {
@@ -73,6 +74,7 @@ export class SimulatedAckSender implements SenderControls {
     const sessionId = createSessionId();
     let sequence = 1;
     let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
+    const basicPaletteState = createBasicPaletteTimingState();
 
     for (const [index, command] of commands.entries()) {
       await this.waitWhilePaused();
@@ -98,7 +100,7 @@ export class SimulatedAckSender implements SenderControls {
               ? { inputReportFailureAtCommand: options.inputReportFailureAtCommand }
               : {}),
           }),
-          getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming),
+          getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming, basicPaletteState),
         );
 
         for (const line of response.lines) {
@@ -136,6 +138,7 @@ export class SimulatedAckSender implements SenderControls {
         command,
       });
       inputTiming = parseInputConfigCommand(command) ?? inputTiming;
+      updateBasicPaletteStateForCommand(command, basicPaletteState);
       sequence += 1;
     }
 

@@ -18,6 +18,8 @@ const COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS = 12;
 const BASIC_COLOR_GRID_ROWS = 7;
 const BASIC_COLOR_GRID_COLS = 12;
 const BASIC_COLOR_TAB_SETTLE_MS = 140;
+const BASIC_COLOR_INITIAL_SLOT_ROWS = [6, 0, 3, 3, 3, 3, 3, 3, 3] as const;
+const BASIC_COLOR_INITIAL_SLOT_COLS = [0, 0, 10, 9, 8, 6, 5, 2, 1] as const;
 const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
 
 interface HsvColor {
@@ -28,6 +30,12 @@ interface HsvColor {
 
 interface PaletteTimingOptions {
   includeTimeoutMargin?: boolean;
+  basicPaletteState?: BasicPaletteTimingState;
+}
+
+export interface BasicPaletteTimingState {
+  slotRows: number[];
+  slotCols: number[];
 }
 
 function clampPaletteSlotIndex(index: number): number {
@@ -40,6 +48,30 @@ function clampPaletteSlotIndex(index: number): number {
   }
 
   return index;
+}
+
+function clampBasicColorRow(row: number): number {
+  if (row < 0) {
+    return 0;
+  }
+
+  if (row >= BASIC_COLOR_GRID_ROWS) {
+    return BASIC_COLOR_GRID_ROWS - 1;
+  }
+
+  return row;
+}
+
+function clampBasicColorCol(col: number): number {
+  if (col < 0) {
+    return 0;
+  }
+
+  if (col >= BASIC_COLOR_GRID_COLS) {
+    return BASIC_COLOR_GRID_COLS - 1;
+  }
+
+  return col;
 }
 
 function scaleChannelToSteps(value: number, steps: number): number {
@@ -96,6 +128,30 @@ function splitPaletteValueDropSteps(valueDropSteps: number): {
 
 function timeoutMargin(options: PaletteTimingOptions): number {
   return options.includeTimeoutMargin ? PALETTE_CONFIG_TIMEOUT_MARGIN_MS : 0;
+}
+
+export function createBasicPaletteTimingState(): BasicPaletteTimingState {
+  return {
+    slotRows: [...BASIC_COLOR_INITIAL_SLOT_ROWS],
+    slotCols: [...BASIC_COLOR_INITIAL_SLOT_COLS],
+  };
+}
+
+export function resetBasicPaletteTimingState(state: BasicPaletteTimingState): void {
+  state.slotRows = [...BASIC_COLOR_INITIAL_SLOT_ROWS];
+  state.slotCols = [...BASIC_COLOR_INITIAL_SLOT_COLS];
+}
+
+export function updateBasicPaletteTimingState(
+  state: BasicPaletteTimingState,
+  slotIndex: number,
+  targetRow: number,
+  targetCol: number,
+): void {
+  const normalizedSlot = clampPaletteSlotIndex(slotIndex);
+
+  state.slotRows[normalizedSlot] = clampBasicColorRow(targetRow);
+  state.slotCols[normalizedSlot] = clampBasicColorCol(targetCol);
 }
 
 export function estimatePaletteSlotSelectionDurationMs(slotIndex: number): number {
@@ -169,22 +225,29 @@ export function estimatePaletteConfigDurationMs(
 
 export function estimateBasicPaletteConfigDurationMs(
   slotIndex: number,
-  _targetRow: number,
-  _targetCol: number,
+  targetRow: number,
+  targetCol: number,
   timing: InputTiming,
   options: PaletteTimingOptions = {},
 ): number {
+  const normalizedSlot = clampPaletteSlotIndex(slotIndex);
+  const normalizedTargetRow = clampBasicColorRow(targetRow);
+  const normalizedTargetCol = clampBasicColorCol(targetCol);
   const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
-  const maxRowSteps = BASIC_COLOR_GRID_ROWS - 1;
-  const maxColSteps = BASIC_COLOR_GRID_COLS - 1;
+  const currentRows = options.basicPaletteState?.slotRows ?? BASIC_COLOR_INITIAL_SLOT_ROWS;
+  const currentCols = options.basicPaletteState?.slotCols ?? BASIC_COLOR_INITIAL_SLOT_COLS;
+  const currentRow = clampBasicColorRow(currentRows[normalizedSlot] ?? BASIC_COLOR_INITIAL_SLOT_ROWS[normalizedSlot] ?? 0);
+  const currentCol = clampBasicColorCol(currentCols[normalizedSlot] ?? BASIC_COLOR_INITIAL_SLOT_COLS[normalizedSlot] ?? 0);
+  const gridMoveSteps =
+    Math.abs(normalizedTargetRow - currentRow) + Math.abs(normalizedTargetCol - currentCol);
 
   return (
-    estimatePaletteSlotSelectionDurationMs(slotIndex) +
+    estimatePaletteSlotSelectionDurationMs(normalizedSlot) +
     menuPressMs +
     COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS +
     menuPressMs +
     BASIC_COLOR_TAB_SETTLE_MS +
-    (maxRowSteps + maxColSteps + 1) * menuPressMs +
+    (gridMoveSteps + 1) * menuPressMs +
     timing.inputDelayMs +
     timeoutMargin(options)
   );
