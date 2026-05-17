@@ -94,10 +94,36 @@ test("scanline and recovery plans preserve profile timing in CFG INPUT", () => {
   });
 
   assert.equal(commands[0], "CFG INPUT 65 170 2400");
-  assert.deepEqual(commands.slice(1, 8), ["BTN X", "BTN X", "M -1 1", "BTN A", "BTN A", "BTN A", "W 3000"]);
+  assert.deepEqual(commands.slice(1, 13), [
+    "BTN X",
+    "W 500",
+    "BTN X",
+    "W 500",
+    "M -1 1",
+    "W 500",
+    "BTN A",
+    "W 500",
+    "BTN A",
+    "W 500",
+    "BTN A",
+    "W 3000",
+  ]);
   assert.equal(scanlinePlan.resumePlan.inputConfigCommand, "CFG INPUT 65 170 2400");
   assert.equal(recoveryPlan.commands[0], "CFG INPUT 65 170 2400");
-  assert.deepEqual(recoveryPlan.commands.slice(1, 8), ["BTN X", "BTN X", "M -1 1", "BTN A", "BTN A", "BTN A", "W 3000"]);
+  assert.deepEqual(recoveryPlan.commands.slice(1, 13), [
+    "BTN X",
+    "W 500",
+    "BTN X",
+    "W 500",
+    "M -1 1",
+    "W 500",
+    "BTN A",
+    "W 500",
+    "BTN A",
+    "W 500",
+    "BTN A",
+    "W 3000",
+  ]);
 });
 
 test("/api/generate echoes timing overrides into commands and estimated runtime", async (t) => {

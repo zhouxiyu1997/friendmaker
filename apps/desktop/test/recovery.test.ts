@@ -101,14 +101,17 @@ function expectedBrushSetupPrefix(
   } as const;
   const dx = columnsBySize[brushSize] - 2;
   const dy = rowsByShape[brushShape];
-  const commands = ["BTN X", "BTN X"];
+  const commands = ["BTN X", "W 500", "BTN X", "W 500"];
 
   if (dx !== 0 || dy !== 0) {
     commands.push(`M ${dx} ${dy}`);
+    commands.push("W 500");
   }
 
   commands.push("BTN A");
+  commands.push("W 500");
   commands.push("BTN A");
+  commands.push("W 500");
   commands.push("BTN A");
   commands.push("W 3000");
   return commands;
@@ -157,9 +160,9 @@ test("mono resume segments keep the first draw command when the segment already 
   assert.deepEqual(scanlinePlan.resumePlan.initialCursor, { x: 2, y: 0 });
   assert.deepEqual(segment.resumePrefixCommands, [...expectedBrushSetupPrefix(1, "square"), "C 1"]);
   assert.deepEqual(segment.firstCanvasPosition, { x: 2, y: 0 });
-  assert.equal(segment.bodyStartCommandIndex, 8);
+  assert.equal(segment.bodyStartCommandIndex, 13);
   assert.equal(commands[segment.bodyStartCommandIndex], "P");
-  assert.equal(segment.commandEndExclusive, 9);
+  assert.equal(segment.commandEndExclusive, 14);
 });
 
 test("official and palette resume segments rebuild only unfinished color slots", () => {

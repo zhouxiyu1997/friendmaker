@@ -2,6 +2,7 @@ import { moveCommand, pressButtonCommand, waitCommand, type DrawCommand } from "
 import type { BrushShape, BrushSize, DrawingProfile } from "./types.js";
 
 const BRUSH_PICKER_EXIT_SETTLE_MS = 3_000;
+const BRUSH_PICKER_UI_SETTLE_MS = 500;
 const DEFAULT_BRUSH_SELECTOR_COLUMN = 2;
 const DEFAULT_BRUSH_SELECTOR_ROW = 0;
 const BRUSH_SELECTOR_ROW_BY_SHAPE: Record<BrushShape, number> = {
@@ -60,19 +61,28 @@ export function buildAutomaticBrushSetupCommands(
   // round and square brushes as two rows of the same six size presets. After
   // choosing the target brush with A, the game still needs two more A presses
   // to leave the brush picker and then about three seconds before the canvas
-  // starts accepting movement input again.
+  // starts accepting movement input again. The menu transitions need a small
+  // settle delay between X/A actions on real devices.
   const targetColumn = BRUSH_SELECTOR_COLUMN_BY_SIZE[profile.brushSize];
   const targetRow = BRUSH_SELECTOR_ROW_BY_SHAPE[profile.brushShape];
   const dx = targetColumn - DEFAULT_BRUSH_SELECTOR_COLUMN;
   const dy = targetRow - DEFAULT_BRUSH_SELECTOR_ROW;
-  const commands: DrawCommand[] = [pressButtonCommand("X"), pressButtonCommand("X")];
+  const commands: DrawCommand[] = [
+    pressButtonCommand("X"),
+    waitCommand(BRUSH_PICKER_UI_SETTLE_MS),
+    pressButtonCommand("X"),
+    waitCommand(BRUSH_PICKER_UI_SETTLE_MS),
+  ];
 
   if (dx !== 0 || dy !== 0) {
     commands.push(moveCommand(dx, dy));
+    commands.push(waitCommand(BRUSH_PICKER_UI_SETTLE_MS));
   }
 
   commands.push(pressButtonCommand("A"));
+  commands.push(waitCommand(BRUSH_PICKER_UI_SETTLE_MS));
   commands.push(pressButtonCommand("A"));
+  commands.push(waitCommand(BRUSH_PICKER_UI_SETTLE_MS));
   commands.push(pressButtonCommand("A"));
   commands.push(waitCommand(BRUSH_PICKER_EXIT_SETTLE_MS));
   return commands;
