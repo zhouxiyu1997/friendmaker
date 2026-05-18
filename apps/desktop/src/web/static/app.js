@@ -383,6 +383,7 @@ const els = {
   copyButton: document.getElementById("copy-button"),
   downloadButton: document.getElementById("download-button"),
   studioLogOutput: document.getElementById("log-output"),
+  studioCopyLogButton: document.getElementById("studio-copy-log-button"),
   studioClearLogButton: document.getElementById("studio-clear-log-button"),
   statColors: document.getElementById("stat-colors"),
   statPixels: document.getElementById("stat-pixels"),
@@ -418,6 +419,7 @@ const els = {
   firmwareStatusTooling: document.getElementById("firmware-status-tooling"),
   firmwareStatusTime: document.getElementById("firmware-status-time"),
   firmwareLogOutput: document.getElementById("firmware-log-output"),
+  firmwareCopyLogButton: document.getElementById("firmware-copy-log-button"),
   firmwareClearLogButton: document.getElementById("firmware-clear-log-button"),
   controllerPortSelect: document.getElementById("controller-port-select"),
   controllerTimingHint: document.getElementById("controller-timing-hint"),
@@ -447,6 +449,7 @@ const els = {
   controllerStatusInitError: document.getElementById("controller-status-init-error"),
   controllerStatusTime: document.getElementById("controller-status-time"),
   controllerLogOutput: document.getElementById("controller-log-output"),
+  controllerCopyLogButton: document.getElementById("controller-copy-log-button"),
   controllerClearLogButton: document.getElementById("controller-clear-log-button"),
   timingPortSelect: document.getElementById("timing-port-select"),
   timingStepSelect: document.getElementById("timing-step-select"),
@@ -479,6 +482,7 @@ const els = {
   timingBenchmarkDeviceSummary: document.getElementById("timing-benchmark-device-summary"),
   timingBenchmarkTime: document.getElementById("timing-benchmark-time"),
   timingLogOutput: document.getElementById("timing-log-output"),
+  timingCopyLogButton: document.getElementById("timing-copy-log-button"),
   timingClearLogButton: document.getElementById("timing-clear-log-button"),
 };
 
@@ -1869,7 +1873,7 @@ els.copyButton.addEventListener("click", async () => {
     return;
   }
 
-  await navigator.clipboard.writeText(state.commands.join("\n"));
+  await writeClipboardText(state.commands.join("\n"));
   appendLog(els.studioLogOutput, "脚本已复制到剪贴板。");
 });
 
@@ -1890,12 +1894,20 @@ els.downloadButton.addEventListener("click", () => {
   appendLog(els.studioLogOutput, "脚本文件已下载。");
 });
 
+els.studioCopyLogButton.addEventListener("click", async () => {
+  await copyLog(els.studioLogOutput);
+});
+
 els.studioClearLogButton.addEventListener("click", () => {
   clearLog(els.studioLogOutput);
 });
 
 els.firmwareFlashButton.addEventListener("click", async () => {
   await startFirmwareFlash();
+});
+
+els.firmwareCopyLogButton.addEventListener("click", async () => {
+  await copyLog(els.firmwareLogOutput);
 });
 
 els.firmwareClearLogButton.addEventListener("click", () => {
@@ -2519,6 +2531,10 @@ els.controllerSendCustomButton.addEventListener("click", async () => {
   await runControllerCommands(commands, "自定义命令");
 });
 
+els.controllerCopyLogButton.addEventListener("click", async () => {
+  await copyLog(els.controllerLogOutput);
+});
+
 els.controllerClearLogButton.addEventListener("click", () => {
   clearLog(els.controllerLogOutput);
 });
@@ -2551,6 +2567,10 @@ els.timingReproBenchmarkButton.addEventListener("click", async () => {
   }
 
   await runTimingBenchmark("repro");
+});
+
+els.timingCopyLogButton.addEventListener("click", async () => {
+  await copyLog(els.timingLogOutput);
 });
 
 els.timingClearLogButton.addEventListener("click", () => {
@@ -4770,6 +4790,12 @@ function clearLog(element) {
   element.scrollTop = 0;
 }
 
+async function copyLog(element) {
+  const source = getLogSource(element);
+  await writeClipboardText(getCopyableLogSource(element, source));
+  appendLog(element, "日志已复制到剪贴板。");
+}
+
 const logSources = new WeakMap();
 
 function getEmptyLogSource(element) {
@@ -4800,6 +4826,53 @@ function getLogSource(element) {
   const source = getEmptyLogSource(element);
   logSources.set(element, source);
   return source;
+}
+
+function getCopyableLogSource(element, source = getLogSource(element)) {
+  const emptySource = getEmptyLogSource(element);
+
+  if (source === emptySource) {
+    return "";
+  }
+
+  if (source.startsWith(`${emptySource}\n`)) {
+    return source.slice(emptySource.length + 1);
+  }
+
+  return source;
+}
+
+async function writeClipboardText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch (error) {
+    const copied = writeClipboardTextWithSelection(text);
+
+    if (!copied) {
+      throw error;
+    }
+  }
+}
+
+function writeClipboardTextWithSelection(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.width = "1px";
+  textarea.style.height = "1px";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
 }
 
 function setLogSource(element, source) {
