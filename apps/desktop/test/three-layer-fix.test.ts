@@ -482,10 +482,17 @@ test("serial sender probes fresh ESP32 serial sessions before first sequenced co
 test("palette-config commands get enough timeout for calibrated custom colors", () => {
   const timing = { buttonPressMs: 100, inputDelayMs: 100, homeMs: 1800 };
 
-  assert.equal(getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing), 24_880);
-  assert.equal(getAckTimeoutForCommand("PC 2 #00FF00", 20_000, timing), 48_560);
-  assert.equal(getAckTimeoutForCommand("PC 0 #202020", 20_000, timing), 22_300);
-  assert.equal(getAckTimeoutForCommand("PC 0 #000000", 20_000, timing), 22_580);
+  assert.equal(getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing), 27_880);
+  assert.equal(getAckTimeoutForCommand("PC 2 #00FF00", 20_000, timing), 51_560);
+  assert.equal(getAckTimeoutForCommand("PC 0 #202020", 20_000, timing), 25_300);
+  assert.equal(getAckTimeoutForCommand("PC 0 #000000", 20_000, timing), 25_580);
+});
+
+test("palette-config timeout covers issue 74 custom colors", () => {
+  const timing = { buttonPressMs: 65, inputDelayMs: 45, homeMs: 1800 };
+
+  assert.equal(getAckTimeoutForCommand("PC 2 #933643", 20_000, timing), 25_740);
+  assert.equal(getAckTimeoutForCommand("PC 3 #5b2a33", 20_000, timing), 25_710);
 });
 
 test("palette menu commands get conservative timeouts for reliable navigation", () => {

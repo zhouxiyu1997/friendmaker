@@ -20,7 +20,7 @@ const BASIC_COLOR_GRID_COLS = 12;
 const BASIC_COLOR_TAB_SETTLE_MS = 140;
 const BASIC_COLOR_INITIAL_SLOT_ROWS = [6, 0, 3, 3, 3, 3, 3, 3, 3] as const;
 const BASIC_COLOR_INITIAL_SLOT_COLS = [0, 0, 10, 9, 8, 6, 5, 2, 1] as const;
-const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 2_000;
+const PALETTE_CONFIG_TIMEOUT_MARGIN_MS = 5_000;
 
 interface HsvColor {
   hue: number;
