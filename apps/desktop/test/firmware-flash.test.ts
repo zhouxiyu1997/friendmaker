@@ -340,7 +340,7 @@ test("controller firmware logs and auto-accepts bluetooth pairing prompts", asyn
   );
 });
 
-test("firmware flasher keeps the firmware version selector plus Switch 2 and Switch Lite upload mappings", async () => {
+test("firmware flasher hides legacy Switch firmware and exposes Switch1/Lite plus Switch 2", async () => {
   const pageSource = await readFile(
     new URL("../src/web/static/index.html", import.meta.url),
     "utf8",
@@ -357,20 +357,25 @@ test("firmware flasher keeps the firmware version selector plus Switch 2 and Swi
   assert.match(pageSource, /固件版本/u);
   assert.match(pageSource, /zhouxiyu1997\.github\.io\/friendmaker\//u);
   assert.match(pageSource, /前往手柄测试/u);
-  assert.match(appSource, /switchModelId:\s*"switch"/u);
+  assert.match(appSource, /switchModelId:\s*"switch_lite"/u);
   assert.match(appSource, /firmwareWebFlasherHint/u);
   assert.match(appSource, /若改用网页端，请刷入与当前选择的 .* 对应的版本/u);
   assert.match(
     appSource,
     /state\.firmwareSwitchModels = Array\.isArray\(payload\.switchModels\) \? payload\.switchModels : \[\]/u,
   );
-  assert.match(serverSource, /switchModels:\s*SWITCH_MODELS/u);
-  assert.match(serverSource, /id:\s*"switch"[\s\S]*label:\s*"老版固件"/u);
+  assert.match(serverSource, /switchModels:\s*VISIBLE_SWITCH_MODELS/u);
+  assert.match(serverSource, /id:\s*"switch"[\s\S]*label:\s*"老版固件"[\s\S]*hidden:\s*true/u);
+  assert.match(serverSource, /id:\s*"switch_lite"[\s\S]*label:\s*"Switch1 和 Lite 固件"[\s\S]*recommended:\s*true/u);
   assert.doesNotMatch(serverSource, /label:\s*"Switch \/ OLED \/ V2"/u);
   assert.match(serverSource, /id:\s*"switch2"[\s\S]*label:\s*"Switch 2"/u);
   assert.match(
     serverSource,
-    /const switchModelId = body\.switchModelId[\s\S]*getSwitchModel\(body\.switchModelId\)\.id[\s\S]*: "switch"/u,
+    /const DEFAULT_SWITCH_MODEL_ID: SwitchModelId = "switch_lite"/u,
+  );
+  assert.match(
+    serverSource,
+    /const switchModelId = body\.switchModelId[\s\S]*getSwitchModel\(body\.switchModelId\)\.id[\s\S]*: DEFAULT_SWITCH_MODEL_ID/u,
   );
   assert.match(
     serverSource,
@@ -378,7 +383,7 @@ test("firmware flasher keeps the firmware version selector plus Switch 2 and Swi
   );
   assert.match(
     serverSource,
-    /function getFirmwareUploadEnvironmentLabel[\s\S]*SWITCH_2_UPLOAD_ENVIRONMENT_ID[\s\S]*Switch 2[\s\S]*SWITCH_LITE_UPLOAD_ENVIRONMENT_ID[\s\S]*Switch Lite/u,
+    /function getFirmwareUploadEnvironmentLabel[\s\S]*SWITCH_2_UPLOAD_ENVIRONMENT_ID[\s\S]*Switch 2[\s\S]*SWITCH_LITE_UPLOAD_ENVIRONMENT_ID[\s\S]*Switch1 和 Lite/u,
   );
 });
 

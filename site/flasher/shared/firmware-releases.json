@@ -1,8 +1,8 @@
 {
-  "defaultVersion": "0.6.2",
+  "defaultVersion": "0.7.0",
   "versions": [
     {
-      "version": "0.6.2",
+      "version": "0.7.0",
       "recommended": true,
       "firmwareBuildRoot": "firmware/esp32/.pio/build"
     }

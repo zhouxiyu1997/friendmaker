@@ -113,9 +113,9 @@ This README includes both Simplified Chinese and English sections. Use the butto
 - `macOS`：安装 `.dmg` 后直接启动 `Friend Maker`
 - `Windows x64`：运行 `.exe` 安装包后直接启动 `Friend Maker`
 - 首次进入 `刷入固件` 页时，如果提示缺少 `PlatformIO`，点击 `准备 PlatformIO`
-- `刷入固件` 页现在会先让你选择 `Switch 型号`：`Switch`、`Switch 2`、`Switch Lite`
+- `刷入固件` 页现在会先让你选择 `Switch 型号`：`Switch1 和 Lite 固件`、`Switch 2`
 - `刷入固件` 页里也会提示 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个 GitHub Pages 在线刷机站；如果改走网页刷机，请刷入与当前 `Switch` 型号对应的版本，刷完后回到桌面端的 `手柄测试` 页继续
-- `Switch 2 / Switch Lite` 当前只给主线 `ESP32-WROOM-32 / ESP-32S` 提供专用固件；如果你的板子更接近 `NodeMCU-32S`，继续优先使用标准 `Switch` 固件
+- `Switch1 和 Lite 固件 / Switch 2` 当前只给主线 `ESP32-WROOM-32 / ESP-32S` 提供专用固件；旧标准 `Switch` 固件已在界面隐藏，仅作为命令行兼容兜底保留
 - 首次准备 `PlatformIO`、下载工具链与部分依赖时，需要 `稳定联网`
 - 如果应用提示缺少 `Python`，允许它下载一个供 `Friend Maker` 使用的本地运行环境即可
 - `Windows` 下如果 `PlatformIO` 已就绪但没有串口，可在应用里优先安装 `CP210x` 驱动，再尝试 `CH340/CH341`
@@ -143,13 +143,13 @@ npm run ui:dev
 ```bash
 cd /path/to/friendmaker/firmware/esp32
 
-# 标准 Switch / OLED / V2
+# 旧标准 Switch 固件（界面已隐藏，仅命令行兜底）
 pio run -e esp32dev_wireless -t upload
 
 # Switch 2（仅限 ESP32-WROOM-32 / ESP-32S）
 pio run -e esp32dev_wireless_switch2 -t upload
 
-# Switch Lite（仅限 ESP32-WROOM-32 / ESP-32S）
+# Switch1 和 Lite 固件（仅限 ESP32-WROOM-32 / ESP-32S）
 pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
@@ -273,9 +273,9 @@ After startup, use the same flow:
 - `macOS`: install the `.dmg`, then launch `Friend Maker`
 - `Windows x64`: run the `.exe` installer, then launch `Friend Maker`
 - On first entry to `Firmware Flash`, click `Prepare PlatformIO` if it is missing
-- `Firmware Flash` now asks you to choose a `Switch` model first: `Switch`, `Switch 2`, or `Switch Lite`
+- `Firmware Flash` now asks you to choose a `Switch` model first: `Switch 1 and Lite firmware` or `Switch 2`
 - The `Firmware Flash` page also points to [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) on GitHub Pages; if you switch to the web flasher, flash the build that matches your current `Switch` model, then return to `Controller Test` in the desktop app
-- `Switch 2 / Switch Lite` firmware is currently only provided for mainline `ESP32-WROOM-32 / ESP-32S`; if your board is closer to `NodeMCU-32S`, stay on standard `Switch` firmware for now
+- `Switch 1 and Lite firmware / Switch 2` is currently only provided for mainline `ESP32-WROOM-32 / ESP-32S`; the old standard `Switch` firmware is hidden in the UI and kept only as a command-line fallback
 - The first toolchain and dependency preparation step needs a `stable network connection`
 - If the app says `Python` is missing, allow it to download an app-local runtime for Friend Maker
 - On `Windows`, if `PlatformIO` is ready but no serial port appears, try the in-app `CP210x` helper before `CH340/CH341`

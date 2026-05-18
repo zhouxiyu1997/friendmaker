@@ -20,6 +20,7 @@ export const siteRoot = path.resolve(__dirname, "..");
 const defaultSwitchModelId = firmwareVariantConfig.defaultSwitchModelId;
 const defaultFirmwareReleaseVersion = readDefaultFirmwareReleaseVersion();
 const firmwareVariants = [...firmwareVariantConfig.variants];
+const visibleFirmwareVariants = firmwareVariants.filter((variant) => variant.hidden !== true);
 const firmwareVariantByModelId = new Map(
   firmwareVariants.map((variant) => [variant.switchModelId, variant]),
 );
@@ -46,6 +47,10 @@ function parseFlashOffset(offset) {
 }
 
 export function listFirmwareVariants() {
+  return visibleFirmwareVariants;
+}
+
+export function listAllFirmwareVariants() {
   return firmwareVariants;
 }
 

@@ -172,11 +172,10 @@ http://127.0.0.1:4307
 3. 确认串口设备
 4. 点击 `编译并刷入固件`
 
-当前 `Switch 型号` 分成 3 个：
+当前 `Switch 型号` 分成 2 个：
 
-- `Switch`：标准 `Switch / OLED / V2`
+- `Switch1 和 Lite 固件`：适用于 Switch1 和 Switch Lite，使用启用 `SWITCH_LITE` 的稳定构建，重点提升配对和按键稳定性
 - `Switch 2`：使用更保守的蓝牙 HID 时序，并在认证成功后主动补发 `virtual cable` 请求
-- `Switch Lite`：使用启用 `SWITCH_LITE` 的专用构建，重点提升配对和按键稳定性
 
 当前主线推荐环境：
 
@@ -185,8 +184,8 @@ http://127.0.0.1:4307
 
 补充说明：
 
-- 如果你选择的是 `Switch 2` 或 `Switch Lite`，当前目标环境需要保持在主线 `ESP32-WROOM-32 / ESP-32S`
-- `NodeMCU-32S` 兼容板目前仍优先使用标准 `Switch` 固件路线
+- 如果你选择的是 `Switch1 和 Lite 固件` 或 `Switch 2`，当前目标环境需要保持在主线 `ESP32-WROOM-32 / ESP-32S`
+- 旧标准 `Switch` 固件已在界面隐藏，仅作为命令行兼容兜底保留
 
 页面里还可以直接完成：
 
@@ -210,13 +209,13 @@ http://127.0.0.1:4307
 ```bash
 cd /path/to/friendmaker/firmware/esp32
 
-# 标准 Switch / OLED / V2
+# 旧标准 Switch 固件（界面已隐藏，仅命令行兜底）
 pio run -e esp32dev_wireless -t upload
 
 # Switch 2（仅限 ESP32-WROOM-32 / ESP-32S）
 pio run -e esp32dev_wireless_switch2 -t upload
 
-# Switch Lite（仅限 ESP32-WROOM-32 / ESP-32S）
+# Switch1 和 Lite 固件（仅限 ESP32-WROOM-32 / ESP-32S）
 pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
@@ -230,13 +229,13 @@ pio run -e esp32dev_wireless_switch_lite -t upload
 ```powershell
 cd C:\path\to\friendmaker\firmware\esp32
 
-# 标准 Switch / OLED / V2
+# 旧标准 Switch 固件（界面已隐藏，仅命令行兜底）
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless -t upload --upload-port COM3
 
 # Switch 2（仅限 ESP32-WROOM-32 / ESP-32S）
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless_switch2 -t upload --upload-port COM3
 
-# Switch Lite（仅限 ESP32-WROOM-32 / ESP-32S）
+# Switch1 和 Lite 固件（仅限 ESP32-WROOM-32 / ESP-32S）
 $env:USERPROFILE\.platformio\penv\Scripts\pio.exe run -e esp32dev_wireless_switch_lite -t upload --upload-port COM3
 ```
 

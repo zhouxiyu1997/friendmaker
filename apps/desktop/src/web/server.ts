@@ -179,7 +179,15 @@ const SWITCH_MODELS = [
     id: "switch",
     label: "老版固件",
     description: "用于旧版 Switch 兼容路径，保持原有蓝牙 HID 时序。",
+    recommended: false,
+    hidden: true,
+  },
+  {
+    id: "switch_lite",
+    label: "Switch1 和 Lite 固件",
+    description: "适用于 Switch1 和 Switch Lite；此模式使用启用 SWITCH_LITE 的稳定构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
     recommended: true,
+    hidden: false,
   },
   {
     id: "switch2",
@@ -187,17 +195,14 @@ const SWITCH_MODELS = [
     description:
       "Switch 2 目前走更保守的 Bluetooth Classic HID 时序，并在认证成功后主动补发 virtual cable 请求。",
     recommended: false,
-  },
-  {
-    id: "switch_lite",
-    label: "Switch Lite",
-    description: "Switch Lite 对蓝牙 HID 时序更敏感；此模式会切换到启用 SWITCH_LITE 的专用构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
-    recommended: false,
+    hidden: false,
   },
 ] as const;
 
 type FirmwareEnvironmentId = (typeof FIRMWARE_ENVIRONMENTS)[number]["id"];
 type SwitchModelId = (typeof SWITCH_MODELS)[number]["id"];
+const DEFAULT_SWITCH_MODEL_ID: SwitchModelId = "switch_lite";
+const VISIBLE_SWITCH_MODELS = SWITCH_MODELS.filter((model) => !model.hidden);
 const SWITCH_LITE_UPLOAD_ENVIRONMENT_ID = "esp32dev_wireless_switch_lite" as const;
 const SWITCH_2_UPLOAD_ENVIRONMENT_ID = "esp32dev_wireless_switch2" as const;
 type FirmwareUploadEnvironmentId =
@@ -695,7 +700,7 @@ function resolveFirmwareUploadEnvironment(
       if (environmentId === "esp32dev_wireless") {
         return SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
       }
-      throw new Error("Switch Lite 目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
+      throw new Error("Switch1 和 Lite 固件目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
   }
 
   return environmentId;
@@ -706,7 +711,7 @@ function getFirmwareUploadEnvironmentLabel(environmentId: FirmwareUploadEnvironm
     case SWITCH_2_UPLOAD_ENVIRONMENT_ID:
       return "ESP32-WROOM-32 / ESP-32S（Switch 2）";
     case SWITCH_LITE_UPLOAD_ENVIRONMENT_ID:
-      return "ESP32-WROOM-32 / ESP-32S（Switch Lite）";
+      return "ESP32-WROOM-32 / ESP-32S（Switch1 和 Lite）";
     default:
       return getFirmwareEnvironment(environmentId).label;
   }
@@ -1730,7 +1735,7 @@ async function handleFirmwareInfo(response: ServerResponse): Promise<void> {
     python: tooling.python,
     install: tooling.install,
     flash: webRuntime.flashManager.getStatus(),
-    switchModels: SWITCH_MODELS,
+    switchModels: VISIBLE_SWITCH_MODELS,
     environments: FIRMWARE_ENVIRONMENTS,
   });
 }
@@ -1814,7 +1819,7 @@ async function handleFirmwareFlash(
     const environmentId = getFirmwareEnvironment(body.environmentId).id;
     const switchModelId = body.switchModelId
       ? getSwitchModel(body.switchModelId).id
-      : "switch";
+      : DEFAULT_SWITCH_MODEL_ID;
     const resolvedEnvironmentId = resolveFirmwareUploadEnvironment(environmentId, switchModelId);
 
     if (!body.portPath) {

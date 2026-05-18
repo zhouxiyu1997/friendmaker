@@ -5,26 +5,41 @@ import { readFile } from "node:fs/promises";
 import {
   getFirmwareVariant,
   getVersionedManifestPath,
+  listAllFirmwareVariants,
   listFlasherReleases,
   listFirmwareVariants,
 } from "../scripts/firmware-site.mjs";
 
-test("firmware site variants cover all supported web flasher models", () => {
+test("firmware site variants expose only the visible web flasher models", () => {
   assert.deepEqual(
     listFirmwareVariants().map((variant) => variant.switchModelId),
-    ["switch", "switch2", "switch_lite"],
+    ["switch_lite", "switch2"],
+  );
+  assert.deepEqual(
+    listAllFirmwareVariants().map((variant) => ({
+      switchModelId: variant.switchModelId,
+      hidden: variant.hidden === true,
+    })),
+    [
+      { switchModelId: "switch", hidden: true },
+      { switchModelId: "switch_lite", hidden: false },
+      { switchModelId: "switch2", hidden: false },
+    ],
   );
 });
 
-test("firmware site keeps the default switch manifest stable and maps Switch 2 explicitly", () => {
+test("firmware site points the default manifest to Switch1 and Lite firmware", () => {
   assert.equal(getFirmwareVariant().manifestFileName, "manifest.json");
-  assert.equal(getFirmwareVariant().switchModelLabel, "Switch");
+  assert.equal(getFirmwareVariant().switchModelLabel, "Switch1 和 Lite 固件");
+  assert.equal(getFirmwareVariant().switchModelId, "switch_lite");
+  assert.equal(getFirmwareVariant("switch").hidden, true);
   assert.equal(getFirmwareVariant("switch2").environmentId, "esp32dev_wireless_switch2");
   assert.equal(getFirmwareVariant("switch_lite").boardId, "esp32dev_wireless");
-  assert.equal(getVersionedManifestPath("switch", "0.6.2"), "./firmware/0.6.2/manifest.json");
+  assert.equal(getVersionedManifestPath("switch_lite", "0.7.0"), "./firmware/0.7.0/manifest.json");
+  assert.equal(getVersionedManifestPath("switch", "0.7.0"), "./firmware/0.7.0/manifest.legacy-switch.json");
   assert.deepEqual(
     listFlasherReleases().map((release) => release.version),
-    ["0.6.2"],
+    ["0.7.0"],
   );
 });
 
@@ -52,4 +67,6 @@ test("firmware site page keeps the switch model wording internationalized and al
   assert.match(scriptSource, /"firmware\.releaseRecommended": "\{\{version\}\} \(recommended\)"/u);
   assert.match(scriptSource, /"firmware\.releaseRecommended": "\{\{version\}\}（推荐）"/u);
   assert.match(scriptSource, /firmwareReleaseField\.classList\.toggle\("hidden", FIRMWARE_RELEASES\.length <= 1\)/u);
+  assert.match(scriptSource, /filter\(\(variant\) => !variant\.hidden\)/u);
+  assert.match(scriptSource, /Switch1 和 Lite 固件/u);
 });

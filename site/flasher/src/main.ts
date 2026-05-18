@@ -50,6 +50,7 @@ interface SwitchModelDefinition {
   description: string;
   manifestFileName: string;
   boardLabel: string;
+  hidden: boolean;
 }
 
 const LANGUAGE_STORAGE_KEY = "friend-maker.flasher.language";
@@ -89,7 +90,7 @@ const TRANSLATIONS = {
       "support.unsupportedDetail": "Open this site in desktop Chrome or Edge.",
       "firmware.heading": "Firmware version",
       "firmware.copy":
-        "This shows the firmware release provided by the site. You can switch between Switch, Switch 2, and Switch Lite.",
+        "This shows the firmware release provided by the site. Choose Switch 1 and Lite firmware, or the Switch 2 firmware.",
       "firmware.releaseVersion": "Release version",
       "firmware.releaseRecommended": "{{version}} (recommended)",
       "firmware.switchModel": "Switch model",
@@ -124,9 +125,9 @@ const TRANSLATIONS = {
       "models.switch2.description":
         "Switch 2 currently uses more conservative Bluetooth Classic HID timing and actively resends the virtual-cable request after authentication succeeds.",
       "models.switchLite.description":
-        "Switch Lite is more sensitive to Bluetooth HID timing. This mode switches to a dedicated SWITCH_LITE build that disables BT modem sleep, fixes the send cadence, and extends congestion retries to improve pairing and button stability.",
+        "For Switch 1 and Switch Lite. This mode uses the stable SWITCH_LITE build, disabling BT modem sleep, fixing the send cadence, and extending congestion retries to improve pairing and button stability.",
       "models.switch2.boardLabel": "ESP32-WROOM-32 / ESP-32S (Switch 2 mode)",
-      "models.switchLite.boardLabel": "ESP32-WROOM-32 / ESP-32S (Switch Lite mode)",
+      "models.switchLite.boardLabel": "ESP32-WROOM-32 / ESP-32S (Switch 1 and Lite mode)",
       "manifest.loadError": "Load failed",
     },
   },
@@ -160,7 +161,7 @@ const TRANSLATIONS = {
       "support.unsupportedTitle": "当前浏览器不支持 Web Serial",
       "support.unsupportedDetail": "请改用桌面版 Chrome 或 Edge 打开这个网站。",
       "firmware.heading": "固件版本",
-      "firmware.copy": "这里展示当前站点提供的固件发布信息，可在 Switch、Switch 2 与 Switch Lite 间切换。",
+      "firmware.copy": "这里展示当前站点提供的固件发布信息，可选择 Switch1 和 Lite 固件，或 Switch 2 固件。",
       "firmware.releaseVersion": "发布版本",
       "firmware.releaseRecommended": "{{version}}（推荐）",
       "firmware.switchModel": "Switch 型号",
@@ -188,9 +189,9 @@ const TRANSLATIONS = {
       "models.switch2.description":
         "Switch 2 目前走更保守的 Bluetooth Classic HID 时序，并在认证成功后主动补发 virtual cable 请求。",
       "models.switchLite.description":
-        "Switch Lite 对蓝牙 HID 时序更敏感；此模式会切换到启用 SWITCH_LITE 的专用构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
+        "适用于 Switch1 和 Switch Lite；此模式使用启用 SWITCH_LITE 的稳定构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
       "models.switch2.boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch 2 模式）",
-      "models.switchLite.boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch Lite 模式）",
+      "models.switchLite.boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch1 和 Lite 模式）",
       "manifest.loadError": "加载失败",
     },
   },
@@ -290,13 +291,16 @@ const FIRMWARE_RELEASES: FirmwareReleaseOption[] = firmwareReleaseConfig.version
 }));
 const RELEASE_BY_VERSION = new Map(FIRMWARE_RELEASES.map((release) => [release.version, release]));
 const DEFAULT_RELEASE_VERSION = firmwareReleaseConfig.defaultVersion as FirmwareReleaseVersion;
-const SWITCH_MODELS: SwitchModelDefinition[] = firmwareVariantConfig.variants.map((variant) => ({
-  id: variant.switchModelId,
-  label: variant.switchModelLabel,
-  description: variant.switchModelDescription,
-  manifestFileName: variant.manifestFileName,
-  boardLabel: variant.boardLabel,
-}));
+const SWITCH_MODELS: SwitchModelDefinition[] = firmwareVariantConfig.variants
+  .map((variant) => ({
+    id: variant.switchModelId,
+    label: variant.switchModelLabel,
+    description: variant.switchModelDescription,
+    manifestFileName: variant.manifestFileName,
+    boardLabel: variant.boardLabel,
+    hidden: variant.hidden === true,
+  }))
+  .filter((variant) => !variant.hidden);
 
 const SWITCH_MODEL_BY_ID = new Map(SWITCH_MODELS.map((model) => [model.id, model]));
 const DEFAULT_SWITCH_MODEL_ID = firmwareVariantConfig.defaultSwitchModelId as SwitchModelId;

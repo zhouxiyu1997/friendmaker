@@ -6,6 +6,7 @@ import {
   createFirmwareManifestForRelease,
   getDefaultFirmwareReleaseVersion,
   getFirmwareVariant,
+  listAllFirmwareVariants,
   listFlasherReleases,
   listFirmwareVariants,
   readFirmwareFlashPlan,
@@ -29,7 +30,8 @@ async function assertFileExists(filePath) {
 async function main() {
   await assertFileExists(path.join(webBuildRoot, "index.html"));
   const firmwareReleases = listFlasherReleases();
-  const firmwareVariants = listFirmwareVariants();
+  const firmwareVariants = listAllFirmwareVariants();
+  const visibleFirmwareVariants = listFirmwareVariants();
   const firmwarePlanByReleaseAndModel = new Map();
   const defaultReleaseVersion = getDefaultFirmwareReleaseVersion();
 
@@ -68,8 +70,8 @@ async function main() {
     }
   }
 
-  const defaultManifestVariant = getFirmwareVariant("switch");
-  for (const variant of firmwareVariants) {
+  const defaultManifestVariant = getFirmwareVariant();
+  for (const variant of visibleFirmwareVariants) {
     const manifest = await createFirmwareManifestForRelease(variant.switchModelId, defaultReleaseVersion, {
       partPathPrefix: defaultReleaseVersion,
     });
@@ -81,7 +83,7 @@ async function main() {
   }
 
   if (defaultManifestVariant.manifestFileName !== "manifest.json") {
-    const manifest = await createFirmwareManifestForRelease("switch", defaultReleaseVersion, {
+    const manifest = await createFirmwareManifestForRelease(defaultManifestVariant.switchModelId, defaultReleaseVersion, {
       partPathPrefix: defaultReleaseVersion,
     });
     await writeFile(path.join(pagesRoot, "firmware", "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

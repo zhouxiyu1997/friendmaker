@@ -94,13 +94,13 @@ python -m pip install --user --upgrade platformio
 1. 关闭所有串口监视器和串口工具
 2. 回到应用里重新点击 `刷新串口`
 3. 确认刷机选择：
-   - 常见 `ESP32-WROOM-32 / ESP-32S` 先选 `Switch` + `esp32dev_wireless`
+   - 常见 `ESP32-WROOM-32 / ESP-32S` 先选 `Switch1 和 Lite 固件` + `esp32dev_wireless`
    - 目标主机是 `Switch 2` 时，改选 `Switch 2`
-   - 目标主机是 `Switch Lite` 时，改选 `Switch Lite`
-   - 明确写着 `NodeMCU-32S` 的板子可以改用 `nodemcu_32s_wireless`，但当前仍优先走标准 `Switch` 固件
+   - 目标主机是 `Switch Lite` 时，保持 `Switch1 和 Lite 固件`
+   - 旧标准 `Switch` 固件已在界面隐藏，仅作为命令行兼容兜底保留
 4. 再次点击 `编译并刷入固件`
 5. 如果板子进不去下载模式，按住实体板上的 `BOOT` 键，再重新刷入
-6. 如果桌面端里反复刷写失败，并且你手上是主线 `ESP32-WROOM-32 / ESP-32S`，也可以改用 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个网页刷机站，用桌面版 `Chrome / Edge` 直接刷固件；网页端也提供 `Switch`、`Switch 2`、`Switch Lite` 3 个型号选项
+6. 如果桌面端里反复刷写失败，并且你手上是主线 `ESP32-WROOM-32 / ESP-32S`，也可以改用 [Friend Maker Firmware Flasher](https://zhouxiyu1997.github.io/friendmaker/) 这个网页刷机站，用桌面版 `Chrome / Edge` 直接刷固件；网页端提供 `Switch1 和 Lite 固件`、`Switch 2` 两个型号选项
 7. 如果网页刷机站也不方便使用，或你想继续确认本地固件链路，再改用命令行手动刷入，确认固件链路本身是否正常
 
 手动刷入命令：
@@ -108,13 +108,13 @@ python -m pip install --user --upgrade platformio
 ```bash
 cd /path/to/friendmaker/firmware/esp32
 
-# 标准 Switch / OLED / V2
+# 旧标准 Switch 固件（界面已隐藏，仅命令行兜底）
 pio run -e esp32dev_wireless -t upload
 
 # Switch 2（仅限 ESP32-WROOM-32 / ESP-32S）
 pio run -e esp32dev_wireless_switch2 -t upload
 
-# Switch Lite（仅限 ESP32-WROOM-32 / ESP-32S）
+# Switch1 和 Lite 固件（仅限 ESP32-WROOM-32 / ESP-32S）
 pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 

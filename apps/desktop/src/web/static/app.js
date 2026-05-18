@@ -221,7 +221,7 @@ const state = {
   },
   firmware: {
     busy: false,
-    switchModelId: "switch",
+    switchModelId: "switch_lite",
     environmentId: "esp32dev_wireless",
     flash: {
       status: "idle",

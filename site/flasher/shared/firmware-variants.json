@@ -1,5 +1,5 @@
 {
-  "defaultSwitchModelId": "switch",
+  "defaultSwitchModelId": "switch_lite",
   "variants": [
     {
       "switchModelId": "switch",
@@ -8,6 +8,16 @@
       "environmentId": "esp32dev_wireless",
       "boardId": "esp32dev_wireless",
       "boardLabel": "ESP32-WROOM-32 / ESP-32S",
+      "manifestFileName": "manifest.legacy-switch.json",
+      "hidden": true
+    },
+    {
+      "switchModelId": "switch_lite",
+      "switchModelLabel": "Switch1 和 Lite 固件",
+      "switchModelDescription": "适用于 Switch1 和 Switch Lite；此模式使用启用 SWITCH_LITE 的稳定构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
+      "environmentId": "esp32dev_wireless_switch_lite",
+      "boardId": "esp32dev_wireless",
+      "boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch1 和 Lite 模式）",
       "manifestFileName": "manifest.json"
     },
     {
@@ -18,15 +28,6 @@
       "boardId": "esp32dev_wireless",
       "boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch 2 模式）",
       "manifestFileName": "manifest.switch2.json"
-    },
-    {
-      "switchModelId": "switch_lite",
-      "switchModelLabel": "Switch Lite",
-      "switchModelDescription": "Switch Lite 对蓝牙 HID 时序更敏感；此模式会切换到启用 SWITCH_LITE 的专用构建（禁用 BT modem sleep、固定发送节奏并延长拥塞重试）以提升配对与按键稳定性。",
-      "environmentId": "esp32dev_wireless_switch_lite",
-      "boardId": "esp32dev_wireless",
-      "boardLabel": "ESP32-WROOM-32 / ESP-32S（Switch Lite 模式）",
-      "manifestFileName": "manifest.switch_lite.json"
     }
   ]
 }
