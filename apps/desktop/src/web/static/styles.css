@@ -28,7 +28,7 @@
   --sidebar-width: 200px;
   --toolbar-height: 40px;
   --splitter-size: 8px;
-  --studio-preview-column-min: 568px;
+  --studio-preview-column-min: 300px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
@@ -426,8 +426,7 @@ textarea:disabled {
 .workspace-content {
   min-width: 0;
   min-height: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
 .page {
@@ -442,9 +441,9 @@ textarea:disabled {
 }
 
 .page[data-page="studio"] {
-  width: max-content;
-  min-width: 100%;
-  overflow: visible;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .grid,
@@ -460,15 +459,15 @@ textarea:disabled {
 }
 
 .grid {
-  width: max-content;
-  min-width: 100%;
-  overflow: visible;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
   grid-template-columns:
-    minmax(250px, var(--layout-studio-col-1, 0.95fr))
+    minmax(260px, var(--layout-studio-col-1, 0.95fr))
     var(--splitter-size)
     minmax(var(--studio-preview-column-min), var(--layout-studio-col-2, 1fr))
     var(--splitter-size)
-    minmax(190px, var(--layout-studio-col-3, 0.82fr));
+    minmax(150px, var(--layout-studio-col-3, 0.82fr));
   grid-template-rows:
     minmax(260px, var(--layout-studio-row-1, 1.15fr))
     var(--splitter-size)
@@ -543,7 +542,7 @@ textarea:disabled {
   grid-column: 3;
   grid-row: 1 / -1;
   min-height: 0;
-  min-width: var(--studio-preview-column-min);
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1314,8 +1313,9 @@ input[type="range"] {
   place-items: center;
   flex: 0 0 auto;
   align-self: center;
-  width: calc(520px + 24px);
-  height: calc(520px + 24px);
+  width: min(100%, calc(520px + 24px));
+  max-width: 100%;
+  aspect-ratio: 1;
   padding: 12px;
   border: 1px solid var(--divider);
   border-radius: var(--radius-lg);
@@ -1337,8 +1337,10 @@ input[type="range"] {
   position: relative;
   display: grid;
   place-items: center;
-  width: 520px;
-  height: 520px;
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  aspect-ratio: 1;
   overflow: hidden;
   border: 1px solid var(--ac-edge);
   border-radius: var(--radius-sm);
@@ -1786,11 +1788,11 @@ input[type="range"] {
 @media (max-width: 1180px) {
   .grid {
     grid-template-columns:
-      minmax(250px, var(--layout-studio-col-1, 0.95fr))
+      minmax(260px, var(--layout-studio-col-1, 0.95fr))
       var(--splitter-size)
       minmax(var(--studio-preview-column-min), var(--layout-studio-col-2, 1fr))
       var(--splitter-size)
-      minmax(190px, var(--layout-studio-col-3, 0.82fr));
+      minmax(150px, var(--layout-studio-col-3, 0.82fr));
     grid-template-rows:
       minmax(260px, var(--layout-studio-row-1, 1.15fr))
       var(--splitter-size)
