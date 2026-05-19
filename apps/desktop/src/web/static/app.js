@@ -32,7 +32,7 @@ function confirmUi(message) {
 
 const PANEL_LAYOUT_STORAGE_KEY = "friendmaker.panelLayout.v1";
 const PANEL_LAYOUT_RATIO_MIN = 0.08;
-const STUDIO_PREVIEW_COLUMN_MIN_PX = 568;
+const STUDIO_PREVIEW_COLUMN_MIN_PX = 300;
 const RECENTER_DIAGNOSTIC_INPUT_CONFIG_COMMAND = "CFG INPUT 65 45 1800";
 const RECENTER_DIAGNOSTIC_STICK_LEFT_COMMAND = "STICK -1 0 2000";
 const RECENTER_DIAGNOSTIC_STICK_UP_COMMAND = "STICK 0 -1 2000";
@@ -43,7 +43,7 @@ const PANEL_LAYOUTS = {
       count: 3,
       vars: ["--layout-studio-col-1", "--layout-studio-col-2", "--layout-studio-col-3"],
       defaults: [0.95, 1, 0.82],
-      minPixels: [250, STUDIO_PREVIEW_COLUMN_MIN_PX, 190],
+      minPixels: [260, STUDIO_PREVIEW_COLUMN_MIN_PX, 150],
     },
     rows: {
       count: 2,
