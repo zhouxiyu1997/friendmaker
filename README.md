@@ -181,15 +181,6 @@ pio run -e esp32dev_wireless_switch_lite -t upload
 - `自动扣背景` 适合白底、浅灰底和棋盘格假透明素材，不是 AI 抠图
 - 如果开始绘制后继续操作手柄或触碰屏幕，容易造成错位
 
-### 当前核验快照
-
-最近一次本地核验日期：`2026-05-22`。
-
-- 已通过：`npm run ci:local:quick`、`npm run build`
-- 已通过：`esp32dev_wireless`、`esp32dev_wireless_switch2`、`esp32dev_wireless_switch_lite` 三个固件环境编译
-- 已通过：网页刷机站 `npm run build --prefix site/flasher` 和 `npm run verify:pages --prefix site/flasher`
-- 说明：以上是自动化与编译核验；真实刷写、配对和实机绘制仍需要按快速上手在具体硬件上逐段确认
-
 ### 许可证与来源
 
 本仓库采用 **GPL-3.0-or-later** 开源协议。完整协议内容请查看 [LICENSE](LICENSE)。
@@ -350,15 +341,6 @@ If `pio` is not in `PATH`, use the full path instead:
 - `Official palette drawing` assumes the game's `9` palette slots still start from their default colors
 - `Automatic background removal` is for white, light gray, and checkerboard fake-transparency sources; it is not AI cutout
 - Touching the screen or using the controller during drawing can still cause drift
-
-### Current verification snapshot
-
-Latest local verification date: `2026-05-22`.
-
-- Passed: `npm run ci:local:quick`, `npm run build`
-- Passed: firmware builds for `esp32dev_wireless`, `esp32dev_wireless_switch2`, and `esp32dev_wireless_switch_lite`
-- Passed: web flasher `npm run build --prefix site/flasher` and `npm run verify:pages --prefix site/flasher`
-- Note: this is automated and compile-time verification; real flashing, pairing, and drawing still need per-device validation through the quick-start flow
 
 ### License and attribution
 
