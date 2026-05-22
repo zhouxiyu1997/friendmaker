@@ -33,16 +33,18 @@ The current version already brings these into one workflow:
 - `Controller Test`
 - `Timing Tune / Benchmark`
 - `Script Studio`
-- image import, pixel preview, template cropping, and automatic background removal
+- `PNG / JPG / WEBP / SVG` image import, pixel preview, template cropping, and automatic background removal
 - `mono drawing`
 - `official palette drawing`
 - `custom multicolor`
+- six square-pixel brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
 - pause, resume, stop, and recovery sessions
 
 ### 1.3 Current usage guidance
 
 - The current mainline officially supports `mono drawing`, `official palette drawing`, and `custom multicolor`
 - For a first trial, it is still best to use `mono drawing` or simpler images to validate the whole chain
+- The public UI currently exposes square pixel brushes only; round pixel brushes are still reserved
 - The first priority is still `input stability`, not drawing speed
 - The system is currently modeled as `256x256` and `start from canvas center`
 - Some `ESP32` compatible boards still vary during the controller connection phase
@@ -59,7 +61,7 @@ Extra reminders:
 
 - The recovery flow also assumes that you re-enter the drawing page and continue from the `canvas center`; resuming also switches back to the saved brush automatically
 - After drawing starts, do not touch the controller or the screen again
-- Using the square brush first is strongly recommended
+- Use the square brush for current first-run testing; do not treat round brushes as a first-run entry path
 
 ## 2. Prepare hardware and environment
 
@@ -316,10 +318,11 @@ Once this chain is stable, then try:
 ### 7.2 Basic steps
 
 1. Import an image
-2. Choose `mono drawing`, `official palette drawing`, or `custom multicolor`
-3. Adjust template, scale, position, and automatic background removal when needed
-4. Click `Generate Commands Only` first and inspect the preview and statistics
-5. After that looks right, click `Start Drawing`
+2. Choose a square-pixel brush size
+3. Choose `mono drawing`, `official palette drawing`, or `custom multicolor`
+4. Adjust template, scale, position, and automatic background removal when needed
+5. Click `Generate Commands Only` first and inspect the preview and statistics
+6. After that looks right, click `Start Drawing`
 
 ### 7.3 About recovery tasks
 

@@ -12,6 +12,9 @@
 This README includes both Simplified Chinese and English sections. Use the buttons above to jump to your preferred language.
 本页同时包含简体中文与 English 内容，请使用上方按钮跳转。
 
+If this project helps you, [click here to support me](https://github.com/zhouxiyu1997/zhouxiyu1997/blob/main/SUPPORT.md).
+如果这个项目对你有帮助，[点击这里资助我](https://github.com/zhouxiyu1997/zhouxiyu1997/blob/main/SUPPORT.md)。
+
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20x64-black.svg)
 ![Hardware](https://img.shields.io/badge/hardware-ESP32--WROOM--32%20%7C%20ESP--32S-orange.svg)
@@ -44,9 +47,9 @@ This README includes both Simplified Chinese and English sections. Use the butto
 
 ### 现在能做什么
 
-- 导入 `PNG / JPG / SVG` 图片，生成像素预览、统计信息与动作脚本
+- 导入 `PNG / JPG / WEBP / SVG` 图片，生成像素预览、统计信息与动作脚本
 - 支持 `单色绘制`、`官方色绘制` 和 `自定义多色`
-- 支持 `1 / 3 / 7 / 13 / 19 / 27` 六种画笔大小
+- 支持方块像素笔刷的 `1 / 3 / 7 / 13 / 19 / 27` 六种大小；圆形像素笔刷当前仍在公开界面预留
 - 支持 `256x256` 画布建模、模板裁切、辅助线预览和自动扣背景
 - 支持在界面里完成 `PlatformIO` 固件刷写、串口枚举、Windows 驱动安装辅助、蓝牙连接测试与 timing 调整
 - 支持暂停、继续、中断并保存恢复点；异常或重启后也能从本地恢复任务继续
@@ -83,6 +86,7 @@ This README includes both Simplified Chinese and English sections. Use the butto
 
 - 当前主线已正式支持 `单色绘制`、`官方色绘制` 和 `自定义多色`
 - 第一次试用时，仍建议先用 `单色绘制` 或结构更简单的图片验证整体链路
+- 当前公开界面只开放方块像素笔刷；圆形像素笔刷入口仍保留为后续校准能力
 - 当前系统固定按 `256x256` 和 `画布中心起步` 建模
 - 当前第一优先级仍然是 `稳定性`，不是 `速度`
 - 已知部分 `ESP32` 兼容板存在连接个体差异；如果出现频繁断链、串键或异常连发，除软件重试外，也建议一起排查数据线、供电和板子做工差异
@@ -177,6 +181,15 @@ pio run -e esp32dev_wireless_switch_lite -t upload
 - `自动扣背景` 适合白底、浅灰底和棋盘格假透明素材，不是 AI 抠图
 - 如果开始绘制后继续操作手柄或触碰屏幕，容易造成错位
 
+### 当前核验快照
+
+最近一次本地核验日期：`2026-05-22`。
+
+- 已通过：`npm run ci:local:quick`、`npm run build`
+- 已通过：`esp32dev_wireless`、`esp32dev_wireless_switch2`、`esp32dev_wireless_switch_lite` 三个固件环境编译
+- 已通过：网页刷机站 `npm run build --prefix site/flasher` 和 `npm run verify:pages --prefix site/flasher`
+- 说明：以上是自动化与编译核验；真实刷写、配对和实机绘制仍需要按快速上手在具体硬件上逐段确认
+
 ### 许可证与来源
 
 本仓库采用 **GPL-3.0-or-later** 开源协议。完整协议内容请查看 [LICENSE](LICENSE)。
@@ -204,9 +217,9 @@ It brings `ESP32 firmware flashing`, `controller connection testing`, `input tim
 
 ### What it can do now
 
-- Import `PNG / JPG / SVG` images and generate pixel previews, stats, and action scripts
+- Import `PNG / JPG / WEBP / SVG` images and generate pixel previews, stats, and action scripts
 - Support `mono drawing`, `official palette drawing`, and `custom multicolor`
-- Support six brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
+- Support six square-pixel brush sizes: `1 / 3 / 7 / 13 / 19 / 27`; round pixel brushes are still reserved in the public UI
 - Support `256x256` canvas modeling, template cropping, preview guides, and automatic background removal
 - Handle `PlatformIO` flashing, serial-port enumeration, Windows driver helper flows, controller tests, and timing adjustments from the same UI
 - Preserve recovery sessions for pause, resume, stop, crash, or restart scenarios
@@ -243,6 +256,7 @@ After startup, use the same flow:
 
 - The current mainline officially supports `mono drawing`, `official palette drawing`, and `custom multicolor`
 - For a first successful run, it is still safer to start with `mono drawing` or structurally simpler images
+- The public UI currently exposes square pixel brushes only; round pixel brushes are kept reserved for later calibration work
 - The current system models the drawing flow as `256x256` and `start from canvas center`
 - Stability still matters more than speed
 - Some `ESP32`-compatible boards still vary in controller-link quality, so frequent disconnects or ghost inputs may also require checking cable quality, power delivery, and board variance
@@ -302,7 +316,15 @@ Flash firmware:
 
 ```bash
 cd /path/to/friendmaker/firmware/esp32
+
+# Old standard Switch firmware (hidden in the UI; command-line fallback only)
 pio run -e esp32dev_wireless -t upload
+
+# Switch 2 (ESP32-WROOM-32 / ESP-32S only)
+pio run -e esp32dev_wireless_switch2 -t upload
+
+# Switch 1 and Lite firmware (ESP32-WROOM-32 / ESP-32S only)
+pio run -e esp32dev_wireless_switch_lite -t upload
 ```
 
 If `pio` is not in `PATH`, use the full path instead:
@@ -328,6 +350,15 @@ If `pio` is not in `PATH`, use the full path instead:
 - `Official palette drawing` assumes the game's `9` palette slots still start from their default colors
 - `Automatic background removal` is for white, light gray, and checkerboard fake-transparency sources; it is not AI cutout
 - Touching the screen or using the controller during drawing can still cause drift
+
+### Current verification snapshot
+
+Latest local verification date: `2026-05-22`.
+
+- Passed: `npm run ci:local:quick`, `npm run build`
+- Passed: firmware builds for `esp32dev_wireless`, `esp32dev_wireless_switch2`, and `esp32dev_wireless_switch_lite`
+- Passed: web flasher `npm run build --prefix site/flasher` and `npm run verify:pages --prefix site/flasher`
+- Note: this is automated and compile-time verification; real flashing, pairing, and drawing still need per-device validation through the quick-start flow
 
 ### License and attribution
 

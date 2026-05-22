@@ -4,7 +4,7 @@
 
 Version: v0.2
 Status: Alpha trial
-Updated: 2026-05-14
+Updated: 2026-05-22
 
 ## 1. Product overview
 
@@ -27,7 +27,7 @@ The current product still follows three guiding principles:
 
 ## 2. One-line summary of the current version
 
-As of `2026-05-07`, the repository already supports one testable closed loop:
+As of `2026-05-22`, the repository already supports one testable closed loop:
 
 `Packaged desktop app / repo-based workflow -> Firmware Flash -> Controller Test -> Timing Tune / Benchmark -> Script Studio -> serial ACK transport -> ESP32 Bluetooth controller output -> Switch canvas drawing`
 
@@ -80,7 +80,7 @@ The current alpha should satisfy at least the following:
 
 - users can launch the packaged desktop app on `macOS` or `Windows x64`, or start the local workspace through the repo workflow
 - users can enter the `Script Studio / Firmware Flash / Controller Test / Timing Tune / Benchmark` pages normally
-- users can import `PNG / JPG / SVG` and inspect previews, statistics, and actual command scripts
+- users can import `PNG / JPG / WEBP / SVG` and inspect previews, statistics, and actual command scripts
 - users can flash ESP32 firmware through local `PlatformIO` from the page
 - users can connect the controller, reset Bluetooth, and run button / stick tests from the page
 - users can tune `inputDelay / buttonPressDuration` and run loopback timing tests from the page
@@ -103,7 +103,8 @@ The current alpha should satisfy at least the following:
 ### 6.2 Script Studio
 
 - fixed `256x256` script-coordinate canvas
-- six brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
+- six public square-pixel brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
+- round pixel brushes are currently reserved and are not part of the formal drawing mainline
 - `mono drawing`
 - `official palette drawing`
 - `custom multicolor`
@@ -309,6 +310,14 @@ The current stage should be accepted against these criteria:
 - recovery sessions can be written, reloaded, and resumed
 - drawing templates can be selected and reflected in both preview output and final command generation
 - during real execution, logs stay observable and commands advance through ACK
+
+Local automated verification as of `2026-05-22`:
+
+- `npm run ci:local:quick` passed
+- `npm run build` passed
+- firmware compilation passed for `esp32dev_wireless`, `esp32dev_wireless_switch2`, and `esp32dev_wireless_switch_lite`
+- `npm run build --prefix site/flasher` and `npm run verify:pages --prefix site/flasher` passed
+- real hardware flashing, Bluetooth pairing, timing tuning, and drawing are still accepted through the step-by-step quick-start flow
 
 ## 13. Matching implementation in the repository
 

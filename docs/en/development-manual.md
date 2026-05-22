@@ -4,8 +4,25 @@
 
 Built specifically for the Switch version of `Tomodachi Life`.
 
-Updated: 2026-05-07
+Updated: 2026-05-22
 Status: active development
+
+## 0. Local Verification Snapshot, 2026-05-22
+
+This verification pass covered the desktop app, the web flasher, and ESP32 firmware compilation in the current repository:
+
+- `npm run ci:local:quick`: passed, including desktop type-checking, `94` desktop tests, flasher type-checking, `8` flasher tests, and the flasher web build
+- `npm run build`: passed, including root TypeScript compilation and static asset copying
+- `~/.platformio/penv/bin/pio run -d firmware/esp32 -e esp32dev_wireless`: passed
+- `~/.platformio/penv/bin/pio run -d firmware/esp32 -e esp32dev_wireless_switch2`: passed
+- `~/.platformio/penv/bin/pio run -d firmware/esp32 -e esp32dev_wireless_switch_lite`: passed
+- `npm run build --prefix site/flasher`: passed and produced the web flasher release output
+- `npm run verify:pages --prefix site/flasher`: passed
+
+Notes:
+
+- On this machine, `python3 -m platformio` is not available, but `~/.platformio/penv/bin/pio` is available; firmware compilation was verified through the full `pio` path documented for repo-based usage
+- These results only cover automated tests, builds, and firmware compilation; real flashing, Bluetooth pairing, timing tuning, and drawing still need device-by-device validation through the quick-start flow
 
 ## Author notes
 
@@ -58,7 +75,8 @@ As of the current version, these parts are already verified or basically usable:
 - the page can directly run controller connection, Bluetooth reset, and button / D-pad / stick tests
 - the page can directly tune `inputDelay / buttonPressDuration` and run loopback timing tests
 - a `256x256` script-coordinate canvas
-- six brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
+- the public UI currently exposes six square-pixel brush sizes: `1 / 3 / 7 / 13 / 19 / 27`
+- round pixel brushes are still reserved / guarded, and the main generation and execution path does not depend on them
 - drawing starts from the center of the canvas after entering the drawing page
 - after recovery, re-entering the drawing page is still modeled as starting again from the center
 - `A` is used for drawing / confirming a stroke
@@ -70,6 +88,7 @@ As of the current version, these parts are already verified or basically usable:
 - official colors are quantized into the `7 x 12` / `84`-color base palette and then mapped into the game's right-side `9` palette slots
 - the drawing-template system already supports categories, previews, masks, and command-time cropping
 - automatic background removal, preview guides, and official-palette previews are already integrated
+- the image import path currently supports `PNG / JPG / WEBP / SVG`
 - execution logs, flash logs, and test logs are all observable in the page
 - `inputDelay` currently behaves more like a stability knob, while `buttonPressDuration` behaves more like an input-strength knob
 - recovery tasks are persisted after pause, stop, or abnormal exit; if the app exits while paused, that task is converted into a recoverable task on the next launch
@@ -77,6 +96,7 @@ As of the current version, these parts are already verified or basically usable:
 - ESP32 already supports the base serial protocol
 - ESP32 already supports the ACK execution path required by formal drawing
 - ESP32 already supports test commands such as `TAP <BUTTON> <COUNT>`, `HOLD <BUTTON> <MS>`, and `STICK <X> <Y> <MS>`
+- the web flasher can currently publish the two visible models, `Switch 1 and Lite firmware` and `Switch 2`, while hiding the old standard `Switch` firmware entry
 
 ## 4. Current modeling of the drawing page
 
@@ -95,6 +115,7 @@ That means the current mainline for `Script Studio` is:
 - fixed `256x256`
 - fixed center-start assumption
 - three formal routes: mono, official-palette, and custom-multicolor
+- fixed public-UI mainline around square pixel brushes; round pixel brushes are not a formal drawing entry yet
 
 Important distinction:
 
@@ -337,6 +358,10 @@ Prioritize the `base colors 7x12` route.
 ### 8.3 Custom colors
 
 Already included as one of the formal automatic-drawing capabilities, but still needs more optimization in color precision and stability.
+
+### 8.4 Recenter optimization
+
+The code path keeps a `time-saving` recenter strategy, and it is covered by path-generation and `/api/generate` tests. The public UI currently keeps this entry hidden and off by default; the real-device mainline should still be validated as "no recenter, center-start" first.
 
 ## 9. Suggested next development order
 
