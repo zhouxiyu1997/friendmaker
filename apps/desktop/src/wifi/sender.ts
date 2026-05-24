@@ -1,3 +1,21 @@
+/**
+ * WiFi TCP sender — 与 serial/sender.ts 同构的 TCP 运输层实现。
+ *
+ * 从 serial/sender.ts 的 SEQ 协议栈复刻，将 SerialPort+ReadlineParser 替换为
+ * net.Socket+readline.createInterface。核心协议函数（formatSequencedCommand、
+ * parseSequencedAck、getAckTimeoutForCommand）全部复用，零改动。
+ *
+ * 架构对照：
+ *   SerialCommandSession ↔ TcpCommandSession
+ *   SerialSessionManager  ↔ TcpSessionManager
+ *   SerialAckSender      ↔ TcpAckSender (实现 SenderControls 接口)
+ *
+ * 设备发现：mDNS (friendmaker.local) → 静态 IP (192.168.1.200) 回退。
+ * TCP 端口：9876。
+ *
+ * @see apps/desktop/src/serial/sender.ts
+ * @see firmware/esp32/test_s2  — 对端固件
+ */
 import { createConnection, type Socket } from "node:net";
 import { createInterface, type Interface as Readline } from "node:readline";
 import { resolve4 } from "node:dns/promises";
@@ -394,6 +412,13 @@ export function listDeviceHosts(): string[] {
   return ["friendmaker.local", "192.168.1.200"];
 }
 
+/**
+ * 单次 TCP 连接会话。
+ *
+ * 对应 serial/sender.ts 的 SerialCommandSession，但底层替换为 net.Socket。
+ * 每个 session 有独立的 sessionId 和递增序列号。被动日志行通过
+ * foregroundCaptureDepth 机制在 send() 执行时切换为前景消费。
+ */
 export class TcpCommandSession {
   readonly host: string;
   readonly port: number;

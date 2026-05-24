@@ -14,6 +14,10 @@ void setRightStick(uint8_t x, uint8_t y);
 void setHat(uint8_t hat);
 void sendReport();
 
+// 按钮位映射 — HORIPAD S USB HID 标准位序。
+// USB HID 报告格式: byte0=buttons[0:7], byte1=buttons[8:13]+pad。
+// 注意与 Nintendo 经典蓝牙 HID 的位序不同（蓝牙: B=0,A=1,Y=2,X=3）。
+// 修复记录: commit 7295e6f — 将 A/B/X/Y 从蓝牙位序修正为 HORIPAD S 标准位序。
 enum {
     BTN_Y       = 0,  BTN_B       = 1,
     BTN_A       = 2,  BTN_X       = 3,

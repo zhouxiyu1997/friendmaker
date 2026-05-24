@@ -387,6 +387,9 @@ void handleRawCommand(const String &line) {
 
   const unsigned long t0 = millis();
   String error;
+  // USB HID 模式下没有 CDC 串口，executeCommand("I") 内部的 Serial.printf
+  // 无法被桌面端接收。因此在这里预先将 transport 状态信息写到 tcpClient，
+  // 确保 deriveControllerStatus() 能读到 transport=usb-hid 字段。
   if (line == "I") {
     tcpClient.printf("INFO transport=%s\n", controller.transportName());
     tcpClient.println("INFO usb-hid transport active");
@@ -442,6 +445,7 @@ void handleSeqCommand(const String &line) {
 
   const unsigned long t0 = millis();
   String error;
+  // USB HID 模式下没有 CDC 串口，I 命令的 transport 信息需要直接写入 tcpClient。
   if (frame.command == "I") {
     tcpClient.printf("INFO transport=%s\n", controller.transportName());
     tcpClient.println("INFO usb-hid transport active");

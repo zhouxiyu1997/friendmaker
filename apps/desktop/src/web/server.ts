@@ -221,6 +221,10 @@ type FirmwareUploadEnvironmentId =
   | typeof SWITCH_LITE_UPLOAD_ENVIRONMENT_ID
   | typeof SWITCH_2_UPLOAD_ENVIRONMENT_ID;
 const VALID_BRUSH_SIZES = new Set([1, 3, 7, 13, 19, 27] as const);
+// ExecutionTarget 三种运输方式：
+// - "serial": USB 串口 + ESP32 Bluetooth Classic → Switch（主线）
+// - "wifi":   WiFi TCP + ESP32-S2 USB HID → Switch 2（实验性）
+// - "simulate": 纯模拟模式，不连接真实设备（调试用）
 type ExecutionTarget = "simulate" | "serial" | "wifi";
 type ExecutionStatus = "idle" | "running" | "paused" | "stopping" | "completed" | "failed" | "stopped";
 type FirmwareFlashStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
