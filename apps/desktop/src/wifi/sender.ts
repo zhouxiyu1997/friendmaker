@@ -466,9 +466,17 @@ export class TcpCommandSession {
   }
 
   private closeInternal(socket: Socket, rl: Readline): void {
-    rl.close();
-    if (!socket.destroyed) {
-      socket.destroy();
+    try {
+      rl.close();
+    } catch {
+      // readline close may throw if the underlying socket is already destroyed.
+    }
+    try {
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    } catch {
+      // socket destroy may throw if already torn down.
     }
     if (this.socket === socket) {
       this.socket = null;
@@ -498,8 +506,15 @@ export class TcpCommandSession {
       }
     };
 
+    const onError = () => {
+      // Suppress unhandled readline errors caused by remote TCP resets.
+      // The socket close event will clean up state.
+    };
+
     rl.on("line", onLine);
+    rl.on("error", onError);
     this.socket?.on("close", onClose);
+    this.socket?.on("error", onError);
   }
 
   private beginForegroundCapture(): void {
