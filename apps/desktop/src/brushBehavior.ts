@@ -83,7 +83,7 @@ export function buildAutomaticBrushSetupCommands(
   commands.push(waitCommand(BRUSH_PICKER_UI_SETTLE_MS));
   commands.push(pressButtonCommand("A"));
   commands.push(waitCommand(BRUSH_PICKER_UI_SETTLE_MS));
-  commands.push(pressButtonCommand("A"));
+  commands.push(pressButtonCommand("B"));
   commands.push(waitCommand(BRUSH_PICKER_EXIT_SETTLE_MS));
   return commands;
 }
