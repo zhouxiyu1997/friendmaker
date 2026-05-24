@@ -34,6 +34,10 @@ import {
   SerialSessionManager,
   type SerialSessionSnapshot,
 } from "../serial/sender.js";
+import {
+  TcpSessionManager,
+  type TcpSessionSnapshot,
+} from "../wifi/sender.js";
 import { SimulatedAckSender } from "../simulator/sender.js";
 import type { ResumePlan, SenderControls } from "../types.js";
 import {
@@ -88,6 +92,7 @@ function normalizeAckTimeoutMs(value?: number): number {
   return Math.max(value ?? DEFAULT_ACK_TIMEOUT_MS, DEFAULT_ACK_TIMEOUT_MS);
 }
 const serialSessionManager = new SerialSessionManager();
+const tcpSessionManager = new TcpSessionManager();
 
 export interface StartWebServerOptions {
   host?: string;
@@ -172,6 +177,12 @@ const FIRMWARE_ENVIRONMENTS = [
     description: "仅用于协议、ACK 和串口联调，不是最终的 Switch Pro 路线。",
     recommended: false,
   },
+  {
+    id: "lolin_s2_mini",
+    label: "Lolin S2 Mini (USB HID)",
+    description: "ESP32-S2 通过 USB HID 直连 Switch 2，配合 WiFi TCP 接收命令。烧录完成后需插入 Switch USB-C 口使用。",
+    recommended: false,
+  },
 ] as const;
 
 const SWITCH_MODELS = [
@@ -210,7 +221,7 @@ type FirmwareUploadEnvironmentId =
   | typeof SWITCH_LITE_UPLOAD_ENVIRONMENT_ID
   | typeof SWITCH_2_UPLOAD_ENVIRONMENT_ID;
 const VALID_BRUSH_SIZES = new Set([1, 3, 7, 13, 19, 27] as const);
-type ExecutionTarget = "simulate" | "serial";
+type ExecutionTarget = "simulate" | "serial" | "wifi";
 type ExecutionStatus = "idle" | "running" | "paused" | "stopping" | "completed" | "failed" | "stopped";
 type FirmwareFlashStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 type ExecutionProgressUpdate = { index: number; total: number; command: string };
@@ -222,6 +233,8 @@ interface ManagedExecution {
   status: ExecutionStatus;
   target: ExecutionTarget;
   portPath: string | null;
+  host: string | null;
+  port: number | null;
   baudRate: number | null;
   totalCommands: number;
   completedCommands: number;
@@ -244,6 +257,8 @@ function createEmptyExecution(): ManagedExecution {
     status: "idle",
     target: "serial",
     portPath: null,
+    host: null,
+    port: null,
     baudRate: null,
     totalCommands: 0,
     completedCommands: 0,
@@ -358,6 +373,60 @@ export class ManagedSerialSessionSender implements SenderControls {
       onInterruptReady: (interrupt) => {
         this.interruptAckWait = interrupt;
       },
+    });
+  }
+
+  private async waitWhilePaused(): Promise<void> {
+    while (this.paused && !this.stopped) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+}
+
+export class ManagedTcpSessionSender implements SenderControls {
+  private paused = false;
+  private stopped = false;
+  private interruptAckWait: (() => void) | null = null;
+
+  constructor(private readonly sessionManager: TcpSessionManager) {}
+
+  pause(): void { this.paused = true; }
+  resume(): void { this.paused = false; }
+
+  stop(): void { this.requestStop(); }
+  forceStop(): void { this.requestStop(); }
+
+  private requestStop(): void {
+    this.stopped = true;
+    this.interruptAckWait?.();
+    this.interruptAckWait = null;
+    void this.sessionManager.disconnect({ force: true }).catch(() => {});
+  }
+
+  async send(
+    commands: string[],
+    options: {
+      host: string;
+      port: number;
+      ackTimeoutMs: number;
+      retries: number;
+      onProgress?: (progress: { index: number; total: number; command: string }) => Promise<void> | void;
+      onDeviceLine?: (line: string) => void;
+    },
+  ): Promise<void> {
+    this.paused = false;
+    this.stopped = false;
+
+    await this.sessionManager.send(commands, {
+      host: options.host,
+      port: options.port,
+      ackTimeoutMs: options.ackTimeoutMs,
+      retries: options.retries,
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
+      beforeCommand: () => this.waitWhilePaused(),
+      shouldStop: () => this.stopped,
+      onInterruptReady: (interrupt) => { this.interruptAckWait = interrupt; },
     });
   }
 
@@ -1229,6 +1298,8 @@ function snapshotManagedExecution(execution: ManagedExecution = managedExecution
     status: execution.status,
     target: execution.target,
     portPath: execution.portPath,
+    host: execution.host,
+    port: execution.port,
     baudRate: execution.baudRate,
     totalCommands: execution.totalCommands,
     completedCommands: execution.completedCommands,
@@ -1435,7 +1506,7 @@ function handleDrawingTemplates(response: ServerResponse): void {
 
 async function executeCommands(body: {
   commands?: string[];
-  target?: "simulate" | "serial";
+  target?: "simulate" | "serial" | "wifi";
   portPath?: string;
   baudRate?: number;
   ackTimeoutMs?: number;
@@ -1444,16 +1515,17 @@ async function executeCommands(body: {
   errorAtCommand?: number;
 }): Promise<{
   success: true;
-  target: "simulate" | "serial";
+  target: "simulate" | "serial" | "wifi";
   totalCommands: number;
   lines: string[];
   session: SerialSessionSnapshot;
+  tcpSession: TcpSessionSnapshot;
 }> {
   if (!Array.isArray(body.commands) || body.commands.length === 0) {
     throw new Error("Missing commands.");
   }
 
-  const target = body.target === "serial" ? "serial" : "simulate";
+  const target = body.target === "wifi" ? "wifi" : body.target === "serial" ? "serial" : "simulate";
   const ackTimeoutMs = normalizeAckTimeoutMs(body.ackTimeoutMs);
   const retries = body.retries ?? 1;
   const lines: string[] = [`INFO target=${target} commands=${body.commands.length}`];
@@ -1473,6 +1545,25 @@ async function executeCommands(body: {
       await serialSessionManager.send(body.commands, {
         path: body.portPath,
         baudRate: body.baudRate ?? 115200,
+        ackTimeoutMs,
+        retries,
+        onDeviceLine: (line) => {
+          lines.push(line);
+        },
+      });
+    } else if (target === "wifi") {
+      const host = body.portPath ?? "friendmaker.local";
+      const port = body.baudRate ?? 9876;
+
+      if (isManagedExecutionActive(managedExecution.status)) {
+        throw new Error("Drawing execution is already running.");
+      }
+
+      lines.push(`INFO tcp_host=${host} tcp_port=${port}`);
+
+      await tcpSessionManager.send(body.commands, {
+        host,
+        port,
         ackTimeoutMs,
         retries,
         onDeviceLine: (line) => {
@@ -1506,6 +1597,7 @@ async function executeCommands(body: {
     totalCommands: body.commands.length,
     lines,
     session: serialSessionManager.snapshot(),
+    tcpSession: tcpSessionManager.snapshot(),
   };
 }
 
@@ -1551,6 +1643,28 @@ async function runManagedExecution(
       await sender.send(body.commands, {
         path: body.portPath,
         baudRate: body.baudRate ?? 115200,
+        ackTimeoutMs,
+        retries,
+        onProgress: async ({ index, command }: ExecutionProgressUpdate) => {
+          const mappedCompletedCommands = execution.progressMap?.[index - 1] ?? index;
+          execution.completedCommands = mappedCompletedCommands;
+          execution.currentCommand = command;
+          await updateRecoverySessionProgress(execution, mappedCompletedCommands);
+        },
+        onDeviceLine: (line) => {
+          appendManagedExecutionLine(execution, line);
+        },
+      });
+    } else if (body.target === "wifi") {
+      const host = body.portPath ?? "friendmaker.local";
+      const port = body.baudRate ?? 9876;
+
+      const sender = execution.sender as ManagedTcpSessionSender;
+      appendManagedExecutionLine(execution, `INFO tcp_host=${host} tcp_port=${port}`);
+
+      await sender.send(body.commands, {
+        host,
+        port,
         ackTimeoutMs,
         retries,
         onProgress: async ({ index, command }: ExecutionProgressUpdate) => {
@@ -1648,8 +1762,9 @@ async function startManagedExecution(body: {
     throw new Error("A drawing execution is already running.");
   }
 
-  const target: ExecutionTarget = body.target === "simulate" ? "simulate" : "serial";
-  const portPath = target === "serial" ? preferSerialPath(body.portPath ?? "") : null;
+  const target: ExecutionTarget =
+    body.target === "simulate" ? "simulate" : body.target === "wifi" ? "wifi" : "serial";
+  const portPath = target === "serial" ? preferSerialPath(body.portPath ?? "") : (target === "wifi" ? (body.portPath ?? "friendmaker.local") : null);
 
   if (target === "serial" && !portPath) {
     throw new Error("Missing portPath.");
@@ -1659,14 +1774,25 @@ async function startManagedExecution(body: {
     throw new Error("Progress map does not match commands.");
   }
 
-  const sender: SenderControls =
-    target === "serial" ? new ManagedSerialSessionSender(serialSessionManager) : new SimulatedAckSender();
+  let sender: SenderControls;
+  if (target === "serial") {
+    sender = new ManagedSerialSessionSender(serialSessionManager);
+  } else if (target === "wifi") {
+    sender = new ManagedTcpSessionSender(tcpSessionManager);
+  } else {
+    sender = new SimulatedAckSender();
+  }
+
+  const host = target === "wifi" ? portPath : null;
+  const tcpPort = target === "wifi" ? (body.baudRate ?? 9876) : null;
 
   const execution: ManagedExecution = {
     id: executionCounter += 1,
     status: "running",
     target,
     portPath,
+    host,
+    port: tcpPort,
     baudRate: body.baudRate ?? 115200,
     totalCommands: body.totalCommands ?? body.commands.length,
     completedCommands: body.initialCompletedCommands ?? 0,
@@ -1714,6 +1840,31 @@ async function handlePorts(response: ServerResponse): Promise<void> {
   json(response, 200, {
     ports: await listPortInfos(),
   });
+}
+
+function handleWifiHosts(response: ServerResponse): void {
+  json(response, 200, {
+    hosts: ["friendmaker.local", "192.168.1.200"],
+  });
+}
+
+async function handleWifiStatus(response: ServerResponse): Promise<void> {
+  json(response, 200, { ...tcpSessionManager.snapshot() });
+}
+
+async function handleWifiDisconnect(response: ServerResponse): Promise<void> {
+  try {
+    if (isManagedExecutionActive(managedExecution.status)) {
+      throw new Error("Drawing execution is active.");
+    }
+    json(response, 200, {
+      success: true,
+      session: await tcpSessionManager.disconnect(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    json(response, 400, { error: message, session: tcpSessionManager.snapshot() });
+  }
 }
 
 function handleOfficialPalette(response: ServerResponse): void {
@@ -1868,7 +2019,7 @@ async function handleFirmwareFlashCancel(response: ServerResponse): Promise<void
 async function handleExecute(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const body = (await readJsonBody(request)) as {
     commands?: string[];
-    target?: "simulate" | "serial";
+    target?: "simulate" | "serial" | "wifi";
     portPath?: string;
     baudRate?: number;
     ackTimeoutMs?: number;
@@ -1917,8 +2068,14 @@ async function handleExecutionStart(
       throw new Error("A drawing execution is already running.");
     }
 
-    const target: ExecutionTarget = body.target === "simulate" ? "simulate" : "serial";
-    const portPath = target === "serial" ? preferSerialPath(body.portPath ?? "") : null;
+    const target: ExecutionTarget =
+      body.target === "simulate" ? "simulate" : body.target === "wifi" ? "wifi" : "serial";
+    const portPath =
+      target === "serial"
+        ? preferSerialPath(body.portPath ?? "")
+        : target === "wifi"
+          ? (body.portPath ?? "friendmaker.local")
+          : null;
     const normalizedProfileSummary = normalizeRecoveryProfileSummary(body.profileSummary);
 
     if (target === "serial" && !portPath) {
@@ -1992,6 +2149,7 @@ async function handleExecutionStatus(response: ServerResponse): Promise<void> {
     success: true,
     execution: snapshotManagedExecution(),
     session: serialSessionManager.snapshot(),
+    tcpSession: tcpSessionManager.snapshot(),
   });
 }
 
@@ -2288,6 +2446,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
 
     if (request.method === "GET" && url.pathname === "/api/ports") {
       await handlePorts(response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/wifi/hosts") {
+      handleWifiHosts(response);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/wifi/status") {
+      await handleWifiStatus(response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/wifi/disconnect") {
+      await handleWifiDisconnect(response);
       return;
     }
 

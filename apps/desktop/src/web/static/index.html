@@ -393,9 +393,25 @@
 
               <div class="field-grid execution-grid">
                 <label>
+                  <span>运输方式</span>
+                  <select id="studio-transport-select">
+                    <option value="serial">USB 串口 (ESP32 蓝牙)</option>
+                    <option value="wifi">WiFi (ESP32-S2 USB HID)</option>
+                  </select>
+                </label>
+
+                <label id="studio-serial-port-label">
                   <span>串口设备</span>
                   <select id="studio-port-select">
                     <option value="">未检测到串口</option>
+                  </select>
+                </label>
+
+                <label id="studio-wifi-host-label" class="hidden">
+                  <span>WiFi 地址</span>
+                  <select id="studio-wifi-host-select">
+                    <option value="friendmaker.local">friendmaker.local (mDNS)</option>
+                    <option value="192.168.1.200">192.168.1.200 (静态 IP)</option>
                   </select>
                 </label>
               </div>
@@ -749,9 +765,25 @@
 
             <div class="field-grid">
               <label>
+                <span>运输方式</span>
+                <select id="controller-transport-select">
+                  <option value="serial">USB 串口 (ESP32 蓝牙)</option>
+                  <option value="wifi">WiFi (ESP32-S2 USB HID)</option>
+                </select>
+              </label>
+
+              <label id="controller-serial-port-label">
                 <span>串口设备</span>
                 <select id="controller-port-select">
                   <option value="">未检测到串口</option>
+                </select>
+              </label>
+
+              <label id="controller-wifi-host-label" class="hidden">
+                <span>WiFi 地址</span>
+                <select id="controller-wifi-host-select">
+                  <option value="friendmaker.local">friendmaker.local (mDNS)</option>
+                  <option value="192.168.1.200">192.168.1.200 (静态 IP)</option>
                 </select>
               </label>
 
@@ -1038,9 +1070,25 @@
 
             <div class="field-grid">
               <label>
+                <span>运输方式</span>
+                <select id="timing-transport-select">
+                  <option value="serial">USB 串口 (ESP32 蓝牙)</option>
+                  <option value="wifi">WiFi (ESP32-S2 USB HID)</option>
+                </select>
+              </label>
+
+              <label id="timing-serial-port-label">
                 <span>当前串口</span>
                 <select id="timing-port-select">
                   <option value="">未检测到串口</option>
+                </select>
+              </label>
+
+              <label id="timing-wifi-host-label" class="hidden">
+                <span>WiFi 地址</span>
+                <select id="timing-wifi-host-select">
+                  <option value="friendmaker.local">friendmaker.local (mDNS)</option>
+                  <option value="192.168.1.200">192.168.1.200 (静态 IP)</option>
                 </select>
               </label>
 

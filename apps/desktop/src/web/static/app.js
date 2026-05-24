@@ -104,6 +104,17 @@ const state = {
   ports: [],
   selectedPortPath: "",
   missingSelectedPortPath: null,
+  transport: "serial",
+  wifiHost: "friendmaker.local",
+  wifiPort: 9876,
+  tcpSession: {
+    connected: false,
+    host: null,
+    port: 9876,
+    busy: false,
+    idleTimeoutMs: 15 * 60 * 1000,
+    lastUsedAt: null,
+  },
   serialSession: {
     connected: false,
     portPath: null,
@@ -159,7 +170,7 @@ const state = {
   },
   studio: {
     busy: false,
-    target: "serial",
+    get target() { return state.transport; },
     canvasSize: 256,
     brushSize: 3,
     brushShape: "square",
@@ -251,7 +262,7 @@ const state = {
   },
   controller: {
     busy: false,
-    target: "serial",
+    get target() { return state.transport; },
     autoReconnectAttempted: false,
     status: {
       tone: "idle",
@@ -357,6 +368,10 @@ const els = {
   offsetYInput: document.getElementById("offset-y-input"),
   recenterStrategyCheckbox: document.getElementById("recenter-strategy-checkbox"),
   studioPortSelect: document.getElementById("studio-port-select"),
+  studioTransportSelect: document.getElementById("studio-transport-select"),
+  studioSerialPortLabel: document.getElementById("studio-serial-port-label"),
+  studioWifiHostLabel: document.getElementById("studio-wifi-host-label"),
+  studioWifiHostSelect: document.getElementById("studio-wifi-host-select"),
   refreshPortsButton: document.getElementById("refresh-ports-button"),
   executionHint: document.getElementById("execution-hint"),
   quickStartButton: document.getElementById("quick-start-button"),
@@ -422,6 +437,10 @@ const els = {
   firmwareCopyLogButton: document.getElementById("firmware-copy-log-button"),
   firmwareClearLogButton: document.getElementById("firmware-clear-log-button"),
   controllerPortSelect: document.getElementById("controller-port-select"),
+  controllerTransportSelect: document.getElementById("controller-transport-select"),
+  controllerSerialPortLabel: document.getElementById("controller-serial-port-label"),
+  controllerWifiHostLabel: document.getElementById("controller-wifi-host-label"),
+  controllerWifiHostSelect: document.getElementById("controller-wifi-host-select"),
   controllerTimingHint: document.getElementById("controller-timing-hint"),
   controllerStepSelect: document.getElementById("controller-step-select"),
   controllerRefreshButton: document.getElementById("controller-refresh-button"),
@@ -452,6 +471,10 @@ const els = {
   controllerCopyLogButton: document.getElementById("controller-copy-log-button"),
   controllerClearLogButton: document.getElementById("controller-clear-log-button"),
   timingPortSelect: document.getElementById("timing-port-select"),
+  timingTransportSelect: document.getElementById("timing-transport-select"),
+  timingSerialPortLabel: document.getElementById("timing-serial-port-label"),
+  timingWifiHostLabel: document.getElementById("timing-wifi-host-label"),
+  timingWifiHostSelect: document.getElementById("timing-wifi-host-select"),
   timingStepSelect: document.getElementById("timing-step-select"),
   timingInputDelayRange: document.getElementById("timing-input-delay-range"),
   timingInputDelayInput: document.getElementById("timing-input-delay-input"),
@@ -1144,6 +1167,24 @@ els.thresholdRange.addEventListener("input", () => {
   });
 });
 
+[els.studioTransportSelect, els.controllerTransportSelect, els.timingTransportSelect].forEach((select) => {
+  select.addEventListener("change", () => {
+    state.transport = select.value;
+    syncTransport();
+    renderPortSelects();
+    syncStudioUi();
+    syncControllerUi();
+    syncTimingLabUi();
+  });
+});
+
+[els.studioWifiHostSelect, els.controllerWifiHostSelect, els.timingWifiHostSelect].forEach((select) => {
+  select.addEventListener("change", () => {
+    state.wifiHost = select.value;
+    syncTransport();
+  });
+});
+
 els.timingStepSelect.addEventListener("change", () => {
   state.timingLab.quickStep = Number(els.timingStepSelect.value || state.timingLab.quickStep);
   syncTimingLabUi();
@@ -1812,12 +1853,13 @@ async function executeStudioCommands({ logPrefix }) {
     return false;
   }
 
-  if (!state.selectedPortPath) {
+  const isWifi = state.transport === "wifi";
+  if (!isWifi && !state.selectedPortPath) {
     appendLog(els.studioLogOutput, "请先选择一个串口设备。");
     return false;
   }
 
-  if (!isControllerReadyForStudio()) {
+  if (!isWifi && !isControllerReadyForStudio()) {
     appendLog(els.studioLogOutput, "开始绘制前，请先到“手柄测试”页把手柄连接状态跑到“已就绪”。");
     switchPage("controller");
     return false;
@@ -1832,15 +1874,15 @@ async function executeStudioCommands({ logPrefix }) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        target: "serial",
+        target: state.transport,
         commands: state.commands,
         resumePlan: state.studio.resumePlan,
         sourceLabel: state.imageSourceLabel ?? "untitled-drawing",
         profileSummary: {
           ...getStudioExecutionProfileSummary(),
         },
-        portPath: state.selectedPortPath,
-        baudRate: state.studio.profile.baudRate,
+        portPath: state.transport === "serial" ? state.selectedPortPath : state.wifiHost,
+        baudRate: state.transport === "wifi" ? state.wifiPort : state.studio.profile.baudRate,
         ackTimeoutMs: state.studio.profile.ackTimeoutMs,
         retries: state.studio.profile.commandRetryCount,
       }),
@@ -2399,6 +2441,31 @@ function stopWindowsSerialDriverPolling() {
 els.controllerInfoButton.addEventListener("click", async () => {
   state.controller.autoReconnectAttempted = false;
   controllerStatusTimeoutRecoveryAttempted = false;
+
+  if (state.transport === "wifi") {
+    setControllerPendingStatus({
+      title: "正在检查 USB HID 连接状态",
+      detail: `通过 WiFi (${state.wifiHost}) 检查 ESP32-S2 的 USB HID 就绪状态。`,
+    });
+
+    const statusOk = await requestControllerStatus();
+    if (statusOk) {
+      appendLog(els.controllerLogOutput, "WiFi TCP 连接已建立，可通过下方按钮测试手柄动作。");
+      setControllerPendingStatus({
+        title: "USB HID 已就绪",
+        detail: "可通过下方按钮测试手柄动作。",
+      });
+      startControllerStatusPolling();
+    } else {
+      appendLog(els.controllerLogOutput, "WiFi TCP 连接失败，请检查 S2 Mini 是否已正确连接并等待 LED 常亮。");
+      setControllerPendingStatus({
+        title: "USB HID 未就绪",
+        detail: "请确保：1) S2 Mini 已插入 Switch USB-C 口 2) LED 常亮 3) WiFi 已连接。",
+      });
+    }
+    return;
+  }
+
   setControllerPendingStatus({
     title: "正在检查当前手柄状态",
     detail: "正在读取开发板当前蓝牙状态；如果已经连上 Switch，会直接复用当前连接。",
@@ -3309,7 +3376,7 @@ async function handleControllerStatusPollTimeout() {
 }
 
 async function requestControllerStatus({ logErrors = false } = {}) {
-  if (!state.selectedPortPath) {
+  if (state.transport === "serial" && !state.selectedPortPath) {
     return false;
   }
 
@@ -3324,10 +3391,10 @@ async function requestControllerStatus({ logErrors = false } = {}) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        target: "serial",
+        target: state.transport,
         commands: ["I"],
-        portPath: state.selectedPortPath,
-        baudRate: state.studio.profile.baudRate,
+        portPath: state.transport === "serial" ? state.selectedPortPath : state.wifiHost,
+        baudRate: state.transport === "wifi" ? state.wifiPort : state.studio.profile.baudRate,
         ackTimeoutMs: state.studio.profile.ackTimeoutMs,
         retries: state.studio.profile.commandRetryCount,
         ackDelayMs: 0,
@@ -3335,6 +3402,7 @@ async function requestControllerStatus({ logErrors = false } = {}) {
     });
     const payload = await response.json();
     applySerialSessionSnapshot(payload.session);
+    applyTcpSessionSnapshot(payload.tcpSession);
 
     if (!response.ok) {
       if (logErrors) {
@@ -3365,7 +3433,7 @@ async function pollControllerStatus() {
     return;
   }
 
-  if (!state.selectedPortPath) {
+  if (state.transport === "serial" && !state.selectedPortPath) {
     stopControllerStatusPolling();
     return;
   }
@@ -4046,19 +4114,25 @@ function syncTimingLabUi() {
 }
 
 function syncControllerUi() {
-  const hasPort = Boolean(state.selectedPortPath);
-  const ready = state.controller.status.readyValue === true;
-  const canSendTestCommands = !state.controller.busy && !state.serialSession.busy && hasPort && ready;
+  const isWifi = state.transport === "wifi";
+  const hasPort = isWifi ? true : Boolean(state.selectedPortPath);
+  const busy = state.controller.busy || state.serialSession.busy || (isWifi && state.tcpSession.busy);
+  const ready = isWifi ? state.tcpSession.connected : state.controller.status.readyValue === true;
+  const canSendTestCommands = !state.controller.busy && !busy && hasPort && ready;
 
-  els.controllerPortSelect.disabled = state.controller.busy || state.serialSession.busy;
+  els.controllerPortSelect.disabled = busy;
+  els.controllerSerialPortLabel.classList.toggle("hidden", isWifi);
+  els.controllerWifiHostLabel.classList.toggle("hidden", !isWifi);
 
-  const shouldDisable = state.controller.busy || state.serialSession.busy || !hasPort;
+  const shouldDisable = busy || !hasPort;
   els.controllerInfoButton.disabled = shouldDisable;
-  els.controllerResetButton.disabled = shouldDisable;
-  els.controllerClearPeerButton.disabled = shouldDisable;
+  els.controllerResetButton.disabled = true;
+  els.controllerClearPeerButton.disabled = true;
+  els.controllerResetButton.classList.toggle("hidden", isWifi);
+  els.controllerClearPeerButton.classList.toggle("hidden", isWifi);
   els.controllerSendCustomButton.disabled = !canSendTestCommands;
   els.controllerCustomCommands.disabled = !canSendTestCommands;
-  els.controllerDisconnectButton.disabled = state.controller.busy || !state.serialSession.connected;
+  els.controllerDisconnectButton.disabled = busy || (!isWifi && !state.serialSession.connected);
   els.controllerActionButtons.forEach((button) => {
     button.disabled = !canSendTestCommands;
   });
@@ -4096,8 +4170,8 @@ async function runExecution({
       body: JSON.stringify({
         target,
         commands,
-        portPath: target === "serial" ? portPath : undefined,
-        baudRate,
+        portPath: target === "serial" ? portPath : (target === "wifi" ? state.wifiHost : undefined),
+        baudRate: target === "wifi" ? state.wifiPort : baudRate,
         ackTimeoutMs,
         retries,
         ackDelayMs: 0,
@@ -4105,6 +4179,7 @@ async function runExecution({
     });
     const payload = await response.json();
     applySerialSessionSnapshot(payload.session);
+    applyTcpSessionSnapshot(payload.tcpSession);
 
     if (!response.ok) {
       appendExecutionLines(logTarget, payload.lines);
@@ -4137,20 +4212,21 @@ async function runTimedSerialCommands({
   setBusy,
   successLabel,
 }) {
-  if (!state.selectedPortPath) {
+  if (state.transport === "serial" && !state.selectedPortPath) {
     appendLog(logTarget, "请先选择一个串口设备。");
     return null;
   }
 
   const timedCommands = prependSharedTimingCommand(commands);
-  appendLog(logTarget, `${label}：${state.selectedPortPath} · ${formatTimingSummary(state.sharedTiming)}`);
+  const hostLabel = state.transport === "wifi" ? state.wifiHost : state.selectedPortPath;
+  appendLog(logTarget, `${label}：${hostLabel} · ${formatTimingSummary(state.sharedTiming)}`);
 
   const startedAt = Date.now();
   const payload = await runExecution({
     commands: timedCommands,
-    target: "serial",
-    portPath: state.selectedPortPath,
-    baudRate: state.studio.profile.baudRate,
+    target: state.transport,
+    portPath: state.transport === "serial" ? state.selectedPortPath : state.wifiHost,
+    baudRate: state.transport === "wifi" ? state.wifiPort : state.studio.profile.baudRate,
     ackTimeoutMs: state.studio.profile.ackTimeoutMs,
     retries: state.studio.profile.commandRetryCount,
     setBusy,
@@ -4511,6 +4587,28 @@ function renderPortSelects() {
     });
   });
   syncDesktopShellUi();
+}
+
+function syncTransport() {
+  const isWifi = state.transport === "wifi";
+  const serialLabels = [els.studioSerialPortLabel, els.controllerSerialPortLabel, els.timingSerialPortLabel];
+  const wifiLabels = [els.studioWifiHostLabel, els.controllerWifiHostLabel, els.timingWifiHostLabel];
+  serialLabels.forEach((el) => { if (el) el.classList.toggle("hidden", isWifi); });
+  wifiLabels.forEach((el) => { if (el) el.classList.toggle("hidden", !isWifi); });
+
+  const wifiHost = state.wifiHost;
+  const wifiSelects = [els.studioWifiHostSelect, els.controllerWifiHostSelect, els.timingWifiHostSelect];
+  wifiSelects.forEach((select) => { if (select) select.value = wifiHost; });
+
+  const transportSelects = [els.studioTransportSelect, els.controllerTransportSelect, els.timingTransportSelect];
+  transportSelects.forEach((select) => { if (select) select.value = state.transport; });
+
+  syncControllerUi();
+}
+
+function applyTcpSessionSnapshot(snapshot) {
+  if (!snapshot) return;
+  Object.assign(state.tcpSession, snapshot);
 }
 
 async function loadFirmwareInfo() {
@@ -5264,6 +5362,7 @@ async function init() {
     refreshRecoverySessions(),
   ]);
   renderPortSelects();
+  syncTransport();
   syncStudioUi();
   syncFirmwareUi();
   syncControllerUi();

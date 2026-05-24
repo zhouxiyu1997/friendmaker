@@ -352,12 +352,12 @@ void applyInputTiming(uint16_t pressMs, uint16_t delayMs) {
 
 bool isTimingConfigCommand(const String &line, uint16_t &pressMs, uint16_t &delayMs) {
   if (!line.startsWith("CFG INPUT ")) return false;
-  const int prefixEnd = 10; // strlen("CFG INPUT ")
-  const int a = line.indexOf(' ', prefixEnd);
-  const int b = line.indexOf(' ', a + 1);
+  const String payload = line.substring(10);
+  const int a = payload.indexOf(' ');
+  const int b = payload.indexOf(' ', a + 1);
   if (a < 0 || b < 0) return false;
-  const int press = line.substring(a + 1, b).toInt();
-  const int delay = line.substring(b + 1).toInt();
+  const int press = payload.substring(0, a).toInt();
+  const int delay = payload.substring(a + 1, b).toInt();
   if (press <= 0 || press > 60000 || delay <= 0 || delay > 60000) return false;
   pressMs = static_cast<uint16_t>(press);
   delayMs = static_cast<uint16_t>(delay);
