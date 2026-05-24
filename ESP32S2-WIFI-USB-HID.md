@@ -354,8 +354,8 @@ socket.create_connection(("192.168.1.200", 9876))
 | **Switch USB HID 兼容性** | 🟢 低 (已解决) | HORIPAD S (0x0F0D/0x00C1) + 纯 HID 描述符 (无 IAD) — Switch 2 实测通过 |
 | **WiFi 延迟抖动** | 🟡 中 | TCP 保证可靠传输，命令缓冲削峰；实际延迟 <5ms (局域网) 优于蓝牙 16ms 间隔 |
 | **USB 供电** | 🟢 低 (已解决) | Switch 2 USB-C 口直接供电；静态 IP + mDNS 确保拔插后自动恢复连接 |
-| **右摇杆漂移** | 🟡 中 | 连接后短暂右摇杆推上，通过 TCP 发归中指令可临时解决，待修复 `init()` 预填值 |
-| **WiFi 配置复杂性** | 🟢 低 | SmartConfig + NVS 持久化，配网一次永久生效 |
+| **右摇杆漂移** | 🟢 低 (已解决) | 双重根因已修复：(1) `sendReport()` 打包逻辑对齐 (2) `init()` 预填缓冲区 1 字节偏移 (commit `a40a9a1`)，Switch 2 重新校准无漂移 |
+| **WiFi 配置复杂性** | 🟢 低 | 已实现静态 IP + mDNS + 掉线自动重连 + `WiFi.setSleep(false)` |
 | **ESP32-S2 单核瓶颈** | 🟢 低 | USB HID 由 TinyUSB 硬件驱动，WiFi 由 LWIP 异步处理，不竞争 CPU |
 | **Flash 空间** | 🟢 低 | 蓝牙栈约 400KB 被移除，TinyUSB 约 50KB，WiFi 已有 ~50KB，净释放 ~300KB |
 | **串口调试通道消失** | 🟡 中 | USB HID 占据原生 USB 口，调试可改用 UART0 (GPIO43/44) 或保留 Telnet/WebSerial 调试 |
@@ -386,7 +386,7 @@ socket.create_connection(("192.168.1.200", 9876))
 3. ✅ WiFi + mDNS + TCP Server 共存正常
 4. ✅ 14 个按钮 + D-pad + 左右摇杆全部通过 TCP 控制验证
 5. ✅ `friendmaker.local:9876` WiFi 命令通道完整
-6. ⚠️ 右摇杆初始漂移（上推残留），待修复
+6. ✅ **右摇杆漂移已修复** (commit `a40a9a1`) — 双重根因：(1) `sendReport()` 打包逻辑对齐 (2) `init()` 预填缓冲区 1 字节偏移，Rz 轴从 0→128 归中值
 
 ### 阶段 1 技术突破：绕过 Arduino USB IAD 限制
 
@@ -421,43 +421,112 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) { ... }
 4065ms  USB wakeup sequence sent → hid_ready=yes ✅
 ```
 
-### 阶段 2：WiFi 通信层 + 完整命令协议 (已完成 ✅)
+### 阶段 2：SEQ 协议接入 + ControllerTransport 抽象层 (已完成 ✅)
 
-**当前状态**：
-- ✅ WiFi STA + 静态 IP `192.168.1.200` + TCP Server 端口 9876
-- ✅ mDNS 设备发现 (`friendmaker.local`)
-- ✅ 完整命令集通过 TCP 验证：
+**目标**：将 test_s2 从"简单命令集"升级为与主固件同构的 SEQ 帧协议 + `ControllerTransport` 运输层抽象。
 
-| 类别 | 命令 | 状态 |
-|------|------|:--:|
-| 按钮 | A B X Y L R ZL ZR | ✅ |
-| 功能 | PLUS MINUS HOME LS RS CAPTURE | ✅ |
-| D-pad | `M dx dy` | ✅ |
-| 左摇杆 | `STICK x y ms` | ✅ |
-| 右摇杆 | `RSTICK x y ms` | ✅ |
-| 长按 | `HOLD name ms` | ✅ |
-| 等待 | `W ms` | ✅ |
-| 诊断 | `STATUS` `LOG` | ✅ |
-| 唤醒 | H (Home) / P (笔画 A) | ✅ |
+**提交**：`f874a69 feat(test-s2): 接入 SEQ 帧协议、ControllerTransport 抽象层与诊断日志`
 
-- ✅ WiFi 掉线自动检测 + 重连
-- ✅ 40 条环形日志缓冲，TCP 可查询
-- ✅ 综合诊断输出 (`tud_mounted` / `hid_ready` / WiFi RSSI / uptime)
-- 🔜 待接入完整 `protocol.cpp` 的 SEQ 帧格式
-- 🔜 右摇杆连接后短暂漂移 (~128ms 复位)，待修复
+**新增文件**：
 
-### 阶段 3：配网 + 桌面端 TCP 通信
+| 文件 | 说明 |
+|------|------|
+| `test_s2/src/controller_transport.h` | 抽象运输层基类 + `ControllerButton` 枚举 (从主固件复制) |
+| `test_s2/src/controller.h/.cpp` | `SwitchController` 高层控制逻辑 (从主固件复制) |
+| `test_s2/src/config.h` | 时序常量 + 画板参数 (适配版，移除 BT 常量) |
+| `test_s2/src/protocol.h/.cpp` | 命令解析器 `executeCommand()` (从主固件复制) |
+| `test_s2/src/usb_hid_controller_transport.h/.cpp` | **USB HID 适配器** — 继承 `ControllerTransport`，18 位按钮掩码映射为 USB HID 14 位 + HAT 4 位 |
 
-**目标**：桌面应用通过 WiFi 连接开发板，完整走通绘制流程
+**重写文件**：
 
-**步骤**：
+| 文件 | 变化 |
+|------|------|
+| `test_s2/src/main.cpp` | 集成 SEQ 帧解析器 + tcpLogf 实时诊断 + CFG INPUT 运行时调参 |
 
-1. 实现 WiFi 配网（SmartConfig / SoftAP Captive Portal）
-2. 新建 `wifi/sender.ts` (参考 serial/sender.ts)
-3. 设备发现（mDNS 广播 `friendmaker._tcp.local`）
-4. 完整绘制链路端到端测试
+**关键成果**：
 
-**预计代码量**：~400 行新建 + ~200 行改动
+| 能力 | 旧 (简单命令) | 新 (SEQ + protocol) |
+|------|:--:|:--:|
+| 协议格式 | 裸命令 + ACK/NAK | `SEQ <sid(8hex)> <seq> <cmd>` + OK/ERR |
+| 序列号去重 | ❌ | ✅ (回放缓存的 ACK) |
+| 会话管理 | ❌ | ✅ (8 字符 hex sessionId) |
+| 运行时调参 | ❌ | ✅ `CFG INPUT <press> <delay>` |
+| 命令集 | 14 个原始命令 | 20+ (L/S/HOLD/TAP/PC/BC/C 等全部协议命令) |
+| 运输层抽象 | 无 | `ControllerTransport` 接口 |
+| 诊断日志 | 2 条循环缓冲 | 三层：tcpLogf 实时推送 + addLog 80 条环形缓冲 + HID 逐操作计时 |
+
+**时序优化**：经 TCP 实测验证，默认时序从 100/50 降至 **65/45**，与蓝牙原项目推荐值持平。单步耗时 150ms→110ms (-26.7%)。
+
+**固件资源占用**：
+- RAM: 59,468 / 327,680 (18.1%)
+- Flash: 737,598 / 1,310,720 (56.3%)
+
+**SEQ 逐命令实测数据** (65/45)：
+
+| 命令 | 耗时 | 结果 |
+|------|:--:|:--:|
+| `A` | 110ms | ✅ |
+| `L 3 0` | 440ms | ✅ |
+| `STICK 1 0 200` | 245ms | ✅ |
+| `STICK 0 1 200` | 245ms | ✅ |
+| `HOLD A 400` | 446ms | ✅ |
+| `H` (Home) | 3701ms | ✅ |
+
+**WiFi 诊断命令完整支持**：
+
+| 命令 | 返回内容 |
+|------|------|
+| `STATUS` | usb / hid_ready / tud_ready / wifi / ip / press_ms / delay_ms / uptime / logcnt / tcp_rx |
+| `LOG` | 80 条环形缓冲区完整转储 (含毫秒时间戳) |
+
+**已修复 Bug**：
+- ✅ CFG INPUT 2 参数解析偏移 (commit 内第二个 repair) — `isTimingConfigCommand` 改用 `payload.substring()` 从固定前缀后解析，SEQ 路径 CFG INPUT 通过 Node.js TCP sender 验证 `press=65 delay=45`
+
+### 阶段 3：桌面端 TCP sender (已完成 ✅) + 固件端 SEQ 验证 (已完成 ✅)
+
+**目标**：桌面应用通过 WiFi TCP 连接开发板，走通完整 SEQ 帧协议绘制链路。**不含 SmartConfig 配网**（当前通过 wifi_credentials.h 硬编码凭据，后续阶段再配）。
+
+**新建文件**：
+
+| 文件 | 说明 |
+|------|------|
+| `apps/desktop/src/wifi/sender.ts` | ~500 行 TCP sender — `TcpCommandSession` + `TcpSessionManager` + `TcpAckSender` + `discoverDevice()` + `listDeviceHosts()` |
+
+**修改文件**：
+
+| 文件 | 变化 |
+|------|------|
+| `apps/desktop/src/web/server.ts` | 新增 `ExecutionTarget: "wifi"`、`ManagedTcpSessionSender`、`TcpSessionManager` 单例、API 路由 (`/api/wifi/hosts` `/api/wifi/status` `/api/wifi/disconnect`)、执行分支、tcpSession 快照 |
+
+**核心对接点**：
+
+| 串口版 | WiFi 版 | 保留/复用 |
+|------|------|------|
+| `SerialPort` + `ReadlineParser` | `net.Socket` + `readline.createInterface` | — |
+| `preferSerialPath()` 端口枚举 | `discoverDevice(mdnsHost, fallbackIp)` mDNS 发现 + 静态 IP 回退 | — |
+| `stabilizeFreshSerialSession()` 等 BOOT 检测 | `stabilizeTcpSession()` 简化为超时读 BOOT 行 | — |
+| `probeFreshSerialSession()` 发 `I` 探测 | `probeTcpSession()` 发 `STATUS` 探测 | — |
+| `formatSequencedCommand()` / `parseSequencedAck()` | **完全复用** | ✅ 零改动 |
+| `getAckTimeoutForCommand()` | **完全复用** | ✅ 零改动 |
+| `SenderControls` 接口 | `TcpAckSender` 实现 `pause()/resume()/stop()` | ✅ 同构 |
+| RTS/DTR 复位脉冲 | 删除 | — |
+| 蓝牙 HID 拥塞检测 | 删除 | — |
+
+**编译验证**：
+```
+$ npx tsc -p tsconfig.json --noEmit
+(零错误)
+```
+
+**固件端 SEQ 端到端验证** (Node.js raw TCP)：
+
+| seq | 命令 | 结果 | 耗时 |
+|:--:|------|:--:|:--:|
+| 1 | `CFG INPUT 65 45 1800` | ✅ OK | `press=65 delay=45` |
+| 2 | `A` | ✅ OK | 110ms |
+| 3 | `L 3 0` | ✅ OK | 440ms |
+
+**下一子阶段**：UI 集成 (固件页新增 S2 Mini 板型选项 + 手柄测试页适配 USB HID 即插即用流程)，预计 ~200 行 UI 改动
 
 ### 阶段 4：稳定化 + 网页刷机站适配
 
@@ -491,9 +560,12 @@ TCP: 开发板-IP:9876
 |------|------|
 | **可行性** | ✅ 已验证通过 — Switch 2 成功识别 ESP32-S2 为 HORIPAD S USB 手柄 |
 | **核心突破** | 覆盖 TinyUSB 描述符回调绕过 Arduino IAD 限制 (`bDeviceClass=0xEF→0x00`) |
-| **新增文件** | `test_s2/src/usb_hid.cpp/.h` (HID 传输层, ~170行) + `test_s2/src/main.cpp` (WiFi+命令引擎, ~325行) + `test_s2/sdkconfig.lolin_s2_mini` (纯 HID 配置) |
-| **已删除** | CDC/MSC/MIDI/VIDEO/DFU/VENDOR — 通过自定义 sdkconfig 全部禁用 |
-| **不变代码** | `protocol.cpp`, `controller.cpp`, `config.h`(大部分), `scanline.ts`, `sequencing.ts`, `recovery.ts`, 所有 profile JSON |
-| **已验证** | 14 按钮 + D-pad 4方向 + 左右摇杆 4方向 + HOME/CAPTURE/MINUS/PLUS 功能键 ✅ |
-| **待修复** | 右摇杆初始漂移 (连接后 ~128ms 推上) |
-| **下一步** | 1) 修复右摇杆漂移 2) 接入 `protocol.cpp` SEQ 帧格式 3) 桌面端 `wifi/sender.ts` 4) 整合为主线固件 |
+| **固件新增文件** | `controller_transport.h`, `controller.h/.cpp`, `config.h`, `protocol.h/.cpp`, `usb_hid_controller_transport.h/.cpp` (8 文件, ~1700 行) + `usb_hid.h/.cpp` (HID 底层, ~110 行) + `sdkconfig.lolin_s2_mini` (纯 HID 配置) |
+| **桌面端新增文件** | `apps/desktop/src/wifi/sender.ts` (~500 行 TCP sender) |
+| **桌面端修改文件** | `apps/desktop/src/web/server.ts` (ExecutionTarget 扩展 + API 路由 + sender 分支) |
+| **已修复 Bug** | 右摇杆漂移 (`init()` 预填 1 字节偏移) + CFG INPUT 解析偏移 |
+| **默认时序** | 65/45 (与蓝牙原项目推荐值持平，经 TCP 全命令实测验证) |
+| **不变代码** | `scanline.ts`, `sequencing.ts`, `serializer.ts`, `timing.ts`, `recovery.ts`, 所有 profile JSON |
+| **已验证** | 14 按钮 + D-pad 4方向 + 左右摇杆 4方向 + HOME/CAPTURE/MINUS/PLUS 功能键 + SEQ 帧协议 + CFG INPUT 调参 ✅ |
+| **当前分支** | `feature/esp32s2-wifi-usb-hid` — 4 个 commits |
+| **下一步** | 1) UI 集成 (固件页新增 S2 Mini 选项 + 手柄测试页适配 USB HID) 2) 端到端绘制流程测试 3) 网页刷机站适配 4) 文档同步
