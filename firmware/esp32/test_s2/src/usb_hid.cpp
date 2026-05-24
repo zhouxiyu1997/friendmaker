@@ -44,9 +44,10 @@ void tud_hid_set_report_cb(uint8_t i, uint8_t rid, hid_report_type_t t, uint8_t 
 
 void UsbHid::init() {
     btns_=0; hat_=HAT_CENTER; lx_=ly_=rx_=ry_=STICK_CENTER;
-    rpt_[0]=0; rpt_[1]=(uint8_t)((HAT_CENTER&0x0F)<<4);
-    rpt_[2]=STICK_CENTER; rpt_[3]=STICK_CENTER;
-    rpt_[4]=STICK_CENTER; rpt_[5]=STICK_CENTER; rpt_[6]=0; rpt_[7]=0;
+    rpt_[0]=0; rpt_[1]=0;
+    rpt_[2]=(uint8_t)(HAT_CENTER & 0x0F);
+    rpt_[3]=STICK_CENTER; rpt_[4]=STICK_CENTER;
+    rpt_[5]=STICK_CENTER; rpt_[6]=STICK_CENTER; rpt_[7]=0;
 }
 bool UsbHid::isMounted()  { return tud_hid_ready(); }
 void UsbHid::pressButtons(uint16_t m) { btns_ = m; }
