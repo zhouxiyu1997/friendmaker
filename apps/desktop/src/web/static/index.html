@@ -410,8 +410,6 @@
                 <label id="studio-wifi-host-label" class="hidden">
                   <span>WiFi 地址</span>
                   <select id="studio-wifi-host-select">
-                    <option value="friendmaker.local">friendmaker.local (mDNS)</option>
-                    <option value="192.168.1.200">192.168.1.200 (静态 IP)</option>
                   </select>
                 </label>
               </div>
@@ -646,11 +644,33 @@
                   <button id="firmware-wifi-password-toggle" class="ghost password-toggle" type="button" aria-label="显示/隐藏密码">👁</button>
                 </div>
               </label>
+
+              <div id="firmware-wifi-advanced" class="hidden firmware-advanced-section">
+                <button id="firmware-wifi-advanced-toggle" class="ghost advanced-toggle" type="button">
+                  <span id="firmware-wifi-advanced-arrow">▶</span> 高级网络设置
+                </button>
+                <div id="firmware-wifi-advanced-body" class="hidden advanced-body">
+                  <label id="firmware-wifi-static-ip-label">
+                    <span>静态 IP</span>
+                    <input type="text" id="firmware-wifi-static-ip" placeholder="留空使用 DHCP" autocomplete="off" />
+                  </label>
+
+                  <label id="firmware-wifi-gateway-label">
+                    <span>网关</span>
+                    <input type="text" id="firmware-wifi-gateway" placeholder="192.168.1.1" autocomplete="off" />
+                  </label>
+
+                  <label id="firmware-wifi-subnet-label">
+                    <span>子网掩码</span>
+                    <input type="text" id="firmware-wifi-subnet" placeholder="255.255.255.0" autocomplete="off" />
+                  </label>
+                </div>
+              </div>
             </div>
 
             <p class="hint" id="firmware-platformio-hint">正在检测 PlatformIO...</p>
             <p class="hint" id="firmware-env-hint">选择目标开发板后，这里会显示对应说明。</p>
-            <p class="hint hidden" id="firmware-wifi-hint">S2 Mini 需要填写 WiFi 凭证才能自动连接网络。SSID 和密码会在编译时写入固件。</p>
+            <p class="hint hidden" id="firmware-wifi-hint">S2 Mini 需要填写 WiFi 凭证才能自动连接网络。SSID 和密码会在编译时写入固件。留空静态 IP 则走 DHCP 自动获取。</p>
 
             <div class="mono-note-box firmware-web-flasher-card">
               <div class="panel-head compact">
@@ -796,9 +816,7 @@
               <label id="controller-wifi-host-label" class="hidden">
                 <span>WiFi 地址</span>
                 <select id="controller-wifi-host-select">
-                  <option value="friendmaker.local">friendmaker.local (mDNS)</option>
-                  <option value="192.168.1.200">192.168.1.200 (静态 IP)</option>
-                </select>
+                  </select>
               </label>
 
               <label>
@@ -1101,9 +1119,7 @@
               <label id="timing-wifi-host-label" class="hidden">
                 <span>WiFi 地址</span>
                 <select id="timing-wifi-host-select">
-                  <option value="friendmaker.local">friendmaker.local (mDNS)</option>
-                  <option value="192.168.1.200">192.168.1.200 (静态 IP)</option>
-                </select>
+                  </select>
               </label>
 
               <label>

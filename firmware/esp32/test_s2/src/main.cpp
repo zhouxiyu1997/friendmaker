@@ -146,13 +146,17 @@ void startWiFiConnect() {
     wifiState = WiFiState::Connecting;
     wifiConnectStartMs = millis();
     IPAddress localIp, gateway, subnet;
-    if (localIp.fromString(WIFI_STATIC_IP) && gateway.fromString(WIFI_GATEWAY) && subnet.fromString(WIFI_SUBNET)) {
-        WiFi.config(localIp, gateway, subnet);
+    if (strlen(WIFI_STATIC_IP) > 0) {
+        if (localIp.fromString(WIFI_STATIC_IP) && gateway.fromString(WIFI_GATEWAY) && subnet.fromString(WIFI_SUBNET)) {
+            WiFi.config(localIp, gateway, subnet);
+        }
+        addLog("WiFi connecting (static ip=%s)", WIFI_STATIC_IP);
+    } else {
+        addLog("WiFi connecting (DHCP)");
     }
     WiFi.setSleep(false); WiFi.setAutoReconnect(true); WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    addLog("WiFi connecting (ip=%s)", WIFI_STATIC_IP);
 }
 
 void stopMdns() { if (mdnsStarted) { MDNS.end(); mdnsStarted = false; } }

@@ -236,6 +236,9 @@ const state = {
     environmentId: "esp32dev_wireless",
     wifiSsid: "",
     wifiPassword: "",
+    wifiStaticIp: "",
+    wifiGateway: "",
+    wifiSubnet: "",
     flash: {
       status: "idle",
       lines: [],
@@ -428,6 +431,13 @@ const els = {
   firmwareWifiPassword: document.getElementById("firmware-wifi-password"),
   firmwareWifiPasswordToggle: document.getElementById("firmware-wifi-password-toggle"),
   firmwareWifiHint: document.getElementById("firmware-wifi-hint"),
+  firmwareWifiAdvanced: document.getElementById("firmware-wifi-advanced"),
+  firmwareWifiAdvancedToggle: document.getElementById("firmware-wifi-advanced-toggle"),
+  firmwareWifiAdvancedArrow: document.getElementById("firmware-wifi-advanced-arrow"),
+  firmwareWifiAdvancedBody: document.getElementById("firmware-wifi-advanced-body"),
+  firmwareWifiStaticIp: document.getElementById("firmware-wifi-static-ip"),
+  firmwareWifiGateway: document.getElementById("firmware-wifi-gateway"),
+  firmwareWifiSubnet: document.getElementById("firmware-wifi-subnet"),
   windowsDriverPanel: document.getElementById("windows-driver-panel"),
   windowsDriverHint: document.getElementById("windows-driver-hint"),
   firmwareOpenControllerButton: document.getElementById("firmware-open-controller-button"),
@@ -1250,6 +1260,25 @@ els.firmwareWifiPasswordToggle.addEventListener("click", () => {
   els.firmwareWifiPasswordToggle.textContent = isPassword ? "🙈" : "👁";
 });
 
+els.firmwareWifiAdvancedToggle.addEventListener("click", () => {
+  const isOpen = !els.firmwareWifiAdvancedBody.classList.contains("hidden");
+  els.firmwareWifiAdvancedBody.classList.toggle("hidden", isOpen);
+  els.firmwareWifiAdvancedArrow.textContent = isOpen ? "▶" : "▼";
+});
+
+els.firmwareWifiStaticIp.addEventListener("input", () => {
+  state.firmware.wifiStaticIp = els.firmwareWifiStaticIp.value;
+  syncWifiHostSelects();
+});
+
+els.firmwareWifiGateway.addEventListener("input", () => {
+  state.firmware.wifiGateway = els.firmwareWifiGateway.value;
+});
+
+els.firmwareWifiSubnet.addEventListener("input", () => {
+  state.firmware.wifiSubnet = els.firmwareWifiSubnet.value;
+});
+
 els.refreshPortsButton.addEventListener("click", async () => {
   await refreshPorts({
     log: (message) => appendLog(els.studioLogOutput, message),
@@ -1999,6 +2028,9 @@ async function startFirmwareFlash() {
     if (state.firmware.environmentId === "lolin_s2_mini") {
       flashBody.wifiSsid = state.firmware.wifiSsid;
       flashBody.wifiPassword = state.firmware.wifiPassword;
+      flashBody.wifiStaticIp = state.firmware.wifiStaticIp;
+      flashBody.wifiGateway = state.firmware.wifiGateway;
+      flashBody.wifiSubnet = state.firmware.wifiSubnet;
     }
     const response = await fetch("/api/firmware/flash", {
       method: "POST",
@@ -3997,6 +4029,10 @@ function syncFirmwareUi() {
   els.firmwareWifiSsid.disabled = state.firmware.busy;
   els.firmwareWifiPassword.disabled = state.firmware.busy;
   els.firmwareWifiPasswordToggle.disabled = state.firmware.busy;
+  els.firmwareWifiAdvanced.classList.toggle("hidden", !isS2Mini || state.firmware.busy);
+  els.firmwareWifiStaticIp.disabled = state.firmware.busy;
+  els.firmwareWifiGateway.disabled = state.firmware.busy;
+  els.firmwareWifiSubnet.disabled = state.firmware.busy;
 
   syncWindowsSerialDriverUi();
 
@@ -4640,12 +4676,50 @@ function renderPortSelects() {
   syncDesktopShellUi();
 }
 
+function syncWifiHostSelects() {
+  const selects = [els.studioWifiHostSelect, els.controllerWifiHostSelect, els.timingWifiHostSelect];
+  const staticIp = state.firmware.wifiStaticIp.trim();
+
+  selects.forEach((select) => {
+    if (!select) return;
+    const currentValue = select.value;
+    select.replaceChildren();
+
+    const mdsnOption = document.createElement("option");
+    mdsnOption.value = "friendmaker.local";
+    mdsnOption.textContent = "friendmaker.local (mDNS)";
+    select.appendChild(mdsnOption);
+
+    if (staticIp) {
+      const ipOption = document.createElement("option");
+      ipOption.value = staticIp;
+      ipOption.textContent = `${staticIp} (静态 IP)`;
+      select.appendChild(ipOption);
+    }
+
+    select.value = currentValue && [...select.options].some((o) => o.value === currentValue)
+      ? currentValue
+      : "friendmaker.local";
+  });
+
+  if (!isWifiHostValid(state.wifiHost)) {
+    state.wifiHost = "friendmaker.local";
+  }
+}
+
+function isWifiHostValid(host) {
+  const staticIp = state.firmware.wifiStaticIp.trim();
+  return host === "friendmaker.local" || (staticIp && host === staticIp);
+}
+
 function syncTransport() {
   const isWifi = state.transport === "wifi";
   const serialLabels = [els.studioSerialPortLabel, els.controllerSerialPortLabel, els.timingSerialPortLabel];
   const wifiLabels = [els.studioWifiHostLabel, els.controllerWifiHostLabel, els.timingWifiHostLabel];
   serialLabels.forEach((el) => { if (el) el.classList.toggle("hidden", isWifi); });
   wifiLabels.forEach((el) => { if (el) el.classList.toggle("hidden", !isWifi); });
+
+  syncWifiHostSelects();
 
   const wifiHost = state.wifiHost;
   const wifiSelects = [els.studioWifiHostSelect, els.controllerWifiHostSelect, els.timingWifiHostSelect];

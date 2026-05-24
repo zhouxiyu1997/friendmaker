@@ -408,8 +408,12 @@ export async function discoverDevice(mdnsHost: string, fallbackIp: string): Prom
   return { host: fallbackIp, port: 9876 };
 }
 
-export function listDeviceHosts(): string[] {
-  return ["friendmaker.local", "192.168.1.200"];
+export function listDeviceHosts(staticIp?: string): string[] {
+  const hosts = ["friendmaker.local"] as string[];
+  if (staticIp) {
+    hosts.push(staticIp);
+  }
+  return hosts;
 }
 
 /**

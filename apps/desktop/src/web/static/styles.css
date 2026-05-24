@@ -834,6 +834,40 @@ input[type="password"] {
   line-height: 1;
 }
 
+.firmware-advanced-section {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.advanced-toggle {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: 1px dashed var(--divider);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.advanced-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.advanced-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--neutral);
+}
+
 textarea {
   resize: vertical;
   padding: 9px;

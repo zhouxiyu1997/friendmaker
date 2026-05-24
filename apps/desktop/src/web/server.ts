@@ -768,12 +768,18 @@ function resolveFirmwareUploadEnvironment(
       if (environmentId === "esp32dev_wireless") {
         return SWITCH_2_UPLOAD_ENVIRONMENT_ID;
       }
-      throw new Error("Switch 2 目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
+      if (environmentId === "lolin_s2_mini") {
+        return environmentId;
+      }
+      throw new Error("Switch 2 固件目前仅支持 ESP32-WROOM-32 / ESP-32S 或 Lolin S2 Mini 硬件环境。");
     case "switch_lite":
       if (environmentId === "esp32dev_wireless") {
         return SWITCH_LITE_UPLOAD_ENVIRONMENT_ID;
       }
-      throw new Error("Switch1 和 Lite 固件目前仅支持 ESP32-WROOM-32 / ESP-32S 硬件环境。");
+      if (environmentId === "lolin_s2_mini") {
+        return environmentId;
+      }
+      throw new Error("Switch1 和 Lite 固件目前仅支持 ESP32-WROOM-32 / ESP-32S 或 Lolin S2 Mini 硬件环境。");
   }
 
   return environmentId;
@@ -799,6 +805,9 @@ class FirmwareFlashManager {
   private stopReason: string | null = null;
   private wifiSsid: string | null = null;
   private wifiPassword: string | null = null;
+  private wifiStaticIp: string | null = null;
+  private wifiGateway: string | null = null;
+  private wifiSubnet: string | null = null;
 
   getStatus(): FirmwareFlashSnapshot {
     return {
@@ -812,6 +821,9 @@ class FirmwareFlashManager {
     portPath: string;
     wifiSsid?: string;
     wifiPassword?: string;
+    wifiStaticIp?: string;
+    wifiGateway?: string;
+    wifiSubnet?: string;
   }): Promise<FirmwareFlashSnapshot> {
     if (this.state.status === "running") {
       throw new Error("A firmware flash is already running.");
@@ -826,6 +838,9 @@ class FirmwareFlashManager {
 
     this.wifiSsid = options.wifiSsid?.trim() || null;
     this.wifiPassword = options.wifiPassword?.trim() || null;
+    this.wifiStaticIp = options.wifiStaticIp?.trim() || null;
+    this.wifiGateway = options.wifiGateway?.trim() || null;
+    this.wifiSubnet = options.wifiSubnet?.trim() || null;
 
     this.state = {
       ...createIdleFirmwareFlashState(),
@@ -842,7 +857,8 @@ class FirmwareFlashManager {
     this.appendLine(`INFO selected upload port=${selectedPortPath}`);
     this.appendLine(`INFO flash timeout=${formatDuration(FIRMWARE_FLASH_TIMEOUT_MS)}`);
     if (this.wifiSsid) {
-      this.appendLine(`INFO wifi ssid=${this.wifiSsid} password=***`);
+      const mode = this.wifiStaticIp ? `static=${this.wifiStaticIp}` : "DHCP";
+      this.appendLine(`INFO wifi ssid=${this.wifiSsid} mode=${mode} password=***`);
     }
     if (session.connected) {
       this.appendLine(
@@ -1052,8 +1068,24 @@ class FirmwareFlashManager {
     if (this.wifiSsid && this.wifiPassword) {
       const escapedSsid = this.wifiSsid.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const escapedPassword = this.wifiPassword.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      platformIoEnv.PLATFORMIO_BUILD_FLAGS =
-        `-DWIFI_SSID="${escapedSsid}" -DWIFI_PASSWORD="${escapedPassword}"`;
+      const flags = [`-DWIFI_SSID="${escapedSsid}"`, `-DWIFI_PASSWORD="${escapedPassword}"`];
+
+      if (this.wifiStaticIp) {
+        const escapedIp = this.wifiStaticIp.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        flags.push(`-DWIFI_STATIC_IP="${escapedIp}"`);
+
+        if (this.wifiGateway) {
+          const escapedGw = this.wifiGateway.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          flags.push(`-DWIFI_GATEWAY="${escapedGw}"`);
+        }
+
+        if (this.wifiSubnet) {
+          const escapedSn = this.wifiSubnet.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          flags.push(`-DWIFI_SUBNET="${escapedSn}"`);
+        }
+      }
+
+      platformIoEnv.PLATFORMIO_BUILD_FLAGS = flags.join(" ");
       this.appendLine(`INFO injected wifi build flags into PlatformIO environment`);
     }
 
@@ -1984,6 +2016,9 @@ async function handleFirmwareFlash(
     portPath?: string;
     wifiSsid?: string;
     wifiPassword?: string;
+    wifiStaticIp?: string;
+    wifiGateway?: string;
+    wifiSubnet?: string;
   };
 
   try {
@@ -2008,6 +2043,9 @@ async function handleFirmwareFlash(
         portPath: body.portPath,
         ...(body.wifiSsid ? { wifiSsid: body.wifiSsid } : {}),
         ...(body.wifiPassword ? { wifiPassword: body.wifiPassword } : {}),
+        ...(body.wifiStaticIp ? { wifiStaticIp: body.wifiStaticIp } : {}),
+        ...(body.wifiGateway ? { wifiGateway: body.wifiGateway } : {}),
+        ...(body.wifiSubnet ? { wifiSubnet: body.wifiSubnet } : {}),
       }),
       session: serialSessionManager.snapshot(),
     });
