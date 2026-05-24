@@ -15,8 +15,8 @@ void setHat(uint8_t hat);
 void sendReport();
 
 enum {
-    BTN_B       = 0,  BTN_A       = 1,
-    BTN_Y       = 2,  BTN_X       = 3,
+    BTN_Y       = 0,  BTN_B       = 1,
+    BTN_A       = 2,  BTN_X       = 3,
     BTN_L       = 4,  BTN_R       = 5,
     BTN_ZL      = 6,  BTN_ZR      = 7,
     BTN_MINUS   = 8,  BTN_PLUS    = 9,
