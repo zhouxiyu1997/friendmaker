@@ -142,42 +142,41 @@ public:
 
 **规模预估**：500-800 行（对比蓝牙版的 1885 行）
 
+**当前 test_s2 原型已实现**：[usb_hid.h](file:///d:/Dev/friendmaker/firmware/esp32/test_s2/src/usb_hid.h) / [usb_hid.cpp](file:///d:/Dev/friendmaker/firmware/esp32/test_s2/src/usb_hid.cpp)
+
 **实现要点**：
 
 | 接口方法 | USB HID 实现 |
 |---------|-------------|
 | `begin()` | TinyUSB 初始化、HID 设备注册、USB 连接等待 |
-| `pressButtons(mask, holdMs, settleMs)` | 设置 HID report 按钮位、发送、等待 settle |
+| `pressButtons(mask, holdMs, settleMs)` | 设置 HID report 按钮/摇杆位、发送、等待 settle |
 | `moveDirection(x, y, holdMs, settleMs)` | 设置 D-pad hat switch 值、发送 |
 | `resetConnection(reconnect)` | USB 重新枚举或重置 HID 状态 |
 | `clearStoredPeer()` | USB 无"配对"概念，空操作 |
 | `printStatus()` | 打印 USB 连接状态 |
 | `name()` | 返回 `"usb-hid"` |
 
-**关键数据**：
+**实际使用的 USB 描述符**（已验证通过）：
 
 ```
-HID report 长度:    48 字节 (与蓝牙版 report30_ 结构一致，可直接复用)
-HID report 速率:    无需 FreeRTOS sendTask，USB IN endpoint 由 TinyUSB 轮询驱动
-摇杆值:             128=中性, 0=上/左, 255=下/右 (与蓝牙版一致)
+设备描述符: bDeviceClass=0x00, idVendor=0x0F0D, idProduct=0x00C1
+           "HORI CO.,LTD." / "HORIPAD S"
+配置描述符: TUD_CONFIG_DESCRIPTOR + TUD_HID_DESCRIPTOR (纯 HID, 无 IAD)
+           EP 0x81 IN, 64 bytes, interval=1
+HID 描述符: 标准 HID Gamepad
+           14 buttons (report count=14, size=1, usage page=Button)
+           HAT switch (report count=1, size=4, usage=Hat Switch)
+           4 axes X/Y/Z/Rz (report count=4, size=8, logical min=0 max=255)
+报告格式:   8 字节 (无 report ID)
+           [0]=buttons_lo [1]=buttons_hi+hat_nibble
+           [2]=lx [3]=ly [4]=rx [5]=ry [6]=pad [7]=pad
 ```
 
 **TinyUSB 配置要点**：
 
-- 需要 `TinyUSB` 和 `Adafruit TinyUSB Library`（PlatformIO 内置）
-- Switch Pro Controller 的 USB HID 描述符需要精确匹配：
-  - Vendor ID: `0x0F0D` (Hori — 有线的通用兼容 ID)
-  - Product ID: `0x0092`
-  - 接口协议: HID
-- HID report descriptor 可复用蓝牙版本的描述符（114 字节的 `kHidDescriptor[]`），仅需微调
-
-**风险点**：
-
-```
-⚠️ Nintendo Switch 对 USB HID 有严格的 VID/PID 和描述符校验
-⚠️ 某些 Switch 系统版本可能限制第三方 USB 手柄
-⚠️ 有线 HID 需要 Switch 底座 (Dock) 的 USB-A 口
-```
+- 使用自定义 `sdkconfig.lolin_s2_mini` 禁用所有接口除 HID 外
+- **关键修复**：覆盖 `tud_descriptor_device_cb()` / `tud_descriptor_configuration_cb()` / `tud_descriptor_string_cb()` 绕过 Arduino 框架的 IAD 复合设备标记
+- 参考项目：[esp32-circuitpython-switch-joystick](https://github.com/radiantwf/esp32-circuitpython-switch-joystick) — 同款 LOLIN S2 Mini + HORIPAD S 配置
 
 ### 4.2 改造：`main.cpp` — 通信层
 
@@ -251,17 +250,25 @@ constexpr char CONTROL_TRANSPORT[] = "usb-hid-wifi";
 
 **废弃**：`esp32dev_wireless_base` 及其三个继承环境
 
-**新建**：
+**实际配置**（[platformio.ini](file:///d:/Dev/friendmaker/firmware/esp32/test_s2/platformio.ini)）：
 
 ```ini
 [env:lolin_s2_mini]
 board = lolin_s2_mini
 framework = arduino
-monitor_speed = 115200
+board_build.esp-idf.sdkconfig_path = sdkconfig.lolin_s2_mini
 board_upload.flash_size = 4MB
 build_flags =
-  -DSWITCH_AUTO_DRAW_USE_USB_HID=1
+  -DUSB_VID=0x0F0D
+  -DUSB_PID=0x00C1
+  -DUSB_MANUFACTURER="\"HORI CO.,LTD.\""
+  -DUSB_PRODUCT="\"HORIPAD S\""
 ```
+
+**自定义 sdkconfig**（[sdkconfig.lolin_s2_mini](file:///d:/Dev/friendmaker/firmware/esp32/test_s2/sdkconfig.lolin_s2_mini)）：
+- `CONFIG_TINYUSB_HID_ENABLED=y` — 仅启用 HID
+- `CDC/MSC/MIDI/VIDEO/DFU/VENDOR` — 全部禁用 (`# ... is not set`)
+- `CONFIG_TINYUSB_DESC_HID_STRING="Pro Controller"`
 
 ### 4.5 桌面端改造
 
@@ -344,9 +351,10 @@ socket.create_connection(("192.168.1.200", 9876))
 
 | 风险 | 等级 | 缓解措施 |
 |------|:--:|---------|
-| **Switch USB HID 兼容性** | 🔴 高 | 先做 USB HID 兼容性验证测试 (能否被 Switch 识别为 Pro Controller)，这是前提 |
+| **Switch USB HID 兼容性** | 🟢 低 (已解决) | HORIPAD S (0x0F0D/0x00C1) + 纯 HID 描述符 (无 IAD) — Switch 2 实测通过 |
 | **WiFi 延迟抖动** | 🟡 中 | TCP 保证可靠传输，命令缓冲削峰；实际延迟 <5ms (局域网) 优于蓝牙 16ms 间隔 |
-| **USB 供电** | 🟡 中 | 通过底座 USB 供电；独立供电的 OTG 线备选 |
+| **USB 供电** | 🟢 低 (已解决) | Switch 2 USB-C 口直接供电；静态 IP + mDNS 确保拔插后自动恢复连接 |
+| **右摇杆漂移** | 🟡 中 | 连接后短暂右摇杆推上，通过 TCP 发归中指令可临时解决，待修复 `init()` 预填值 |
 | **WiFi 配置复杂性** | 🟢 低 | SmartConfig + NVS 持久化，配网一次永久生效 |
 | **ESP32-S2 单核瓶颈** | 🟢 低 | USB HID 由 TinyUSB 硬件驱动，WiFi 由 LWIP 异步处理，不竞争 CPU |
 | **Flash 空间** | 🟢 低 | 蓝牙栈约 400KB 被移除，TinyUSB 约 50KB，WiFi 已有 ~50KB，净释放 ~300KB |
@@ -481,10 +489,11 @@ TCP: 开发板-IP:9876
 
 | 维度 | 评估 |
 |------|------|
-| **可行性** | ✅ 完全可行，硬件已验证 |
-| **核心新增** | `usb_hid_controller_transport.cpp` (~600行) + WiFi 初始化 (~150行) + 桌面端 `wifi/sender.ts` (~400行) |
-| **代码库改动量** | 固件新增 ~750行 / 改动 ~150行；桌面端新增 ~400行 / 改动 ~100行 |
-| **可删除的代码** | `classic_bt_controller_transport.cpp` (1885行) 不再需要链接；三个 Switch 型号变体宏全部移除 |
+| **可行性** | ✅ 已验证通过 — Switch 2 成功识别 ESP32-S2 为 HORIPAD S USB 手柄 |
+| **核心突破** | 覆盖 TinyUSB 描述符回调绕过 Arduino IAD 限制 (`bDeviceClass=0xEF→0x00`) |
+| **新增文件** | `test_s2/src/usb_hid.cpp/.h` (HID 传输层, ~170行) + `test_s2/src/main.cpp` (WiFi+命令引擎, ~325行) + `test_s2/sdkconfig.lolin_s2_mini` (纯 HID 配置) |
+| **已删除** | CDC/MSC/MIDI/VIDEO/DFU/VENDOR — 通过自定义 sdkconfig 全部禁用 |
 | **不变代码** | `protocol.cpp`, `controller.cpp`, `config.h`(大部分), `scanline.ts`, `sequencing.ts`, `recovery.ts`, 所有 profile JSON |
-| **最大风险** | Switch 能否识别 USB HID 作为 Pro Controller（阶段 1 即可验证） |
-| **预计总工时** | 阶段 1: 半天 | 阶段 2: 1天 | 阶段 3: 1天 | 阶段 4: 1天 |
+| **已验证** | 14 按钮 + D-pad 4方向 + 左右摇杆 4方向 + HOME/CAPTURE/MINUS/PLUS 功能键 ✅ |
+| **待修复** | 右摇杆初始漂移 (连接后 ~128ms 推上) |
+| **下一步** | 1) 修复右摇杆漂移 2) 接入 `protocol.cpp` SEQ 帧格式 3) 桌面端 `wifi/sender.ts` 4) 整合为主线固件 |
