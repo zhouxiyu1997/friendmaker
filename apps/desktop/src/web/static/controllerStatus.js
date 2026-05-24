@@ -114,6 +114,8 @@ export function deriveControllerStatus(lines) {
     return null;
   }
 
+  const isUsbHidTransport = info.transport === "usb-hid";
+
   const discoverable = boolFromInfo(info.bt_discoverable);
   const authComplete = boolFromInfo(info.bt_auth_complete);
   const connected = boolFromInfo(info.bt_connected);
@@ -135,7 +137,7 @@ export function deriveControllerStatus(lines) {
     congestedSendReport &&
     sendReportFailureCount >= 10;
   const readyInferredFromPairing = rawReady !== true && connected === true && paired === true && !unstableInferredReady;
-  const ready = rawReady === true || readyInferredFromPairing;
+  const ready = isUsbHidTransport ? true : (rawReady === true || readyInferredFromPairing);
   const initError = info.bt_init_error ?? "-";
 
   let tone = "idle";
@@ -143,7 +145,12 @@ export function deriveControllerStatus(lines) {
   let title = "等待连接手柄";
   let detail = "当前还没有拿到可用的蓝牙连接状态。";
 
-  if (ready === true) {
+  if (isUsbHidTransport) {
+    tone = "success";
+    pill = "已就绪";
+    title = "USB HID 手柄已连接";
+    detail = "ESP32-S2 通过 USB HID 直连 Switch 2，可以继续做手柄测试和开始绘制。";
+  } else if (ready === true) {
     tone = "success";
     pill = "已就绪";
     title = "手柄已连接";

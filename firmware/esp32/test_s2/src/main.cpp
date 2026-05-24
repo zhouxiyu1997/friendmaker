@@ -387,6 +387,10 @@ void handleRawCommand(const String &line) {
 
   const unsigned long t0 = millis();
   String error;
+  if (line == "I") {
+    tcpClient.printf("INFO transport=%s\n", controller.transportName());
+    tcpClient.println("INFO usb-hid transport active");
+  }
   const bool ok = executeCommand(line, controller, error);
   const unsigned long t1 = millis();
 
@@ -438,6 +442,10 @@ void handleSeqCommand(const String &line) {
 
   const unsigned long t0 = millis();
   String error;
+  if (frame.command == "I") {
+    tcpClient.printf("INFO transport=%s\n", controller.transportName());
+    tcpClient.println("INFO usb-hid transport active");
+  }
   const bool ok = executeCommand(frame.command, controller, error);
   const unsigned long t1 = millis();
 

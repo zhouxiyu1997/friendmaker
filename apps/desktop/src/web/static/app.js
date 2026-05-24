@@ -2705,12 +2705,15 @@ function normalizePageName(pageName) {
 
 function syncDesktopShellUi() {
   const copy = PAGE_UI_COPY[state.activePage] ?? PAGE_UI_COPY.studio;
-  const selectedPortLabel = state.selectedPortPath || "未选择";
-  const portStatus = state.serialSession.connected
-    ? `串口已连接：${selectedPortLabel}`
-    : `串口：${selectedPortLabel}`;
-  const hasSelectedPort = Boolean(state.selectedPortPath);
-  const controllerReady = isControllerReadyForStudio();
+  const isWifi = state.transport === "wifi";
+  const selectedPortLabel = isWifi ? state.wifiHost : (state.selectedPortPath || "未选择");
+  const portStatus = isWifi
+    ? (state.tcpSession.connected ? `WiFi 已连接：${selectedPortLabel}` : `WiFi：${selectedPortLabel}`)
+    : (state.serialSession.connected
+        ? `串口已连接：${selectedPortLabel}`
+        : `串口：${selectedPortLabel}`);
+  const hasSelectedPort = isWifi ? state.tcpSession.connected : Boolean(state.selectedPortPath);
+  const controllerReady = isWifi ? state.tcpSession.connected : isControllerReadyForStudio();
   const controllerStatus = controllerReady
     ? "手柄：已就绪"
     : `手柄：${state.controller.status.title || "待连接"}`;
@@ -3332,6 +3335,14 @@ function shouldPreferLastPeerResetOnAutoRecovery(status = state.controller.statu
 async function handleControllerStatusPollTimeout() {
   stopControllerStatusPolling();
 
+  if (state.transport === "wifi") {
+    appendLog(
+      els.controllerLogOutput,
+      "WiFi 连接状态轮询超时。请检查 S2 Mini 是否已连接并等待 LED 常亮，然后重新点击'连接手柄'。",
+    );
+    return;
+  }
+
   if (
     isControllerConnectionStillInProgress() &&
     !controllerStatusTimeoutRecoveryAttempted
@@ -3506,13 +3517,15 @@ async function pollControllerStatus() {
 }
 
 function startControllerStatusPolling(durationMs = CONTROLLER_STATUS_POLL_WINDOW_MS) {
-  if (!state.selectedPortPath) {
+  if (state.transport === "serial" && !state.selectedPortPath) {
     return;
   }
 
+  const effectiveDuration = state.transport === "wifi" ? Math.max(durationMs, 5 * 60 * 1000) : durationMs;
+
   controllerStatusPollDeadlineMs = Math.max(
     controllerStatusPollDeadlineMs,
-    Date.now() + durationMs,
+    Date.now() + effectiveDuration,
   );
 
   if (!controllerStatusPollTimer) {
@@ -3550,7 +3563,8 @@ function renderStudioConnectionStatus() {
     tone = "success";
     pill = "已连接";
     title = "手柄已连接，可以开始绘制";
-    detail = `当前开发板已经处于可发送状态，可以把绘制脚本发到 ${state.selectedPortPath || "串口设备"}。`;
+    const hostLabel = state.transport === "wifi" ? state.wifiHost : (state.selectedPortPath || "串口设备");
+    detail = `当前开发板已经处于可发送状态，可以把绘制脚本发到 ${hostLabel}。`;
   } else {
     tone = "warning";
     pill = "需要测试";
@@ -3711,8 +3725,9 @@ function syncStudioColorCountOptions() {
 }
 
 function syncStudioUi() {
-  const hasPort = Boolean(state.selectedPortPath);
-  const controllerReady = isControllerReadyForStudio();
+  const isWifi = state.transport === "wifi";
+  const hasPort = isWifi ? state.tcpSession.connected : Boolean(state.selectedPortPath);
+  const controllerReady = isWifi ? state.tcpSession.connected : isControllerReadyForStudio();
   const hasImage = Boolean(state.imageDataUrl);
   const executionActive = isStudioExecutionActive();
   const executionPaused = state.studio.execution.status === "paused";
@@ -4048,11 +4063,12 @@ function renderTimingBenchmarkResult() {
 }
 
 function syncTimingLabUi() {
-  const hasPort = Boolean(state.selectedPortPath);
-  const controllerReady = isControllerReadyForStudio();
+  const isWifi = state.transport === "wifi";
+  const hasPort = isWifi ? state.tcpSession.connected : Boolean(state.selectedPortPath);
+  const controllerReady = isWifi ? state.tcpSession.connected : isControllerReadyForStudio();
   const executionActive = isStudioExecutionActive();
   const inputTiming = state.sharedTiming;
-  const disabled = state.timingLab.busy || executionActive || state.serialSession.busy;
+  const disabled = state.timingLab.busy || executionActive || state.serialSession.busy || (isWifi && state.tcpSession.busy);
 
   state.timingLab.quickStep =
     state.timingLab.quickStep === 3 || state.timingLab.quickStep === 5 ? state.timingLab.quickStep : 1;
