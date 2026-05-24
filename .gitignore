@@ -7,3 +7,5 @@ coverage
 tmp
 *.tsbuildinfo
 firmware/esp32/.pio/
+firmware/esp32/test_s2/src/wifi_credentials.h
+wifi_access.md
