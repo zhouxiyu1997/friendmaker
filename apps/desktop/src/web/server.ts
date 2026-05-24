@@ -913,6 +913,10 @@ class FirmwareFlashManager {
       this.appendLine(`INFO PlatformIO=${platformIoPath}`);
       const firmwareRoot = await refreshFirmwareRootForFlash();
       this.appendLine(`INFO firmware root=${firmwareRoot}`);
+      const firmwareWorkDir =
+        environment.id === "lolin_s2_mini"
+          ? path.join(firmwareRoot, "test_s2")
+          : firmwareRoot;
 
       if (this.cancelRequested) {
         throw markLogged(new Error(this.stopReason ?? "Firmware flash cancelled by user."));
@@ -938,7 +942,7 @@ class FirmwareFlashManager {
         onLine: (line) => this.appendLine(line),
       });
       if (compatibility.targets.length > 0 && compatibility.repaired > 0) {
-        await this.clearBuildArtifacts(firmwareRoot);
+        await this.clearBuildArtifacts(firmwareWorkDir);
       }
 
       try {
@@ -953,7 +957,7 @@ class FirmwareFlashManager {
         if (
           await this.retryAfterManagedPlatformIoRepair(error, {
             environmentId: environment.id,
-            firmwareRoot,
+            firmwareRoot: firmwareWorkDir,
             platformIoPath,
             selectedPortPath,
           })
@@ -966,7 +970,46 @@ class FirmwareFlashManager {
         if (!isUploadPortFailure(message)) {
           throw error;
         }
-        throw new Error(formatSelectedUploadPortFailureMessage(selectedPortPath, message));
+
+        const untriedPorts = detectedPortPaths.filter(
+          (port) => port !== selectedPortPath,
+        );
+        if (untriedPorts.length === 0) {
+          throw new Error(formatSelectedUploadPortFailureMessage(selectedPortPath, message));
+        }
+
+        this.appendLine(`WARN upload failed on ${selectedPortPath}, trying remaining ports: ${untriedPorts.join(", ")}`);
+
+        for (const altPort of untriedPorts) {
+          if (this.cancelRequested) {
+            throw error;
+          }
+
+          this.state.uploadPortPath = altPort;
+          this.appendLine(`INFO retrying upload on port ${altPort}`);
+
+          try {
+            await this.runPlatformIoUpload(environment.id, altPort);
+            this.finish("completed", null);
+            return;
+          } catch (altError) {
+            if (this.cancelRequested) {
+              throw altError;
+            }
+
+            const altMessage = altError instanceof Error ? altError.message : String(altError);
+            if (!isUploadPortFailure(altMessage)) {
+              throw altError;
+            }
+
+            this.appendLine(`WARN upload also failed on ${altPort}`);
+          }
+        }
+
+        const triedPorts = [selectedPortPath, ...untriedPorts];
+        throw new Error(
+          `Upload failed on all tried ports (${triedPorts.join(", ")}). ${message}. Check USB cable, board connection, and download mode.`,
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1065,23 +1108,28 @@ class FirmwareFlashManager {
     ];
     const platformIoEnv = await webRuntime.toolingManager.getPlatformIoEnv();
 
+    const pioCwd =
+      environmentId === "lolin_s2_mini"
+        ? path.join(webRuntime.firmwareRoot, "test_s2")
+        : webRuntime.firmwareRoot;
+
     if (this.wifiSsid && this.wifiPassword) {
       const escapedSsid = this.wifiSsid.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const escapedPassword = this.wifiPassword.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      const flags = [`-DWIFI_SSID="${escapedSsid}"`, `-DWIFI_PASSWORD="${escapedPassword}"`];
+      const flags = [`-DWIFI_SSID=\\"${escapedSsid}\\"`, `-DWIFI_PASSWORD=\\"${escapedPassword}\\"`];
 
       if (this.wifiStaticIp) {
         const escapedIp = this.wifiStaticIp.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        flags.push(`-DWIFI_STATIC_IP="${escapedIp}"`);
+        flags.push(`-DWIFI_STATIC_IP=\\"${escapedIp}\\"`);
 
         if (this.wifiGateway) {
           const escapedGw = this.wifiGateway.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-          flags.push(`-DWIFI_GATEWAY="${escapedGw}"`);
+          flags.push(`-DWIFI_GATEWAY=\\"${escapedGw}\\"`);
         }
 
         if (this.wifiSubnet) {
           const escapedSn = this.wifiSubnet.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-          flags.push(`-DWIFI_SUBNET="${escapedSn}"`);
+          flags.push(`-DWIFI_SUBNET=\\"${escapedSn}\\"`);
         }
       }
 
@@ -1094,11 +1142,12 @@ class FirmwareFlashManager {
         ? `INFO trying explicit upload port ${uploadPortPath}`
         : "INFO trying PlatformIO auto-detect for the upload port",
     );
+    this.appendLine(`INFO pio cwd=${pioCwd}`);
     this.appendLine(`$ ${platformIoPath} ${args.join(" ")}`);
 
     await new Promise<void>((resolve, reject) => {
       const child = spawn(platformIoPath, args, {
-        cwd: webRuntime.firmwareRoot,
+        cwd: pioCwd,
         env: platformIoEnv,
       });
       this.child = child;

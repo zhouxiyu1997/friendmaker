@@ -124,23 +124,23 @@ npm run dev -- --image ./examples/demo.svg --port <your-serial-port> --send
 
 ### 8.1 烧录固件
 
+推荐方式：打开桌面端 → 刷入固件页，选择 `Lolin S2 Mini (USB HID)` 和目标 Switch 型号，填写 WiFi SSID 和密码（DHCP 模式无需额外设置），然后点击"编译并刷入固件"。紧急备用：
+
 ```bash
 cd firmware/esp32/test_s2
-# 先配置 wifi_credentials.h 中的 SSID 和密码
-python -m platformio run -t upload --upload-port COM3
+pio run -t upload --upload-port COM3
 ```
 
 如果自动下载失败，按住 S2 Mini 的 **BOOT 键**再插 PC USB，然后重新执行。
 
 ### 8.2 确认启动日志
 
-烧录后拔下 S2 Mini，插入 Switch 2 USB-C，等待约 25 秒直到 LED 常亮。在 PC 上通过 TCP 验证：
+烧录后拔下 S2 Mini，插入 Switch 2 USB-C，等待约 25 秒直到 LED 常亮。在 PC 上通过 TCP 验证（IP 视 DHCP 分配或静态设置而定，默认 mDNS 地址为 `friendmaker.local`）：
 
 ```bash
-# 通过 PowerShell 或 Node.js 建立 TCP 连接
 node -e "
 const net = require('net');
-const c = net.connect(9876, '192.168.1.200', () => {
+const c = net.connect(9876, 'friendmaker.local', () => {
   c.on('data', d => console.log(d.toString().trim()));
   c.write('STATUS\n');
   setTimeout(() => c.end(), 2000);
@@ -151,18 +151,17 @@ const c = net.connect(9876, '192.168.1.200', () => {
 期望输出类似：
 
 ```
-STATUS usb=mount hid_ready=yes tud_ready=yes wifi=ok ip=192.168.1.200 press_ms=65 delay_ms=45
+STATUS usb=mount hid_ready=yes tud_ready=yes wifi=ok ip=192.168.x.x press_ms=65 delay_ms=45
 ```
 
-关键字段：`usb=mount`、`hid_ready=yes`、`wifi=ok`。
+关键字段：`usb=mount`、`hid_ready=yes`、`wifi=ok`。IP 地址由 DHCP 分配（或静态 IP 配置）。
 
 ### 8.3 SEQ 协议冒烟测试
 
 ```bash
-# 使用 wifi/sender.ts 的连接测试
 node -e "
 const net = require('net');
-const c = net.connect(9876, '192.168.1.200', () => {
+const c = net.connect(9876, 'friendmaker.local', () => {
   c.on('data', d => console.log(d.toString().trim()));
   const sid = 'ffee0001';
   ['CFG INPUT 65 45 1800', 'A', 'M 3 0', 'STATUS']

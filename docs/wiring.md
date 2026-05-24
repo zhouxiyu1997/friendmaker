@@ -95,7 +95,8 @@
 | Switch 2 | ✅ 支持 | ✅ 支持 |
 | 配对/断连 | 需要蓝牙配对，偶发断连 | 零配对，USB 直连不断 |
 | 供电 | PC USB 供电，不涉及拔插 | PC 烧录后需拔插到 Switch USB-C |
-| 桌面端连接方式 | 串口选择器 | WiFi 地址下拉（friendmaker.local） |
+| 桌面端连接方式 | 串口选择器 | WiFi 地址下拉（mDNS 自动发现，DHCP 默认） |
+| 网络配置 | 不需要 | 刷入时填写 SSID 和密码（可选静态 IP/网关） |
 
 ## 3. 供电与线材提醒
 
@@ -132,8 +133,10 @@
 
 1. 板子为 `Lolin S2 Mini`
 2. USB 线可传输数据
-3. PC 上可正常烧录（COM3 识别）
-4. 拔插到 Switch 2 USB-C 后 LED 最终常亮
-5. 桌面端选 WiFi transport 后能通过 `friendmaker.local` 建立 TCP 连接
+3. 在刷入固件页选择 `Lolin S2 Mini (USB HID)` 环境和对应 Switch 型号
+4. 填写 WiFi SSID 和密码（留空静态 IP 则走 DHCP 自动获取）
+5. PC 上可正常烧录
+6. 拔插到 Switch 2 USB-C 后 LED 最终常亮
+7. 桌面端选 WiFi transport 后能通过 `friendmaker.local` 建立 TCP 连接
 
 如果你已经卡在具体问题上，直接去看：[排障说明](troubleshooting.md)。
