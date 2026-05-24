@@ -796,9 +796,42 @@ textarea {
 }
 
 select,
-input[type="number"] {
+input[type="number"],
+input[type="text"],
+input[type="password"] {
   height: 30px;
   padding: 0 9px;
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.password-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.password-row input {
+  flex: 1;
+}
+
+.password-toggle {
+  height: 30px;
+  width: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
 }
 
 textarea {

@@ -633,10 +633,24 @@
                   <option value="">未检测到串口</option>
                 </select>
               </label>
+
+              <label id="firmware-wifi-ssid-label" class="hidden">
+                <span>WiFi SSID</span>
+                <input type="text" id="firmware-wifi-ssid" placeholder="WiFi 名称" autocomplete="off" />
+              </label>
+
+              <label id="firmware-wifi-password-label" class="hidden">
+                <span>WiFi 密码</span>
+                <div class="password-row">
+                  <input type="password" id="firmware-wifi-password" placeholder="WiFi 密码" autocomplete="off" />
+                  <button id="firmware-wifi-password-toggle" class="ghost password-toggle" type="button" aria-label="显示/隐藏密码">👁</button>
+                </div>
+              </label>
             </div>
 
             <p class="hint" id="firmware-platformio-hint">正在检测 PlatformIO...</p>
             <p class="hint" id="firmware-env-hint">选择目标开发板后，这里会显示对应说明。</p>
+            <p class="hint hidden" id="firmware-wifi-hint">S2 Mini 需要填写 WiFi 凭证才能自动连接网络。SSID 和密码会在编译时写入固件。</p>
 
             <div class="mono-note-box firmware-web-flasher-card">
               <div class="panel-head compact">

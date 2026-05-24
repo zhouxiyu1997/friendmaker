@@ -234,6 +234,8 @@ const state = {
     busy: false,
     switchModelId: "switch_lite",
     environmentId: "esp32dev_wireless",
+    wifiSsid: "",
+    wifiPassword: "",
     flash: {
       status: "idle",
       lines: [],
@@ -420,6 +422,12 @@ const els = {
   firmwarePlatformIoHint: document.getElementById("firmware-platformio-hint"),
   firmwareEnvHint: document.getElementById("firmware-env-hint"),
   firmwareWebFlasherHint: document.getElementById("firmware-web-flasher-hint"),
+  firmwareWifiSsidLabel: document.getElementById("firmware-wifi-ssid-label"),
+  firmwareWifiPasswordLabel: document.getElementById("firmware-wifi-password-label"),
+  firmwareWifiSsid: document.getElementById("firmware-wifi-ssid"),
+  firmwareWifiPassword: document.getElementById("firmware-wifi-password"),
+  firmwareWifiPasswordToggle: document.getElementById("firmware-wifi-password-toggle"),
+  firmwareWifiHint: document.getElementById("firmware-wifi-hint"),
   windowsDriverPanel: document.getElementById("windows-driver-panel"),
   windowsDriverHint: document.getElementById("windows-driver-hint"),
   firmwareOpenControllerButton: document.getElementById("firmware-open-controller-button"),
@@ -1228,6 +1236,20 @@ els.firmwareModelSelect.addEventListener("change", () => {
   syncFirmwareUi();
 });
 
+els.firmwareWifiSsid.addEventListener("input", () => {
+  state.firmware.wifiSsid = els.firmwareWifiSsid.value;
+});
+
+els.firmwareWifiPassword.addEventListener("input", () => {
+  state.firmware.wifiPassword = els.firmwareWifiPassword.value;
+});
+
+els.firmwareWifiPasswordToggle.addEventListener("click", () => {
+  const isPassword = els.firmwareWifiPassword.type === "password";
+  els.firmwareWifiPassword.type = isPassword ? "text" : "password";
+  els.firmwareWifiPasswordToggle.textContent = isPassword ? "🙈" : "👁";
+});
+
 els.refreshPortsButton.addEventListener("click", async () => {
   await refreshPorts({
     log: (message) => appendLog(els.studioLogOutput, message),
@@ -1969,14 +1991,19 @@ async function startFirmwareFlash() {
 
   try {
     state.firmware.flashLineCount = 0;
+    const flashBody = {
+      switchModelId: state.firmware.switchModelId,
+      environmentId: state.firmware.environmentId,
+      portPath: state.selectedPortPath,
+    };
+    if (state.firmware.environmentId === "lolin_s2_mini") {
+      flashBody.wifiSsid = state.firmware.wifiSsid;
+      flashBody.wifiPassword = state.firmware.wifiPassword;
+    }
     const response = await fetch("/api/firmware/flash", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        switchModelId: state.firmware.switchModelId,
-        environmentId: state.firmware.environmentId,
-        portPath: state.selectedPortPath,
-      }),
+      body: JSON.stringify(flashBody),
     });
     const payload = await response.json();
 
@@ -3962,6 +3989,14 @@ function syncFirmwareUi() {
   if (state.missingSelectedPortPath) {
     els.firmwareEnvHint.textContent = `之前选择的串口 ${state.missingSelectedPortPath} 已断开，请重新选择目标设备。`;
   }
+
+  const isS2Mini = state.firmware.environmentId === "lolin_s2_mini";
+  els.firmwareWifiSsidLabel.classList.toggle("hidden", !isS2Mini || state.firmware.busy);
+  els.firmwareWifiPasswordLabel.classList.toggle("hidden", !isS2Mini || state.firmware.busy);
+  els.firmwareWifiHint.classList.toggle("hidden", !isS2Mini || state.firmware.busy);
+  els.firmwareWifiSsid.disabled = state.firmware.busy;
+  els.firmwareWifiPassword.disabled = state.firmware.busy;
+  els.firmwareWifiPasswordToggle.disabled = state.firmware.busy;
 
   syncWindowsSerialDriverUi();
 

@@ -797,6 +797,8 @@ class FirmwareFlashManager {
   private cancelTimer: NodeJS.Timeout | null = null;
   private cancelRequested = false;
   private stopReason: string | null = null;
+  private wifiSsid: string | null = null;
+  private wifiPassword: string | null = null;
 
   getStatus(): FirmwareFlashSnapshot {
     return {
@@ -808,6 +810,8 @@ class FirmwareFlashManager {
   async start(options: {
     environmentId: FirmwareUploadEnvironmentId;
     portPath: string;
+    wifiSsid?: string;
+    wifiPassword?: string;
   }): Promise<FirmwareFlashSnapshot> {
     if (this.state.status === "running") {
       throw new Error("A firmware flash is already running.");
@@ -819,6 +823,9 @@ class FirmwareFlashManager {
     };
     const selectedPortPath = preferSerialPath(options.portPath);
     const session = await serialSessionManager.disconnect();
+
+    this.wifiSsid = options.wifiSsid?.trim() || null;
+    this.wifiPassword = options.wifiPassword?.trim() || null;
 
     this.state = {
       ...createIdleFirmwareFlashState(),
@@ -834,6 +841,9 @@ class FirmwareFlashManager {
     this.appendLine(`INFO flashing environment=${environment.id} label=${environment.label}`);
     this.appendLine(`INFO selected upload port=${selectedPortPath}`);
     this.appendLine(`INFO flash timeout=${formatDuration(FIRMWARE_FLASH_TIMEOUT_MS)}`);
+    if (this.wifiSsid) {
+      this.appendLine(`INFO wifi ssid=${this.wifiSsid} password=***`);
+    }
     if (session.connected) {
       this.appendLine(
         `INFO released serial session port=${session.portPath ?? selectedPortPath} baud=${session.baudRate ?? "-"}`,
@@ -1038,6 +1048,14 @@ class FirmwareFlashManager {
       ...(uploadPortPath ? ["--upload-port", uploadPortPath] : []),
     ];
     const platformIoEnv = await webRuntime.toolingManager.getPlatformIoEnv();
+
+    if (this.wifiSsid && this.wifiPassword) {
+      const escapedSsid = this.wifiSsid.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const escapedPassword = this.wifiPassword.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      platformIoEnv.PLATFORMIO_BUILD_FLAGS =
+        `-DWIFI_SSID="${escapedSsid}" -DWIFI_PASSWORD="${escapedPassword}"`;
+      this.appendLine(`INFO injected wifi build flags into PlatformIO environment`);
+    }
 
     this.appendLine(
       uploadPortPath
@@ -1964,6 +1982,8 @@ async function handleFirmwareFlash(
     switchModelId?: SwitchModelId;
     environmentId?: FirmwareEnvironmentId;
     portPath?: string;
+    wifiSsid?: string;
+    wifiPassword?: string;
   };
 
   try {
@@ -1986,6 +2006,8 @@ async function handleFirmwareFlash(
       flash: await webRuntime.flashManager.start({
         environmentId: resolvedEnvironmentId,
         portPath: body.portPath,
+        ...(body.wifiSsid ? { wifiSsid: body.wifiSsid } : {}),
+        ...(body.wifiPassword ? { wifiPassword: body.wifiPassword } : {}),
       }),
       session: serialSessionManager.snapshot(),
     });
