@@ -1,0 +1,36 @@
+#pragma once
+
+#include <Arduino.h>
+
+constexpr uint32_t SERIAL_BAUD_RATE = 115200;
+constexpr uint16_t HOME_DURATION_MS = 1800;
+constexpr uint16_t CELL_MOVE_DURATION_MS = 80;
+constexpr uint16_t INPUT_DELAY_MS = 45;
+constexpr uint16_t BUTTON_PRESS_DURATION_MS = 65;
+constexpr uint16_t HID_REPEAT_INTERVAL_MS = 16;
+constexpr uint16_t HID_SEND_REPORT_TIMEOUT_MS = 400;
+constexpr uint8_t COLOR_PALETTE_SLOT_COUNT = 9;
+constexpr uint8_t COLOR_PALETTE_RESET_TO_BOTTOM_STEPS = 18;
+constexpr uint16_t COLOR_PALETTE_MENU_OPEN_SETTLE_MS = 180;
+constexpr uint16_t COLOR_PALETTE_MENU_PRESS_DURATION_MS = 90;
+constexpr uint16_t COLOR_PALETTE_MENU_INPUT_DELAY_MS = 150;
+constexpr uint16_t COLOR_PALETTE_EDITOR_OPEN_SETTLE_MS = 180;
+constexpr uint16_t COLOR_PALETTE_EDITOR_HUE_RESET_HOLD_MS = 2500;
+constexpr uint16_t COLOR_PALETTE_EDITOR_HUE_STEP_COUNT = 200;
+constexpr uint16_t COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT = 213;
+constexpr uint16_t COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT = 112;
+constexpr uint16_t COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS = 1500;
+constexpr uint16_t COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3000;
+constexpr uint16_t COLOR_PALETTE_EDITOR_MOVE_STEP_MS = 20;
+constexpr uint16_t COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
+constexpr uint8_t COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS = 12;
+constexpr uint8_t BASIC_COLOR_GRID_ROWS = 7;
+constexpr uint8_t BASIC_COLOR_GRID_COLS = 12;
+constexpr uint16_t BASIC_COLOR_TAB_SETTLE_MS = 140;
+constexpr uint8_t BASIC_COLOR_ANCHOR_ROW = 0;
+constexpr uint8_t BASIC_COLOR_ANCHOR_COL = 0;
+constexpr uint8_t BASIC_COLOR_INITIAL_SLOT_ROWS[COLOR_PALETTE_SLOT_COUNT] = {6, 0, 3, 3, 3, 3, 3, 3, 3};
+constexpr uint8_t BASIC_COLOR_INITIAL_SLOT_COLS[COLOR_PALETTE_SLOT_COUNT] = {0, 0, 10, 9, 8, 6, 5, 2, 1};
+constexpr char FIRMWARE_NAME[] = "switch-auto-draw";
+constexpr char BOARD_FAMILY[] = "esp32s2-usb-hid";
+constexpr char CONTROL_TRANSPORT[] = "usb-hid";

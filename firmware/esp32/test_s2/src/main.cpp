@@ -3,16 +3,17 @@
 #include <WiFi.h>
 #include <tusb.h>
 
+#include "config.h"
+#include "controller.h"
+#include "protocol.h"
 #include "usb_hid.h"
+#include "usb_hid_controller_transport.h"
 #include "wifi_credentials.h"
 
 constexpr int LED_PIN = 15;
 constexpr int TCP_PORT = 9876;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 constexpr uint32_t WIFI_RETRY_INTERVAL_MS = 5000;
-constexpr uint32_t BTN_PRESS_MS = 100;
-constexpr uint32_t BTN_SETTLE_MS = 50;
-constexpr uint32_t DSTICK_HOLD_MS = 80;
 
 enum class WiFiState { Disconnected, Connecting, Connected, Reconnecting };
 
@@ -28,11 +29,18 @@ String tcpLineBuffer;
 bool usbWasMounted = false;
 bool mdnsStarted = false;
 
+UsbHidControllerTransport usbTransport;
+ControllerTransport &transport = usbTransport;
+SwitchController controller(transport);
+
+static uint16_t gButtonPressMs = BUTTON_PRESS_DURATION_MS;
+static uint16_t gInputDelayMs = INPUT_DELAY_MS;
+
 struct LogEntry {
     unsigned long ms;
     char text[72];
 };
-constexpr int LOG_BUF_SIZE = 40;
+constexpr int LOG_BUF_SIZE = 80;
 LogEntry logBuf[LOG_BUF_SIZE];
 int logIdx = 0;
 int logCnt = 0;
@@ -48,6 +56,22 @@ void addLog(const char *fmt, ...) {
     if (logCnt < LOG_BUF_SIZE) logCnt++;
 }
 
+void tcpLogf(const char *fmt, ...) {
+    char buf[96];
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    addLog("%s", buf);
+    if (tcpClient && tcpClient.connected()) {
+        tcpClient.print("[");
+        tcpClient.print(millis());
+        tcpClient.print("] ");
+        if (len > 0) tcpClient.write((const uint8_t *)buf, len);
+        tcpClient.println();
+    }
+}
+
 int currentBlinkRate() {
     bool usbOk = tud_mounted();
     bool wifiOk = (WiFi.status() == WL_CONNECTED);
@@ -60,7 +84,7 @@ static const tusb_desc_device_t kDeviceDesc = {
     .bLength = sizeof(tusb_desc_device_t),
     .bDescriptorType = TUSB_DESC_DEVICE,
     .bcdUSB = 0x0200,
-    .bDeviceClass = 0x00,       // defined at interface level
+    .bDeviceClass = 0x00,
     .bDeviceSubClass = 0x00,
     .bDeviceProtocol = 0x00,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
@@ -74,14 +98,11 @@ static const tusb_desc_device_t kDeviceDesc = {
 };
 
 static char const *kStringDesc[] = {
-    (const char[]){0x09, 0x04},  // 0: language
-    "HORI CO.,LTD.",             // 1: manufacturer
-    "HORIPAD S",                 // 2: product
-    "000000000001",              // 3: serial
+    (const char[]){0x09, 0x04},
+    "HORI CO.,LTD.",
+    "HORIPAD S",
+    "000000000001",
 };
-
-// Override Arduino's weak TinyUSB callbacks with our own
-// Key fix: device class = 0x00 (not 0xEF IAD)
 
 uint8_t const *tud_descriptor_device_cb(void) {
     return (uint8_t const *)&kDeviceDesc;
@@ -169,6 +190,10 @@ void sendStatusResponse() {
     tcpClient.print(WiFi.status() == WL_CONNECTED ? "ok" : "no");
     tcpClient.print(" ip=");
     tcpClient.print(WiFi.localIP());
+    tcpClient.print(" press_ms=");
+    tcpClient.print(gButtonPressMs);
+    tcpClient.print(" delay_ms=");
+    tcpClient.print(gInputDelayMs);
     tcpClient.print(" uptime=");
     tcpClient.print(millis());
     tcpClient.print(" logcnt=");
@@ -190,14 +215,262 @@ void sendLogDump() {
     tcpClient.println("LOG_END");
 }
 
-void executeHidAction(const String &cmd);
+namespace {
+
+struct SequencedFrame {
+  String sessionId;
+  uint32_t sequence = 0;
+  String command;
+};
+
+struct SequencedCommandCache {
+  bool hasSession = false;
+  String sessionId;
+  uint32_t lastSequence = 0;
+  String lastCommand;
+  String lastAckLine;
+};
+
+SequencedCommandCache sequencedCommandCache;
+
+bool isHexSessionId(const String &value) {
+  if (value.length() != 8) {
+    return false;
+  }
+  for (size_t index = 0; index < value.length(); index += 1) {
+    const char c = value.charAt(index);
+    const bool isHex =
+        (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    if (!isHex) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool parseSequenceToken(const String &value, uint32_t &sequence) {
+  if (value.length() == 0) {
+    return false;
+  }
+  uint32_t parsed = 0;
+  for (size_t index = 0; index < value.length(); index += 1) {
+    const char c = value.charAt(index);
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    const uint32_t digit = static_cast<uint32_t>(c - '0');
+    if (parsed > (UINT32_MAX - digit) / 10) {
+      return false;
+    }
+    parsed = parsed * 10 + digit;
+  }
+  if (parsed == 0) {
+    return false;
+  }
+  sequence = parsed;
+  return true;
+}
+
+bool parseSequencedFrame(const String &line, SequencedFrame &frame) {
+  if (!line.startsWith("SEQ ")) {
+    return false;
+  }
+  const int firstSpace = line.indexOf(' ');
+  const int secondSpace = line.indexOf(' ', firstSpace + 1);
+  const int thirdSpace = line.indexOf(' ', secondSpace + 1);
+  if (secondSpace < 0 || thirdSpace < 0) {
+    return false;
+  }
+  String sessionId = line.substring(firstSpace + 1, secondSpace);
+  String sequenceToken = line.substring(secondSpace + 1, thirdSpace);
+  String command = line.substring(thirdSpace + 1);
+  command.trim();
+  if (!isHexSessionId(sessionId) || command.length() == 0) {
+    return false;
+  }
+  uint32_t sequence = 0;
+  if (!parseSequenceToken(sequenceToken, sequence)) {
+    return false;
+  }
+  sessionId.toLowerCase();
+  frame.sessionId = sessionId;
+  frame.sequence = sequence;
+  frame.command = command;
+  return true;
+}
+
+String makeOkAck(const SequencedFrame &frame) {
+  return "OK " + frame.sessionId + " " + String(frame.sequence);
+}
+
+String makeErrorAck(const SequencedFrame &frame, const String &message) {
+  return "ERR " + frame.sessionId + " " + String(frame.sequence) + " " + message;
+}
+
+bool validateSequencedFrame(const SequencedFrame &frame, String &ackLine) {
+  if (!sequencedCommandCache.hasSession || sequencedCommandCache.sessionId != frame.sessionId) {
+    if (frame.sequence != 1) {
+      ackLine = makeErrorAck(frame, "sequence expected 1 for new session");
+      return false;
+    }
+    sequencedCommandCache.hasSession = true;
+    sequencedCommandCache.sessionId = frame.sessionId;
+    sequencedCommandCache.lastSequence = 0;
+    sequencedCommandCache.lastCommand = "";
+    sequencedCommandCache.lastAckLine = "";
+    return true;
+  }
+  if (frame.sequence == sequencedCommandCache.lastSequence) {
+    if (frame.command == sequencedCommandCache.lastCommand &&
+        sequencedCommandCache.lastAckLine.length() > 0) {
+      ackLine = sequencedCommandCache.lastAckLine;
+      return false;
+    }
+    ackLine = makeErrorAck(frame, "duplicate sequence command mismatch");
+    return false;
+  }
+  if (frame.sequence != sequencedCommandCache.lastSequence + 1) {
+    ackLine = makeErrorAck(
+        frame, "sequence expected " + String(sequencedCommandCache.lastSequence + 1));
+    return false;
+  }
+  return true;
+}
+
+void cacheSequencedResult(const SequencedFrame &frame, const String &ackLine) {
+  sequencedCommandCache.lastSequence = frame.sequence;
+  sequencedCommandCache.lastCommand = frame.command;
+  sequencedCommandCache.lastAckLine = ackLine;
+}
+
+void applyInputTiming(uint16_t pressMs, uint16_t delayMs) {
+  gButtonPressMs = pressMs;
+  gInputDelayMs = delayMs;
+  controller.configureInputTiming(pressMs, delayMs, HOME_DURATION_MS);
+  addLog("CFG INPUT press=%u delay=%u", pressMs, delayMs);
+}
+
+bool isTimingConfigCommand(const String &line, uint16_t &pressMs, uint16_t &delayMs) {
+  if (!line.startsWith("CFG INPUT ")) return false;
+  const int prefixEnd = 10; // strlen("CFG INPUT ")
+  const int a = line.indexOf(' ', prefixEnd);
+  const int b = line.indexOf(' ', a + 1);
+  if (a < 0 || b < 0) return false;
+  const int press = line.substring(a + 1, b).toInt();
+  const int delay = line.substring(b + 1).toInt();
+  if (press <= 0 || press > 60000 || delay <= 0 || delay > 60000) return false;
+  pressMs = static_cast<uint16_t>(press);
+  delayMs = static_cast<uint16_t>(delay);
+  return true;
+}
+
+}  // namespace
+
+void executeTimingCommand(const String &line) {
+  uint16_t pressMs = 0;
+  uint16_t delayMs = 0;
+  if (isTimingConfigCommand(line, pressMs, delayMs)) {
+    applyInputTiming(pressMs, delayMs);
+  }
+}
+
+void handleRawCommand(const String &line) {
+  tcpLogf("RAW recv #%u \"%s\"", tcpRxCount, line.c_str());
+
+  uint16_t pressMs = 0;
+  uint16_t delayMs = 0;
+  if (isTimingConfigCommand(line, pressMs, delayMs)) {
+    applyInputTiming(pressMs, delayMs);
+    tcpLogf("RAW timing applied press=%u delay=%u", pressMs, delayMs);
+    return;
+  }
+
+  const unsigned long t0 = millis();
+  String error;
+  const bool ok = executeCommand(line, controller, error);
+  const unsigned long t1 = millis();
+
+  if (ok) {
+    tcpLogf("RAW ok #%u elapsed=%lu \"%s\"", tcpRxCount, t1 - t0, line.c_str());
+    tcpClient.print("ACK #"); tcpClient.print(tcpRxCount);
+    tcpClient.print(" | \""); tcpClient.print(line);
+    tcpClient.println("\"");
+  } else {
+    tcpLogf("RAW err #%u elapsed=%lu \"%s\" -> %s", tcpRxCount, t1 - t0, line.c_str(),
+            error.length() > 0 ? error.c_str() : "unknown");
+    tcpClient.print("NAK #"); tcpClient.print(tcpRxCount);
+    tcpClient.print(" | \""); tcpClient.print(line);
+    tcpClient.print("\" ");
+    tcpClient.println(error.length() > 0 ? error : "unknown");
+  }
+}
+
+void handleSeqCommand(const String &line) {
+  SequencedFrame frame;
+  if (!parseSequencedFrame(line, frame)) {
+    tcpLogf("SEQ parse_fail fallback_raw #%u", tcpRxCount);
+    handleRawCommand(line);
+    return;
+  }
+
+  tcpLogf("SEQ recv #%u sid=%s seq=%lu cmd=\"%s\"",
+          tcpRxCount, frame.sessionId.c_str(), frame.sequence, frame.command.c_str());
+
+  String ackLine;
+  if (!validateSequencedFrame(frame, ackLine)) {
+    tcpLogf("SEQ validate_fail sid=%s seq=%lu ack=\"%s\"",
+            frame.sessionId.c_str(), frame.sequence, ackLine.c_str());
+    tcpClient.println(ackLine);
+    return;
+  }
+
+  uint16_t pressMs = 0;
+  uint16_t delayMs = 0;
+  if (isTimingConfigCommand(frame.command, pressMs, delayMs)) {
+    applyInputTiming(pressMs, delayMs);
+    ackLine = makeOkAck(frame);
+    cacheSequencedResult(frame, ackLine);
+    tcpLogf("SEQ cfg_input applied #%u sid=%s seq=%lu press=%u delay=%u",
+            tcpRxCount, frame.sessionId.c_str(), frame.sequence, pressMs, delayMs);
+    tcpClient.println(ackLine);
+    return;
+  }
+
+  const unsigned long t0 = millis();
+  String error;
+  const bool ok = executeCommand(frame.command, controller, error);
+  const unsigned long t1 = millis();
+
+  if (ok) {
+    ackLine = makeOkAck(frame);
+    cacheSequencedResult(frame, ackLine);
+    tcpLogf("SEQ ok #%u sid=%s seq=%lu elapsed=%lu",
+            tcpRxCount, frame.sessionId.c_str(), frame.sequence, t1 - t0);
+    tcpClient.println(ackLine);
+  } else {
+    ackLine = makeErrorAck(frame, error.length() > 0 ? error : "unknown error");
+    cacheSequencedResult(frame, ackLine);
+    tcpLogf("SEQ err #%u sid=%s seq=%lu elapsed=%lu -> %s",
+            tcpRxCount, frame.sessionId.c_str(), frame.sequence, t1 - t0,
+            error.length() > 0 ? error.c_str() : "unknown error");
+    tcpClient.println(ackLine);
+  }
+}
 
 void handleTcpClient() {
     if (!tcpClient || !tcpClient.connected()) {
+        if (tcpClient) {
+            addLog("TCP client disconnected");
+            tcpClient.stop();
+        }
         tcpClient = tcpServer.accept();
         if (tcpClient) {
-            tcpClient.println("BOOT friendmaker-usb-hid esp32-s2");
-            addLog("TCP %s", tcpClient.remoteIP().toString().c_str());
+            tcpClient.print("BOOT "); tcpClient.print(FIRMWARE_NAME);
+            tcpClient.print(" board="); tcpClient.print(BOARD_FAMILY);
+            tcpClient.print(" transport="); tcpClient.print(controller.transportName());
+            tcpClient.print(" press="); tcpClient.print(gButtonPressMs);
+            tcpClient.print(" delay="); tcpClient.println(gInputDelayMs);
+            tcpLogf("TCP accept %s", tcpClient.remoteIP().toString().c_str());
         }
         return;
     }
@@ -210,11 +483,9 @@ void handleTcpClient() {
                 if (tcpLineBuffer == "STATUS") sendStatusResponse();
                 else if (tcpLineBuffer == "LOG") sendLogDump();
                 else if (tud_mounted()) {
-                    executeHidAction(tcpLineBuffer);
-                    tcpClient.print("ACK #"); tcpClient.print(tcpRxCount);
-                    tcpClient.print(" HID | \""); tcpClient.print(tcpLineBuffer);
-                    tcpClient.println("\"");
+                    handleSeqCommand(tcpLineBuffer);
                 } else {
+                    tcpLogf("NAK #%u USB_NOT_READY", tcpRxCount);
                     tcpClient.print("NAK #"); tcpClient.print(tcpRxCount);
                     tcpClient.println(" USB_NOT_READY");
                 }
@@ -224,63 +495,14 @@ void handleTcpClient() {
     }
 }
 
-void executeHidAction(const String &cmd) {
-    if (cmd.length() == 0) return;
-    if (cmd == "H") { UsbHid::pressButtons(1u << UsbHid::BTN_HOME); UsbHid::sendReport(); delay(BTN_PRESS_MS); UsbHid::releaseAll(); UsbHid::sendReport(); delay(BTN_SETTLE_MS); return; }
-    if (cmd == "P") { UsbHid::pressButtons(1u << UsbHid::BTN_A); UsbHid::sendReport(); delay(BTN_PRESS_MS); UsbHid::releaseAll(); UsbHid::sendReport(); delay(BTN_SETTLE_MS); return; }
-    if (cmd.startsWith("M ")) {
-        int dx = 0, dy = 0;
-        int f = cmd.indexOf(' '), s = cmd.indexOf(' ', f + 1);
-        if (s < 0) dx = cmd.substring(f + 1).toInt();
-        else { dx = cmd.substring(f + 1, s).toInt(); dy = cmd.substring(s + 1).toInt(); }
-        for (int i = 0; i < abs(dx); i++) { UsbHid::setHat(dx > 0 ? UsbHid::HAT_RIGHT : UsbHid::HAT_LEFT); UsbHid::sendReport(); delay(DSTICK_HOLD_MS); UsbHid::setHat(UsbHid::HAT_CENTER); UsbHid::sendReport(); delay(BTN_SETTLE_MS); }
-        for (int i = 0; i < abs(dy); i++) { UsbHid::setHat(dy > 0 ? UsbHid::HAT_DOWN : UsbHid::HAT_UP); UsbHid::sendReport(); delay(DSTICK_HOLD_MS); UsbHid::setHat(UsbHid::HAT_CENTER); UsbHid::sendReport(); delay(BTN_SETTLE_MS); }
-        return;
-    }
-    if (cmd.startsWith("STICK ")) {
-        int x=0,y=0,ms=0; int a=cmd.indexOf(' '),b=cmd.indexOf(' ',a+1),c=cmd.indexOf(' ',b+1);
-        if (c<0) return; x=cmd.substring(a+1,b).toInt(); y=cmd.substring(b+1,c).toInt(); ms=cmd.substring(c+1).toInt();
-        uint8_t sx=(x<0)?0:((x>0)?255:128), sy=(y<0)?255:((y>0)?0:128);
-        UsbHid::setLeftStick(sx,sy); UsbHid::sendReport(); delay(ms);
-        UsbHid::setLeftStick(128,128); UsbHid::sendReport(); return;
-    }
-    if (cmd.startsWith("RSTICK ")) {
-        int x=0,y=0,ms=0; int a=cmd.indexOf(' '),b=cmd.indexOf(' ',a+1),c=cmd.indexOf(' ',b+1);
-        if (c<0) return; x=cmd.substring(a+1,b).toInt(); y=cmd.substring(b+1,c).toInt(); ms=cmd.substring(c+1).toInt();
-        uint8_t sx=(x<0)?0:((x>0)?255:128), sy=(y<0)?255:((y>0)?0:128);
-        UsbHid::setRightStick(sx,sy); UsbHid::sendReport(); delay(ms);
-        UsbHid::setRightStick(128,128); UsbHid::sendReport(); return;
-    }
-    if (cmd.startsWith("HOLD ")) {
-        int a=cmd.indexOf(' '),b=cmd.indexOf(' ',a+1); if(b<0)return;
-        String n=cmd.substring(a+1,b); n.trim(); int ms=cmd.substring(b+1).toInt();
-        if (n=="A") UsbHid::pressButtons(1u<<UsbHid::BTN_A); else if (n=="B") UsbHid::pressButtons(1u<<UsbHid::BTN_B);
-        else if (n=="X") UsbHid::pressButtons(1u<<UsbHid::BTN_X); else if (n=="Y") UsbHid::pressButtons(1u<<UsbHid::BTN_Y);
-        else if (n=="L") UsbHid::pressButtons(1u<<UsbHid::BTN_L); else if (n=="R") UsbHid::pressButtons(1u<<UsbHid::BTN_R);
-        else if (n=="ZL") UsbHid::pressButtons(1u<<UsbHid::BTN_ZL); else if (n=="ZR") UsbHid::pressButtons(1u<<UsbHid::BTN_ZR);
-        else if (n=="HOME") UsbHid::pressButtons(1u<<UsbHid::BTN_HOME); else return;
-        UsbHid::sendReport(); delay(ms); UsbHid::releaseAll(); UsbHid::sendReport(); return;
-    }
-    if (cmd.startsWith("W ")) { delay(cmd.substring(2).toInt()); return; }
-    uint32_t m = 0;
-    if (cmd=="A") m=1u<<UsbHid::BTN_A; else if (cmd=="B") m=1u<<UsbHid::BTN_B;
-    else if (cmd=="X") m=1u<<UsbHid::BTN_X; else if (cmd=="Y") m=1u<<UsbHid::BTN_Y;
-    else if (cmd=="L") m=1u<<UsbHid::BTN_L; else if (cmd=="R") m=1u<<UsbHid::BTN_R;
-    else if (cmd=="ZL") m=1u<<UsbHid::BTN_ZL; else if (cmd=="ZR") m=1u<<UsbHid::BTN_ZR;
-    else if (cmd=="PLUS") m=1u<<UsbHid::BTN_PLUS; else if (cmd=="MINUS") m=1u<<UsbHid::BTN_MINUS;
-    else if (cmd=="HOME") m=1u<<UsbHid::BTN_HOME; else if (cmd=="LS"||cmd=="L3") m=1u<<UsbHid::BTN_L3;
-    else if (cmd=="RS"||cmd=="R3") m=1u<<UsbHid::BTN_R3; else if (cmd=="CAPTURE"||cmd=="CAP") m=1u<<UsbHid::BTN_CAPTURE;
-    else return;
-    UsbHid::pressButtons(m); UsbHid::sendReport(); delay(BTN_PRESS_MS);
-    UsbHid::releaseAll(); UsbHid::sendReport(); delay(BTN_SETTLE_MS);
-}
-
 void setup() {
     pinMode(LED_PIN, OUTPUT);
     memset(logBuf, 0, sizeof(logBuf));
     addLog("BOOT mac=%s", WiFi.macAddress().c_str());
-    addLog("USB custom init done");
     UsbHid::init();
+    controller.begin();
+    controller.configureInputTiming(gButtonPressMs, gInputDelayMs, HOME_DURATION_MS);
+    addLog("SEQ+protocol ready press=%u delay=%u", gButtonPressMs, gInputDelayMs);
     startWiFiConnect();
 }
 
