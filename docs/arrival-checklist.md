@@ -11,6 +11,8 @@
 - ACK 协议链路正常
 - `Bluetooth Classic HID` 传输层已经拉起
 
+本文档末尾附有 **S2 Mini（WiFi + USB HID）验板清单**，如果你使用的是 Lolin S2 Mini，请跳至 §8。
+
 如果你只是想按公开流程开始使用，请先看：[快速上手](user-trial-guide.md)。
 
 ## 路径说明
@@ -115,3 +117,74 @@ npm run dev -- --image ./examples/demo.svg --port <your-serial-port> --send
 1. 打开桌面端安装包，或运行 `npm run ui:dev`
 2. 按 `刷入固件 -> 手柄测试 -> 调试测速 -> 脚本生成` 继续完整流程
 3. 如果底层验板已经通过、但桌面端流程仍失败，优先排查 `PlatformIO` 准备、资源路径、驱动辅助入口或页面侧集成问题
+
+## 8. S2 Mini 验板清单（WiFi + USB HID）
+
+这是一份针对 **Lolin S2 Mini** 的快速验板清单。完整说明见：[硬件连接说明（S2 Mini / WiFi + USB HID）](hardware-s2-wifi.md)。
+
+### 8.1 烧录固件
+
+```bash
+cd firmware/esp32/test_s2
+# 先配置 wifi_credentials.h 中的 SSID 和密码
+python -m platformio run -t upload --upload-port COM3
+```
+
+如果自动下载失败，按住 S2 Mini 的 **BOOT 键**再插 PC USB，然后重新执行。
+
+### 8.2 确认启动日志
+
+烧录后拔下 S2 Mini，插入 Switch 2 USB-C，等待约 25 秒直到 LED 常亮。在 PC 上通过 TCP 验证：
+
+```bash
+# 通过 PowerShell 或 Node.js 建立 TCP 连接
+node -e "
+const net = require('net');
+const c = net.connect(9876, '192.168.1.200', () => {
+  c.on('data', d => console.log(d.toString().trim()));
+  c.write('STATUS\n');
+  setTimeout(() => c.end(), 2000);
+});
+"
+```
+
+期望输出类似：
+
+```
+STATUS usb=mount hid_ready=yes tud_ready=yes wifi=ok ip=192.168.1.200 press_ms=65 delay_ms=45
+```
+
+关键字段：`usb=mount`、`hid_ready=yes`、`wifi=ok`。
+
+### 8.3 SEQ 协议冒烟测试
+
+```bash
+# 使用 wifi/sender.ts 的连接测试
+node -e "
+const net = require('net');
+const c = net.connect(9876, '192.168.1.200', () => {
+  c.on('data', d => console.log(d.toString().trim()));
+  const sid = 'ffee0001';
+  ['CFG INPUT 65 45 1800', 'A', 'M 3 0', 'STATUS']
+    .forEach((cmd, i) => c.write('SEQ ' + sid + ' ' + (i+1) + ' ' + cmd + '\n'));
+  setTimeout(() => c.end(), 5000);
+});
+"
+```
+
+期望每行回 `OK ffee0001 <seq>`。
+
+### 8.4 桌面端验证
+
+1. 启动 `npm run ui:dev`
+2. 任意页面运输方式切到 `WiFi (ESP32-S2 USB HID)`
+3. WiFi 地址选 `friendmaker.local`
+4. 手柄测试页点击"连接手柄" → 应显示"USB HID 手柄已连接"
+5. 点击 A/B/X/Y 单步测试 → Switch 2 上有对应 UI 反应
+
+### 8.5 这份清单能验证什么
+
+- PC → WiFi → S2 Mini TCP 链路
+- SEQ 帧协议 ACK 返回行为
+- USB HID 按钮映射正确性（A/B/X/Y 经过位序修复）
+- 桌面端 WiFi transport 全链路

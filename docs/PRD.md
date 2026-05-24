@@ -4,13 +4,16 @@
 
 版本：v0.2
 状态：Alpha 试用中
-更新时间：2026-05-14
+更新时间：2026-05-24
 
 ## 1. 产品概述
 
-`朋友制作器 / Friend Maker` 是一个面向 `macOS / Windows x64 + ESP32-WROOM-32 / ESP-32S + Nintendo Switch` 的自动绘制工具。
+`朋友制作器 / Friend Maker` 是一个面向 `macOS / Windows x64 + ESP32-WROOM-32 / ESP-32S / Lolin S2 Mini + Nintendo Switch` 的自动绘制工具。
 
-用户在电脑上导入图片、调整绘制参数并生成动作脚本，再通过 ESP32 模拟 `Bluetooth Classic` Switch Pro Controller，把图案稳定绘制到《朋友收集：梦想生活》/ `Tomodachi Life` 的画布中。
+用户通过桌面应用导入图片、调整参数并生成动作脚本，再通过下面任一方式把图案稳定绘制到《朋友收集：梦想生活》/ `Tomodachi Life` 的画布中：
+
+- **蓝牙路线（主线）**：ESP32 通过 `Bluetooth Classic` 模拟 Switch Pro Controller
+- **WiFi 路线（实验性）**：ESP32-S2 通过 `WiFi TCP` 接收命令，`USB HID` 模拟 HORIPAD S 有线手柄
 
 当前版本已经不再是“只有脚本生成的原型”，而是一个可打包运行的桌面端应用。它内部承载同一套本地 Web 工作台，同时保留仓库源码路线作为开发、调试和协议验证入口，主线 workflow 仍然是下面四页：
 
@@ -289,13 +292,15 @@
 
 ### Phase 5：后续优化阶段
 
-状态：持续进行中
+状态：进行中
 
+- WiFi 路线已在实验性分支验证完成（WiFi TCP + USB HID → Switch 2）
 - 视觉校准
 - 脱机执行
 - 更稳的颜色与位移校准
 - 可版本化的色差补偿与调色拨杆
 - 更完整的桌面端安装、恢复和排障体验
+- S2 Mini 路线整合入主线固件（条件编译）
 
 ## 12. 当前验收标准
 
@@ -323,11 +328,13 @@
 - 后续色差调整主落点：`apps/desktop/src/image/quantize.ts`、`apps/desktop/src/config/officialPalette.ts`、`apps/desktop/src/web/static/app.js`
 - 路径生成：`apps/desktop/src/path/scanline.ts`
 - 串口发送：`apps/desktop/src/serial/sender.ts`
+- WiFi TCP 发送：`apps/desktop/src/wifi/sender.ts`
 - 固件实现：`firmware/esp32/src/*`
+- WiFi 路线固件：`firmware/esp32/test_s2/src/*`
 
 ## 14. 下一阶段优先级
 
-1. 继续提高蓝牙连接与长时间绘制稳定性
-2. 按“感知色差匹配 -> 游戏内偏色补偿 -> 可版本化校准表 / 调色拨杆”的顺序，继续优化官方色与自定义多色的颜色还原和实际观感
-3. 继续优化绘制路径、命令执行路径与长流程效率
-4. 继续优化用户使用体验，包括执行日志、状态提示、失败恢复体验、桌面端安装体验与内部验证说明
+1. S2 Mini 路线整合入主线固件（通过条件编译与原蓝牙方案共存）
+2. 继续提高蓝牙连接与长时间绘制稳定性
+3. 按"感知色差匹配 -> 游戏内偏色补偿 -> 可版本化校准表 / 调色拨杆"的顺序，继续优化官方色与自定义多色的颜色还原和实际观感
+4. 继续优化绘制路径、命令执行路径与长流程效率
