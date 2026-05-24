@@ -56,15 +56,17 @@ void UsbHid::setRightStick(uint8_t x, uint8_t y) { rx_=x; ry_=y; }
 void UsbHid::setHat(uint8_t h) { hat_ = h; }
 
 void UsbHid::sendIdleReport() {
-    releaseAll(); setLeftStick(STICK_CENTER,STICK_CENTER);
-    setRightStick(STICK_CENTER,STICK_CENTER); setHat(HAT_CENTER);
+    releaseAll();
     sendReport();
 }
 
 void UsbHid::sendReport() {
+    // Descriptor layout: byte0=buttons[0:7], byte1=buttons[8:13]+pad
+    //                   byte2=hat[0:3]+pad, byte3-6=X/Y/Z/Rz, byte7=pad
     rpt_[0] = (uint8_t)(btns_ & 0xFF);
-    rpt_[1] = (uint8_t)((btns_ >> 8) & 0xFF) | ((hat_ & 0x0F) << 4);
-    rpt_[2] = lx_; rpt_[3] = ly_; rpt_[4] = rx_; rpt_[5] = ry_;
-    rpt_[6] = 0; rpt_[7] = 0;
+    rpt_[1] = (uint8_t)((btns_ >> 8) & 0x3F);
+    rpt_[2] = hat_ & 0x0F;
+    rpt_[3] = lx_; rpt_[4] = ly_; rpt_[5] = rx_; rpt_[6] = ry_;
+    rpt_[7] = 0;
     tud_hid_report(0, rpt_, 8);
 }
