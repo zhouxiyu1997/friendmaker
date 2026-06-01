@@ -24,6 +24,24 @@ constexpr uint16_t COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3000;
 constexpr uint16_t COLOR_PALETTE_EDITOR_MOVE_STEP_MS = 20;
 constexpr uint16_t COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
 constexpr uint8_t COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS = 12;
+struct PaletteValueCalibrationSample {
+  uint16_t holdMs;
+  uint8_t actualValueSteps;
+};
+constexpr uint8_t PALETTE_VALUE_CALIBRATION_SAMPLE_COUNT = 10;
+constexpr uint8_t PALETTE_VALUE_CALIBRATION_MAX_SAMPLES = 16;
+constexpr PaletteValueCalibrationSample DEFAULT_PALETTE_VALUE_CALIBRATION[PALETTE_VALUE_CALIBRATION_SAMPLE_COUNT] = {
+    {80, 4},
+    {120, 7},
+    {180, 12},
+    {260, 20},
+    {380, 32},
+    {560, 50},
+    {800, 76},
+    {1100, 104},
+    {1500, 112},
+    {2000, 112},
+};
 constexpr uint8_t BASIC_COLOR_GRID_ROWS = 7;
 constexpr uint8_t BASIC_COLOR_GRID_COLS = 12;
 constexpr uint16_t BASIC_COLOR_TAB_SETTLE_MS = 140;

@@ -119,6 +119,102 @@ bool parseInputConfigCommand(
   return true;
 }
 
+bool isUnsignedIntegerToken(const String &token) {
+  if (token.length() == 0) {
+    return false;
+  }
+
+  for (uint16_t index = 0; index < token.length(); index += 1) {
+    const char character = token.charAt(index);
+
+    if (character < '0' || character > '9') {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool parsePaletteValueSampleToken(
+    const String &token, PaletteValueCalibrationSample &sample) {
+  const int colonIndex = token.indexOf(':');
+
+  if (colonIndex <= 0 || colonIndex >= static_cast<int>(token.length()) - 1) {
+    return false;
+  }
+
+  const String holdToken = token.substring(0, colonIndex);
+  const String stepsToken = token.substring(colonIndex + 1);
+
+  if (!isUnsignedIntegerToken(holdToken) || !isUnsignedIntegerToken(stepsToken)) {
+    return false;
+  }
+
+  const int holdMs = holdToken.toInt();
+  const int actualValueSteps = stepsToken.toInt();
+
+  if (
+      holdMs <= 0 || holdMs > 60000 ||
+      actualValueSteps < 0 ||
+      actualValueSteps > COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT) {
+    return false;
+  }
+
+  sample = {
+      static_cast<uint16_t>(holdMs),
+      static_cast<uint8_t>(actualValueSteps),
+  };
+  return true;
+}
+
+bool parsePaletteValueConfigCommand(
+    const String &line, PaletteValueCalibrationSample *samples, uint8_t &sampleCount) {
+  if (!line.startsWith("CFG PALVALUE ")) {
+    return false;
+  }
+
+  sampleCount = 0;
+  const String payload = line.substring(13);
+  int tokenStart = 0;
+
+  while (tokenStart < static_cast<int>(payload.length())) {
+    if (sampleCount >= PALETTE_VALUE_CALIBRATION_MAX_SAMPLES) {
+      return false;
+    }
+
+    int tokenEnd = payload.indexOf(',', tokenStart);
+
+    if (tokenEnd < 0) {
+      tokenEnd = payload.length();
+    }
+
+    String token = payload.substring(tokenStart, tokenEnd);
+    token.trim();
+
+    PaletteValueCalibrationSample sample = {0, 0};
+
+    if (!parsePaletteValueSampleToken(token, sample)) {
+      return false;
+    }
+
+    if (sampleCount > 0) {
+      const PaletteValueCalibrationSample previous = samples[sampleCount - 1];
+
+      if (
+          sample.holdMs <= previous.holdMs ||
+          sample.actualValueSteps < previous.actualValueSteps) {
+        return false;
+      }
+    }
+
+    samples[sampleCount] = sample;
+    sampleCount += 1;
+    tokenStart = tokenEnd + 1;
+  }
+
+  return sampleCount >= 2;
+}
+
 bool failControllerInput(String &error) {
   error = "controller input report failed";
   return false;
@@ -462,6 +558,24 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
 
   if (line.startsWith("CFG INPUT")) {
     error = "invalid input config";
+    return false;
+  }
+
+  PaletteValueCalibrationSample paletteValueSamples[PALETTE_VALUE_CALIBRATION_MAX_SAMPLES] = {};
+  uint8_t paletteValueSampleCount = 0;
+
+  if (parsePaletteValueConfigCommand(line, paletteValueSamples, paletteValueSampleCount)) {
+    if (!controller.configurePaletteValueCalibration(paletteValueSamples, paletteValueSampleCount)) {
+      error = "invalid palette value calibration";
+      return false;
+    }
+
+    Serial.printf("INFO action=palette-value-config samples=%u\n", paletteValueSampleCount);
+    return true;
+  }
+
+  if (line.startsWith("CFG PALVALUE")) {
+    error = "invalid palette value calibration";
     return false;
   }
 

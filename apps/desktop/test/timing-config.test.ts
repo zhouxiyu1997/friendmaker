@@ -16,6 +16,10 @@ import {
   inputConfigCommand,
 } from "../src/protocol/commands.js";
 import {
+  formatPaletteValueCalibrationConfig,
+  normalizePaletteValueCalibration,
+} from "../src/protocol/paletteValueCalibration.js";
+import {
   createBasicPaletteTimingState,
   estimateBasicPaletteConfigDurationMs,
   resetBasicPaletteTimingState,
@@ -73,13 +77,19 @@ function makePixelMap(width: number, height: number, filled: Array<{ x: number; 
   );
 }
 
-async function solidPngDataUrl(width: number, height: number): Promise<string> {
+async function solidPngDataUrl(width: number, height: number, colorHex = "#000000"): Promise<string> {
+  const background = {
+    r: Number.parseInt(colorHex.slice(1, 3), 16),
+    g: Number.parseInt(colorHex.slice(3, 5), 16),
+    b: Number.parseInt(colorHex.slice(5, 7), 16),
+    alpha: 255,
+  };
   const buffer = await sharp({
     create: {
       width,
       height,
       channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 255 },
+      background,
     },
   })
     .png()
@@ -222,6 +232,80 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
     overridePayload.stats.estimatedRuntimeMs < defaultPayload.stats.estimatedRuntimeMs,
     "expected faster timing overrides to reduce estimated runtime",
   );
+});
+
+test("/api/generate accepts palette value calibration for custom multicolor commands", async (t) => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-palette-value-generate-"));
+  const server = await startWebServer({ port: 0, recoverySessionsRoot });
+  t.after(async () => {
+    await server.close();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  });
+
+  const calibration = normalizePaletteValueCalibration({
+    samples: [
+      { holdMs: 80, actualValueSteps: 6 },
+      { holdMs: 120, actualValueSteps: 12 },
+      { holdMs: 180, actualValueSteps: 22 },
+    ],
+  });
+  assert.ok(calibration);
+
+  const response = await fetch(`${server.url}/api/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      imageDataUrl: await solidPngDataUrl(4, 4, "#202020"),
+      previewScale: 1,
+      mode: "palette",
+      colors: 8,
+      paletteValueCalibration: calibration,
+    }),
+  });
+
+  assert.equal(response.ok, true);
+  const payload = (await response.json()) as {
+    commands: string[];
+    profile: { paletteValueCalibration: unknown };
+  };
+
+  assert.equal(payload.commands[1], formatPaletteValueCalibrationConfig(calibration));
+  assert.deepEqual(payload.profile.paletteValueCalibration, calibration);
+});
+
+test("/api/generate rejects malformed palette value calibration and falls back to firmware defaults", async (t) => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-palette-value-malformed-"));
+  const server = await startWebServer({ port: 0, recoverySessionsRoot });
+  t.after(async () => {
+    await server.close();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  });
+
+  const response = await fetch(`${server.url}/api/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      imageDataUrl: await solidPngDataUrl(4, 4, "#202020"),
+      previewScale: 1,
+      mode: "palette",
+      colors: 8,
+      paletteValueCalibration: {
+        samples: [
+          { holdMs: 120, actualValueSteps: 12 },
+          { holdMs: 80, actualValueSteps: 6 },
+        ],
+      },
+    }),
+  });
+
+  assert.equal(response.ok, true);
+  const payload = (await response.json()) as {
+    commands: string[];
+    profile: { paletteValueCalibration: unknown };
+  };
+
+  assert.equal(payload.commands.some((command) => command.startsWith("CFG PALVALUE ")), false);
+  assert.equal(payload.profile.paletteValueCalibration, null);
 });
 
 test("official basic palette timing follows current slot position and BC RESET", () => {

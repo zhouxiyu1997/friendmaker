@@ -262,3 +262,18 @@ test("controller page exposes fixed recenter diagnostic scripts", async () => {
     /function prependSharedTimingCommand\(commands\)\s*\{[\s\S]*commands\[0\]\?\.startsWith\("CFG INPUT "\)[\s\S]*return commands/u,
   );
 });
+
+test("timing page exposes palette value calibration controls", async () => {
+  const [indexSource, appSource] = await Promise.all([
+    readFile(new URL("../src/web/static/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../src/web/static/app.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(indexSource, /亮度长按校准/u);
+  assert.match(indexSource, /id="palette-value-calibration-grid"/u);
+  assert.match(indexSource, /id="palette-value-calibration-import"/u);
+  assert.match(indexSource, /id="palette-value-calibration-export-button"/u);
+  assert.match(appSource, /PALETTE_VALUE_CALIBRATION_STORAGE_KEY/u);
+  assert.match(appSource, /function buildPaletteValueCalibrationSampleCommands/u);
+  assert.match(appSource, /paletteValueCalibration:\s*state\.timingLab\.paletteValueCalibration/u);
+});

@@ -105,6 +105,7 @@ SwitchController::SwitchController(ControllerTransport &transport) : transport_(
 void SwitchController::begin() {
   transport_.begin();
   resetBasicPaletteTracking();
+  resetPaletteValueCalibration();
 }
 
 void SwitchController::configureInputTiming(
@@ -112,6 +113,138 @@ void SwitchController::configureInputTiming(
   buttonPressMs_ = buttonPressMs;
   inputDelayMs_ = inputDelayMs;
   homeMs_ = homeMs;
+}
+
+void SwitchController::resetPaletteValueCalibration() {
+  paletteValueSampleCount_ = PALETTE_VALUE_CALIBRATION_SAMPLE_COUNT;
+
+  for (uint8_t index = 0; index < paletteValueSampleCount_; index += 1) {
+    paletteValueSamples_[index] = DEFAULT_PALETTE_VALUE_CALIBRATION[index];
+  }
+}
+
+bool SwitchController::configurePaletteValueCalibration(
+    const PaletteValueCalibrationSample *samples, uint8_t sampleCount) {
+  if (samples == nullptr || sampleCount < 2 || sampleCount > PALETTE_VALUE_CALIBRATION_MAX_SAMPLES) {
+    return false;
+  }
+
+  PaletteValueCalibrationSample previous = {0, 0};
+
+  for (uint8_t index = 0; index < sampleCount; index += 1) {
+    const PaletteValueCalibrationSample sample = samples[index];
+
+    if (
+        sample.holdMs == 0 || sample.holdMs > 60000 ||
+        sample.actualValueSteps > COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT ||
+        (index > 0 && sample.holdMs <= previous.holdMs) ||
+        (index > 0 && sample.actualValueSteps < previous.actualValueSteps)) {
+      return false;
+    }
+
+    previous = sample;
+  }
+
+  paletteValueSampleCount_ = sampleCount;
+
+  for (uint8_t index = 0; index < sampleCount; index += 1) {
+    paletteValueSamples_[index] = samples[index];
+  }
+
+  return true;
+}
+
+uint8_t SwitchController::estimateValueStepsForHold(uint16_t holdMs) const {
+  if (paletteValueSampleCount_ == 0 || holdMs == 0) {
+    return 0;
+  }
+
+  const PaletteValueCalibrationSample first = paletteValueSamples_[0];
+
+  if (holdMs <= first.holdMs) {
+    const uint32_t estimated =
+        (static_cast<uint32_t>(holdMs) * first.actualValueSteps) / first.holdMs;
+    return static_cast<uint8_t>(
+        estimated > COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT
+            ? COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT
+            : estimated);
+  }
+
+  for (uint8_t index = 1; index < paletteValueSampleCount_; index += 1) {
+    const PaletteValueCalibrationSample previous = paletteValueSamples_[index - 1];
+    const PaletteValueCalibrationSample current = paletteValueSamples_[index];
+
+    if (holdMs > current.holdMs) {
+      continue;
+    }
+
+    const uint16_t holdSpan = current.holdMs - previous.holdMs;
+    const uint8_t stepSpan = current.actualValueSteps - previous.actualValueSteps;
+
+    if (holdSpan == 0 || stepSpan == 0) {
+      return previous.actualValueSteps;
+    }
+
+    const uint32_t interpolated =
+        previous.actualValueSteps +
+        ((static_cast<uint32_t>(holdMs - previous.holdMs) * stepSpan) / holdSpan);
+    return static_cast<uint8_t>(
+        interpolated > COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT
+            ? COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT
+            : interpolated);
+  }
+
+  return paletteValueSamples_[paletteValueSampleCount_ - 1].actualValueSteps;
+}
+
+PaletteValueMovement SwitchController::estimatePaletteValueMovement(uint8_t targetSteps) const {
+  const uint8_t normalizedTarget =
+      targetSteps > COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT
+          ? COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT
+          : targetSteps;
+
+  if (normalizedTarget == 0 || paletteValueSampleCount_ == 0) {
+    return {0, 0, 0};
+  }
+
+  PaletteValueCalibrationSample previous = {0, 0};
+
+  for (uint8_t index = 0; index < paletteValueSampleCount_; index += 1) {
+    const PaletteValueCalibrationSample current = paletteValueSamples_[index];
+
+    if (current.actualValueSteps < normalizedTarget) {
+      previous = current;
+      continue;
+    }
+
+    const uint8_t stepSpan = current.actualValueSteps - previous.actualValueSteps;
+    const uint16_t holdSpan = current.holdMs - previous.holdMs;
+    const uint16_t holdMs = stepSpan == 0
+        ? previous.holdMs
+        : static_cast<uint16_t>(
+              previous.holdMs +
+              ((static_cast<uint32_t>(normalizedTarget - previous.actualValueSteps) * holdSpan) /
+               stepSpan));
+    const uint8_t estimatedSteps = estimateValueStepsForHold(holdMs);
+    const uint8_t estimatedHoldSteps =
+        estimatedSteps > normalizedTarget ? normalizedTarget : estimatedSteps;
+
+    return {
+        holdMs,
+        estimatedHoldSteps,
+        static_cast<uint8_t>(normalizedTarget - estimatedHoldSteps),
+    };
+  }
+
+  const PaletteValueCalibrationSample last = paletteValueSamples_[paletteValueSampleCount_ - 1];
+  const uint8_t estimatedHoldSteps =
+      last.actualValueSteps > normalizedTarget ? normalizedTarget : last.actualValueSteps;
+
+  return {
+      last.holdMs,
+      estimatedHoldSteps,
+      static_cast<uint8_t>(normalizedTarget - estimatedHoldSteps),
+  };
 }
 
 void SwitchController::waitUntilReady() const {
@@ -293,10 +426,7 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
       scaleChannelToSteps(hsv.saturation, COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT);
   const uint8_t valueDropSteps =
       scaleChannelToSteps(1.0f - hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
-  const uint8_t fineValueSteps = valueDropSteps < COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS
-      ? valueDropSteps
-      : COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS;
-  const uint8_t coarseValueSteps = valueDropSteps - fineValueSteps;
+  const PaletteValueMovement movement = estimatePaletteValueMovement(valueDropSteps);
 
   // Palette selection page.
   if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
@@ -359,16 +489,13 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
     }
   }
 
-  if (coarseValueSteps > 0) {
-    if (!transport_.moveDirection(
-            0, 1, static_cast<uint16_t>(coarseValueSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
+  if (movement.holdMs > 0) {
+    if (!transport_.moveDirection(0, 1, movement.holdMs, inputDelayMs_)) {
       return false;
     }
   }
 
-  // Keep the last darkening steps discrete so near-black shades do not get
-  // flattened by the continuous analog hold.
-  for (uint16_t step = 0; step < fineValueSteps; step += 1) {
+  for (uint16_t step = 0; step < movement.remainingTapSteps; step += 1) {
     if (!transport_.pressButton(ControllerButton::DpadDown, buttonPressMs_, inputDelayMs_)) {
       return false;
     }

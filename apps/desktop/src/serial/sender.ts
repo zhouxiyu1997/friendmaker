@@ -13,6 +13,12 @@ import {
   type BasicPaletteTimingState,
 } from "../protocol/paletteTiming.js";
 import {
+  createPaletteValueCalibrationState,
+  parsePaletteValueCalibrationConfig,
+  updatePaletteValueCalibrationStateForCommand,
+  type PaletteValueCalibrationState,
+} from "../protocol/paletteValueCalibration.js";
+import {
   createSessionId,
   formatSequencedCommand,
   parseSequencedAck,
@@ -257,12 +263,17 @@ export function getAckTimeoutForCommand(
   baseTimeoutMs: number,
   timing: InputTiming = DEFAULT_SAFE_INPUT_TIMING,
   basicPaletteState: BasicPaletteTimingState = createBasicPaletteTimingState(),
+  paletteValueState: PaletteValueCalibrationState = createPaletteValueCalibrationState(),
 ): number {
   const trimmed = command.trim();
   const simplePressTimeoutMs = 1_000 + timing.buttonPressMs + timing.inputDelayMs;
   const boundedTimeout = (computedTimeoutMs: number) => Math.max(baseTimeoutMs, computedTimeoutMs);
 
   if (trimmed.startsWith("CFG INPUT ")) {
+    return baseTimeoutMs;
+  }
+
+  if (parsePaletteValueCalibrationConfig(trimmed)) {
     return baseTimeoutMs;
   }
 
@@ -413,12 +424,20 @@ export function getAckTimeoutForCommand(
     return Math.max(
       baseTimeoutMs,
       estimatePaletteConfigDurationMs(slotIndex, red, green, blue, timing, {
+        paletteValueCalibration: paletteValueState.calibration,
         includeTimeoutMargin: true,
       }),
     );
   }
 
   return baseTimeoutMs;
+}
+
+export function updatePaletteValueStateForCommand(
+  command: string,
+  state: PaletteValueCalibrationState,
+): void {
+  updatePaletteValueCalibrationStateForCommand(command, state);
 }
 
 export function updateBasicPaletteStateForCommand(
@@ -989,6 +1008,7 @@ export class SerialCommandSession {
 
     let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
     const basicPaletteState = createBasicPaletteTimingState();
+    const paletteValueState = createPaletteValueCalibrationState();
     this.flushPassiveDeviceLines(options.onDeviceLine);
 
     for (const [index, command] of commands.entries()) {
@@ -1017,6 +1037,7 @@ export class SerialCommandSession {
                 options.ackTimeoutMs,
                 inputTiming,
                 basicPaletteState,
+                paletteValueState,
               ),
               {
                 sessionId: this.sessionId,
@@ -1063,6 +1084,7 @@ export class SerialCommandSession {
       });
       inputTiming = parseInputConfigCommand(command) ?? inputTiming;
       updateBasicPaletteStateForCommand(command, basicPaletteState);
+      updatePaletteValueCalibrationStateForCommand(command, paletteValueState);
       this.sequence += 1;
       this.lastUsedAtValue = Date.now();
     }

@@ -21,6 +21,7 @@ import {
   listDrawingTemplates,
   loadDrawingTemplateMask,
 } from "../drawingTemplates.js";
+import { normalizePaletteValueCalibration } from "../protocol/paletteValueCalibration.js";
 import {
   FirmwareToolingManager,
   type ToolingConfig,
@@ -1324,6 +1325,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
     inputDelay?: number;
     buttonPressDuration?: number;
     recenterStrategy?: "off" | "time-saving";
+    paletteValueCalibration?: unknown;
   };
 
   if (!body.imageDataUrl) {
@@ -1351,6 +1353,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const imageOffsetXPercent = normalizeImageOffsetPercent(body.imageOffsetXPercent);
   const imageOffsetYPercent = normalizeImageOffsetPercent(body.imageOffsetYPercent);
   const template = getDrawingTemplateDefinition(body.templateId ?? "none");
+  const paletteValueCalibration = normalizePaletteValueCalibration(body.paletteValueCalibration);
 
   if (!template) {
     json(response, 400, { error: `Unknown drawing template: ${body.templateId}` });
@@ -1381,6 +1384,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       removeBackground: body.removeBackground === true,
       drawingMask,
       recenterStrategy: body.recenterStrategy === "time-saving" ? "time-saving" : "off",
+      paletteValueCalibration,
     },
   );
 
@@ -1407,6 +1411,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
       buttonPressDuration: profile.buttonPressDuration,
       homeDuration: profile.homeDuration,
       recenterStrategy: body.recenterStrategy === "time-saving" ? "time-saving" : "off",
+      paletteValueCalibration,
     },
     stats: {
       usedColorIndexes: plan.usedColorIndexes,

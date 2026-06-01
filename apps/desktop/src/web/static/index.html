@@ -1131,6 +1131,29 @@
             </div>
 
             <div class="panel-head compact">
+              <h2>亮度长按校准</h2>
+              <p>记录自定义色亮度轴长按后的实际步数，用于避免深色过冲。</p>
+            </div>
+
+            <div class="timing-control-card">
+              <div class="timing-control-head">
+                <div>
+                  <p class="timing-control-kicker">自定义色</p>
+                  <h3>长按时长曲线</h3>
+                  <p id="palette-value-calibration-summary" class="timing-control-subtitle">使用默认曲线</p>
+                </div>
+                <span class="timing-control-badge">手动录入</span>
+              </div>
+              <div id="palette-value-calibration-grid" class="palette-value-calibration-grid"></div>
+              <div class="action-row slim">
+                <button id="palette-value-calibration-reset-button" class="ghost" type="button">恢复默认曲线</button>
+                <button id="palette-value-calibration-export-button" class="ghost" type="button">导出曲线</button>
+                <label class="ghost file-button" for="palette-value-calibration-import">导入曲线</label>
+                <input id="palette-value-calibration-import" class="visually-hidden" type="file" accept="application/json,.json" />
+              </div>
+            </div>
+
+            <div class="panel-head compact">
               <h2>先做一个小动作</h2>
               <p>先用小动作确认连接和参数。</p>
             </div>

@@ -5,12 +5,20 @@
 #include "config.h"
 #include "controller_transport.h"
 
+struct PaletteValueMovement {
+  uint16_t holdMs;
+  uint8_t estimatedHoldSteps;
+  uint8_t remainingTapSteps;
+};
+
 class SwitchController {
  public:
   explicit SwitchController(ControllerTransport &transport);
 
   void begin();
   void configureInputTiming(uint16_t buttonPressMs, uint16_t inputDelayMs, uint16_t homeMs);
+  bool configurePaletteValueCalibration(
+      const PaletteValueCalibrationSample *samples, uint8_t sampleCount);
   bool moveHome();
   bool moveCursor(int dx, int dy);
   bool moveStick(int x, int y, uint16_t holdMs);
@@ -38,9 +46,14 @@ class SwitchController {
   uint8_t basicPaletteSlotRows_[9] = {};
   uint8_t basicPaletteSlotCols_[9] = {};
   bool basicPaletteTrackingReady_ = false;
+  PaletteValueCalibrationSample paletteValueSamples_[PALETTE_VALUE_CALIBRATION_MAX_SAMPLES] = {};
+  uint8_t paletteValueSampleCount_ = 0;
   uint16_t buttonPressMs_ = BUTTON_PRESS_DURATION_MS;
   uint16_t inputDelayMs_ = INPUT_DELAY_MS;
   uint16_t homeMs_ = HOME_DURATION_MS;
 
   void waitUntilReady() const;
+  void resetPaletteValueCalibration();
+  uint8_t estimateValueStepsForHold(uint16_t holdMs) const;
+  PaletteValueMovement estimatePaletteValueMovement(uint8_t targetSteps) const;
 };

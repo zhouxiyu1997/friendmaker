@@ -10,6 +10,10 @@ import {
   parseInputConfigCommand,
 } from "../protocol/timing.js";
 import { createBasicPaletteTimingState } from "../protocol/paletteTiming.js";
+import {
+  createPaletteValueCalibrationState,
+  updatePaletteValueCalibrationStateForCommand,
+} from "../protocol/paletteValueCalibration.js";
 import { getAckTimeoutForCommand, updateBasicPaletteStateForCommand } from "../serial/sender.js";
 import { SimulatedDevice } from "./device.js";
 
@@ -75,6 +79,7 @@ export class SimulatedAckSender implements SenderControls {
     let sequence = 1;
     let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
     const basicPaletteState = createBasicPaletteTimingState();
+    const paletteValueState = createPaletteValueCalibrationState();
 
     for (const [index, command] of commands.entries()) {
       await this.waitWhilePaused();
@@ -100,7 +105,7 @@ export class SimulatedAckSender implements SenderControls {
               ? { inputReportFailureAtCommand: options.inputReportFailureAtCommand }
               : {}),
           }),
-          getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming, basicPaletteState),
+          getAckTimeoutForCommand(command, options.ackTimeoutMs, inputTiming, basicPaletteState, paletteValueState),
         );
 
         for (const line of response.lines) {
@@ -139,6 +144,7 @@ export class SimulatedAckSender implements SenderControls {
       });
       inputTiming = parseInputConfigCommand(command) ?? inputTiming;
       updateBasicPaletteStateForCommand(command, basicPaletteState);
+      updatePaletteValueCalibrationStateForCommand(command, paletteValueState);
       sequence += 1;
     }
 

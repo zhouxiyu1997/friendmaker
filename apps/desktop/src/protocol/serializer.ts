@@ -1,4 +1,5 @@
 import type { DrawCommand } from "./commands.js";
+import { formatPaletteValueCalibrationConfig } from "./paletteValueCalibration.js";
 
 export function serializeCommand(command: DrawCommand): string {
   switch (command.type) {
@@ -20,6 +21,8 @@ export function serializeCommand(command: DrawCommand): string {
       return `BTN ${command.button}`;
     case "color":
       return `C ${command.index}`;
+    case "paletteValueConfig":
+      return formatPaletteValueCalibrationConfig(command.calibration);
     case "basicPaletteReset":
       return "BC RESET";
     case "paletteConfig":

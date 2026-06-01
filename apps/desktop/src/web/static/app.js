@@ -289,6 +289,7 @@ const state = {
   timingLab: {
     busy: false,
     quickStep: 1,
+    paletteValueCalibration: null,
     benchmark: {
       status: "idle",
       detail:
@@ -463,6 +464,11 @@ const els = {
   timingInputDelayTip: document.getElementById("timing-input-delay-tip"),
   timingButtonPressBadge: document.getElementById("timing-button-press-badge"),
   timingButtonPressTip: document.getElementById("timing-button-press-tip"),
+  paletteValueCalibrationSummary: document.getElementById("palette-value-calibration-summary"),
+  paletteValueCalibrationGrid: document.getElementById("palette-value-calibration-grid"),
+  paletteValueCalibrationResetButton: document.getElementById("palette-value-calibration-reset-button"),
+  paletteValueCalibrationExportButton: document.getElementById("palette-value-calibration-export-button"),
+  paletteValueCalibrationImport: document.getElementById("palette-value-calibration-import"),
   timingStatusHint: document.getElementById("timing-status-hint"),
   timingActionButtons: [...document.querySelectorAll("[data-timing-action]")],
   timingBenchmarkButton: document.getElementById("timing-benchmark-button"),
@@ -522,10 +528,25 @@ const STUDIO_IMAGE_OFFSET_LIMITS = {
 };
 
 const SHARED_TIMING_STORAGE_KEY = "friend-maker.shared-timing";
+const PALETTE_VALUE_CALIBRATION_STORAGE_KEY = "friend-maker.palette-value-calibration";
 const DEFAULT_SHARED_TIMING = {
   inputDelay: 45,
   buttonPressDuration: 65,
   homeDuration: 1800,
+};
+const DEFAULT_PALETTE_VALUE_CALIBRATION = {
+  samples: [
+    { holdMs: 80, actualValueSteps: 4 },
+    { holdMs: 120, actualValueSteps: 7 },
+    { holdMs: 180, actualValueSteps: 12 },
+    { holdMs: 260, actualValueSteps: 20 },
+    { holdMs: 380, actualValueSteps: 32 },
+    { holdMs: 560, actualValueSteps: 50 },
+    { holdMs: 800, actualValueSteps: 76 },
+    { holdMs: 1100, actualValueSteps: 104 },
+    { holdMs: 1500, actualValueSteps: 112 },
+    { holdMs: 2000, actualValueSteps: 112 },
+  ],
 };
 const SHARED_TIMING_LIMITS = {
   inputDelay: { min: 16, max: 100, step: 1 },
@@ -1177,6 +1198,20 @@ els.timingResetButton.addEventListener("click", () => {
   resetSharedTiming();
 });
 
+els.paletteValueCalibrationResetButton.addEventListener("click", () => {
+  applyPaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION, { persist: true, rerender: true });
+  appendLog(els.timingLogOutput, "亮度长按校准已恢复默认曲线。");
+});
+
+els.paletteValueCalibrationExportButton.addEventListener("click", () => {
+  exportPaletteValueCalibration();
+});
+
+els.paletteValueCalibrationImport.addEventListener("change", async () => {
+  await importPaletteValueCalibration(els.paletteValueCalibrationImport.files?.[0] ?? null);
+  els.paletteValueCalibrationImport.value = "";
+});
+
 els.firmwareEnvSelect.addEventListener("change", () => {
   state.firmware.environmentId = els.firmwareEnvSelect.value;
   syncFirmwareUi();
@@ -1556,6 +1591,7 @@ function buildStudioGeneratePayload() {
     removeBackground: state.studio.removeBackground,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
+    paletteValueCalibration: state.timingLab.paletteValueCalibration,
     recenterStrategy: normalizeRecenterStrategy(state.studio.recenterStrategy),
   };
 }
@@ -4031,6 +4067,7 @@ function syncTimingLabUi() {
   els.timingBenchmarkButton.disabled = !canSendTimingCommands;
   els.timingLongBenchmarkButton.disabled = !canSendTimingCommands;
   els.timingReproBenchmarkButton.disabled = !canSendTimingCommands;
+  syncPaletteValueCalibrationUi();
 
   if (!hasPort) {
     els.timingStatusHint.textContent = "先在上面选一个串口设备，再开始试动作或跑测试。";
@@ -4204,6 +4241,279 @@ async function runTimingLabCommands(commands, label) {
   }
 
   return result;
+}
+
+function clonePaletteValueCalibration(calibration) {
+  return {
+    samples: (calibration?.samples ?? []).map((sample) => ({
+      holdMs: sample.holdMs,
+      actualValueSteps: sample.actualValueSteps,
+    })),
+  };
+}
+
+function normalizePaletteValueStep(value) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(112, Math.round(parsed)));
+}
+
+function normalizePaletteValueCalibration(value) {
+  const rawSamples = Array.isArray(value) ? value : value?.samples;
+
+  if (!Array.isArray(rawSamples) || rawSamples.length < 2 || rawSamples.length > 16) {
+    return null;
+  }
+
+  const samples = [];
+
+  for (const rawSample of rawSamples) {
+    const holdMs = Number(rawSample?.holdMs);
+    const actualValueSteps = normalizePaletteValueStep(rawSample?.actualValueSteps);
+
+    if (!Number.isFinite(holdMs) || actualValueSteps === null) {
+      return null;
+    }
+
+    const sample = {
+      holdMs: Math.round(holdMs),
+      actualValueSteps,
+    };
+    const previous = samples.at(-1);
+
+    if (
+      sample.holdMs <= 0 ||
+      sample.holdMs > 60_000 ||
+      (previous && sample.holdMs <= previous.holdMs) ||
+      (previous && sample.actualValueSteps < previous.actualValueSteps)
+    ) {
+      return null;
+    }
+
+    samples.push(sample);
+  }
+
+  return { samples };
+}
+
+function persistPaletteValueCalibration() {
+  try {
+    window.localStorage.setItem(
+      PALETTE_VALUE_CALIBRATION_STORAGE_KEY,
+      JSON.stringify(state.timingLab.paletteValueCalibration),
+    );
+  } catch {
+    // Local storage can be disabled in browser shells; generation still uses memory state.
+  }
+}
+
+function applyPaletteValueCalibration(nextCalibration, options = {}) {
+  const calibration =
+    normalizePaletteValueCalibration(nextCalibration) ??
+    clonePaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION);
+
+  state.timingLab.paletteValueCalibration = calibration;
+
+  if (options.persist === true) {
+    persistPaletteValueCalibration();
+  }
+
+  if (options.rerender !== false) {
+    renderPaletteValueCalibrationControls();
+  } else {
+    syncPaletteValueCalibrationUi();
+  }
+
+  syncStudioUi();
+  scheduleStudioPreviewRefresh();
+}
+
+function loadPaletteValueCalibration() {
+  try {
+    const rawValue = window.localStorage.getItem(PALETTE_VALUE_CALIBRATION_STORAGE_KEY);
+
+    if (!rawValue) {
+      applyPaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION, {
+        persist: false,
+        rerender: true,
+      });
+      return;
+    }
+
+    applyPaletteValueCalibration(JSON.parse(rawValue), { persist: false, rerender: true });
+  } catch {
+    applyPaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION, {
+      persist: false,
+      rerender: true,
+    });
+  }
+}
+
+function buildPaletteValueCalibrationSampleCommands(holdMs) {
+  const normalizedHoldMs = Math.max(1, Math.min(60_000, Math.round(Number(holdMs) || 0)));
+  const commands = ["BTN Y"];
+
+  for (let step = 0; step < 18; step += 1) {
+    commands.push("BTN DDOWN");
+  }
+
+  commands.push("BTN Y");
+  commands.push("BTN R");
+  commands.push("STICK 0 -1 1500");
+  commands.push("STICK -1 0 3000");
+  commands.push(`STICK 0 1 ${normalizedHoldMs}`);
+  return commands;
+}
+
+async function runPaletteValueCalibrationSample(holdMs) {
+  const commands = buildPaletteValueCalibrationSampleCommands(holdMs);
+  appendLog(
+    els.timingLogOutput,
+    `亮度长按校准 ${holdMs}ms：会停在自定义色编辑页，观察落点后把实际步数填回表格。`,
+  );
+  await runTimingLabCommands(commands, `亮度长按校准 ${holdMs}ms`);
+}
+
+function updatePaletteValueCalibrationSample(holdMs, value) {
+  const nextSteps = normalizePaletteValueStep(value);
+
+  if (nextSteps === null) {
+    appendLog(els.timingLogOutput, "亮度长按校准保存失败：请输入 0 到 112 的整数。");
+    renderPaletteValueCalibrationControls();
+    return;
+  }
+
+  const calibration = clonePaletteValueCalibration(state.timingLab.paletteValueCalibration);
+  const sample = calibration.samples.find((candidate) => candidate.holdMs === holdMs);
+
+  if (!sample) {
+    return;
+  }
+
+  sample.actualValueSteps = nextSteps;
+  const normalized = normalizePaletteValueCalibration(calibration);
+
+  if (!normalized) {
+    appendLog(els.timingLogOutput, "亮度长按校准保存失败：步数需要随长按时长单调递增或持平。");
+    renderPaletteValueCalibrationControls();
+    return;
+  }
+
+  state.timingLab.paletteValueCalibration = normalized;
+  persistPaletteValueCalibration();
+  syncPaletteValueCalibrationUi();
+  scheduleStudioPreviewRefresh();
+}
+
+function syncPaletteValueCalibrationUi() {
+  const calibration =
+    state.timingLab.paletteValueCalibration ??
+    clonePaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION);
+  const samples = calibration.samples ?? [];
+  const lastSample = samples.at(-1);
+  const hasPort = Boolean(state.selectedPortPath);
+  const canSendTimingCommands =
+    !state.timingLab.busy &&
+    !isStudioExecutionActive() &&
+    !state.serialSession.busy &&
+    hasPort &&
+    isControllerReadyForStudio();
+
+  els.paletteValueCalibrationSummary.textContent = lastSample
+    ? `当前曲线 ${samples.length} 个样本，最大安全长按 ${lastSample.holdMs}ms ≈ ${lastSample.actualValueSteps} 步。`
+    : "当前没有可用曲线，将使用默认保守曲线。";
+  els.paletteValueCalibrationResetButton.disabled = state.timingLab.busy || state.serialSession.busy;
+  els.paletteValueCalibrationExportButton.disabled = !samples.length;
+  els.paletteValueCalibrationImport.disabled = state.timingLab.busy || state.serialSession.busy;
+
+  els.paletteValueCalibrationGrid.querySelectorAll("button[data-palette-value-hold-ms]").forEach((button) => {
+    button.disabled = !canSendTimingCommands;
+  });
+  els.paletteValueCalibrationGrid.querySelectorAll("input[data-palette-value-hold-ms]").forEach((input) => {
+    input.disabled = state.timingLab.busy || state.serialSession.busy;
+  });
+}
+
+function renderPaletteValueCalibrationControls() {
+  const calibration =
+    state.timingLab.paletteValueCalibration ??
+    clonePaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION);
+
+  els.paletteValueCalibrationGrid.innerHTML = "";
+
+  calibration.samples.forEach((sample) => {
+    const row = document.createElement("div");
+    row.className = "palette-value-calibration-row";
+
+    const label = document.createElement("span");
+    label.textContent = `${sample.holdMs} ms`;
+
+    const testButton = document.createElement("button");
+    testButton.type = "button";
+    testButton.className = "secondary-button";
+    testButton.dataset.paletteValueHoldMs = String(sample.holdMs);
+    testButton.textContent = "测试";
+    testButton.addEventListener("click", async () => {
+      await runPaletteValueCalibrationSample(sample.holdMs);
+    });
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "112";
+    input.step = "1";
+    input.value = String(sample.actualValueSteps);
+    input.dataset.paletteValueHoldMs = String(sample.holdMs);
+    input.setAttribute("aria-label", `${sample.holdMs}ms 实际亮度步数`);
+    input.addEventListener("change", () => {
+      updatePaletteValueCalibrationSample(sample.holdMs, input.value);
+    });
+
+    row.append(label, testButton, input);
+    els.paletteValueCalibrationGrid.append(row);
+  });
+
+  syncPaletteValueCalibrationUi();
+}
+
+function exportPaletteValueCalibration() {
+  const calibration =
+    state.timingLab.paletteValueCalibration ??
+    clonePaletteValueCalibration(DEFAULT_PALETTE_VALUE_CALIBRATION);
+  const blob = new Blob([`${JSON.stringify(calibration, null, 2)}\n`], {
+    type: "application/json",
+  });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = "palette-value-calibration.json";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importPaletteValueCalibration(file) {
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const calibration = normalizePaletteValueCalibration(parsed);
+
+    if (!calibration) {
+      throw new Error("曲线格式不正确");
+    }
+
+    applyPaletteValueCalibration(calibration, { persist: true, rerender: true });
+    appendLog(els.timingLogOutput, `已导入亮度长按校准：${calibration.samples.length} 个样本。`);
+  } catch (error) {
+    appendLog(els.timingLogOutput, `亮度长按校准导入失败：${getErrorMessage(error)}`);
+  }
 }
 
 function buildSquareSpiralBenchmarkCommands(spiralDepth) {
@@ -5234,6 +5544,7 @@ async function init() {
     scrollToPage: window.location.hash.length > 0,
   });
   loadSharedTiming();
+  loadPaletteValueCalibration();
   state.studio.canvasSize = Number(els.sizeSelect.value || state.studio.canvasSize);
   state.studio.brushSize = Number(els.brushSizeSelect.value || state.studio.brushSize);
   state.timingLab.quickStep = Number(els.timingStepSelect.value || state.timingLab.quickStep);

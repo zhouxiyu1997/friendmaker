@@ -281,6 +281,12 @@ export class SimulatedDevice {
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }
 
+    if (trimmed.startsWith("CFG PALVALUE ")) {
+      lines.push("INFO palette-value-calibration=updated");
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
     if (trimmed === "P") {
       this.state.drawCount += 1;
       await delay(options.ackDelayMs);
@@ -361,6 +367,11 @@ export class SimulatedDevice {
       }
 
       this.state.colorIndex = colorIndex;
+      await delay(options.ackDelayMs);
+      return this.cacheAndReturn(frame, this.makeAck(frame), lines);
+    }
+
+    if (trimmed.startsWith("PC ") || trimmed.startsWith("BC ") || trimmed === "BC RESET") {
       await delay(options.ackDelayMs);
       return this.cacheAndReturn(frame, this.makeAck(frame), lines);
     }

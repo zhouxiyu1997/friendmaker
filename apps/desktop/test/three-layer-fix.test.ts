@@ -12,6 +12,12 @@ import { pixelizeImage } from "../src/image/pixelize.js";
 import { renderPreviewToBuffer } from "../src/image/renderPreview.js";
 import { resizeImage } from "../src/image/resizeImage.js";
 import { generateScanlineCommands } from "../src/path/scanline.js";
+import {
+  createPaletteValueCalibrationState,
+  formatPaletteValueCalibrationConfig,
+  normalizePaletteValueCalibration,
+  updatePaletteValueCalibrationStateForCommand,
+} from "../src/protocol/paletteValueCalibration.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import {
   SERIAL_OPEN_BOOT_TIMEOUT_MS,
@@ -481,18 +487,41 @@ test("serial sender probes fresh ESP32 serial sessions before first sequenced co
 
 test("palette-config commands get enough timeout for calibrated custom colors", () => {
   const timing = { buttonPressMs: 100, inputDelayMs: 100, homeMs: 1800 };
+  const paletteValueState = createPaletteValueCalibrationState();
+  const calibration = normalizePaletteValueCalibration({
+    samples: [
+      { holdMs: 560, actualValueSteps: 45 },
+      { holdMs: 800, actualValueSteps: 72 },
+      { holdMs: 1100, actualValueSteps: 100 },
+    ],
+  });
 
-  assert.equal(getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing), 27_880);
+  assert.ok(calibration);
+  updatePaletteValueCalibrationStateForCommand(
+    formatPaletteValueCalibrationConfig(calibration),
+    paletteValueState,
+  );
+
+  assert.equal(
+    getAckTimeoutForCommand("PC 1 #4E3239", 20_000, timing, undefined, paletteValueState),
+    25_224,
+  );
   assert.equal(getAckTimeoutForCommand("PC 2 #00FF00", 20_000, timing), 51_560);
-  assert.equal(getAckTimeoutForCommand("PC 0 #202020", 20_000, timing), 25_300);
-  assert.equal(getAckTimeoutForCommand("PC 0 #000000", 20_000, timing), 25_580);
+  assert.equal(
+    getAckTimeoutForCommand("PC 0 #202020", 20_000, timing, undefined, paletteValueState),
+    22_458,
+  );
+  assert.equal(
+    getAckTimeoutForCommand("PC 0 #000000", 20_000, timing, undefined, paletteValueState),
+    24_680,
+  );
 });
 
 test("palette-config timeout covers issue 74 custom colors", () => {
   const timing = { buttonPressMs: 65, inputDelayMs: 45, homeMs: 1800 };
 
-  assert.equal(getAckTimeoutForCommand("PC 2 #933643", 20_000, timing), 25_740);
-  assert.equal(getAckTimeoutForCommand("PC 3 #5b2a33", 20_000, timing), 25_710);
+  assert.equal(getAckTimeoutForCommand("PC 2 #933643", 20_000, timing), 24_250);
+  assert.equal(getAckTimeoutForCommand("PC 3 #5b2a33", 20_000, timing), 24_063);
 });
 
 test("palette menu commands get conservative timeouts for reliable navigation", () => {

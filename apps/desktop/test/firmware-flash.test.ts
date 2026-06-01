@@ -414,3 +414,42 @@ test("controller firmware can clear the stored bluetooth peer", async () => {
     /line == "BT CLEAR-PEER"[\s\S]*controller\.clearBluetoothPeer\(\)[\s\S]*INFO action=bt-clear-peer/u,
   );
 });
+
+test("controller firmware accepts palette value calibration and uses it for custom-color value drops", async () => {
+  const configSource = await readFile(
+    new URL("../../../firmware/esp32/src/config.h", import.meta.url),
+    "utf8",
+  );
+  const controllerHeader = await readFile(
+    new URL("../../../firmware/esp32/src/controller.h", import.meta.url),
+    "utf8",
+  );
+  const controllerSource = await readFile(
+    new URL("../../../firmware/esp32/src/controller.cpp", import.meta.url),
+    "utf8",
+  );
+  const protocolSource = await readFile(
+    new URL("../../../firmware/esp32/src/protocol.cpp", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(configSource, /PALETTE_VALUE_CALIBRATION_SAMPLE_COUNT/u);
+  assert.match(configSource, /\{80,\s*4\}[\s\S]*\{2000,\s*112\}/u);
+  assert.match(controllerHeader, /configurePaletteValueCalibration/u);
+  assert.match(controllerHeader, /PaletteValueMovement/u);
+  assert.match(controllerSource, /estimatePaletteValueMovement[\s\S]*remainingTapSteps/u);
+  assert.match(
+    controllerSource,
+    /transport_\.moveDirection\(0,\s*1,\s*movement\.holdMs,\s*inputDelayMs_\)/u,
+  );
+  assert.match(
+    controllerSource,
+    /for \(uint16_t step = 0; step < movement\.remainingTapSteps; step \+= 1\)[\s\S]*ControllerButton::DpadDown/u,
+  );
+  assert.doesNotMatch(controllerSource, /coarseValueSteps \* COLOR_PALETTE_EDITOR_MOVE_STEP_MS/u);
+  assert.match(protocolSource, /parsePaletteValueConfigCommand/u);
+  assert.match(
+    protocolSource,
+    /line\.startsWith\("CFG PALVALUE"\)[\s\S]*invalid palette value calibration/u,
+  );
+});

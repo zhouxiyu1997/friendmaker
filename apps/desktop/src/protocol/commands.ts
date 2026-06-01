@@ -1,4 +1,5 @@
 import type { ControllerButton } from "../types.js";
+import type { PaletteValueCalibration } from "./paletteValueCalibration.js";
 
 export type DrawCommand =
   | { type: "inputConfig"; buttonPressMs: number; inputDelayMs: number; homeMs: number }
@@ -9,6 +10,7 @@ export type DrawCommand =
   | { type: "draw"; button: ControllerButton }
   | { type: "press"; button: ControllerButton }
   | { type: "color"; index: number }
+  | { type: "paletteValueConfig"; calibration: PaletteValueCalibration }
   | { type: "basicPaletteReset" }
   | { type: "paletteConfig"; slot: number; colorHex: string }
   | { type: "basicPaletteConfig"; slot: number; row: number; col: number }
@@ -51,6 +53,10 @@ export function pressButtonCommand(button: ControllerButton): DrawCommand {
 
 export function colorCommand(index: number): DrawCommand {
   return { type: "color", index };
+}
+
+export function paletteValueConfigCommand(calibration: PaletteValueCalibration): DrawCommand {
+  return { type: "paletteValueConfig", calibration };
 }
 
 export function basicPaletteResetCommand(): DrawCommand {

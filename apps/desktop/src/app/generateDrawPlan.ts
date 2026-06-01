@@ -12,6 +12,7 @@ import {
 } from "../path/scanline.js";
 import { serializeCommands } from "../protocol/serializer.js";
 import type { DrawCommand } from "../protocol/commands.js";
+import type { PaletteValueCalibration } from "../protocol/paletteValueCalibration.js";
 import type { CanvasBounds, DrawingMask, DrawingProfile, PixelMap, ResumePlan } from "../types.js";
 
 export interface DrawPlanPathStats {
@@ -52,6 +53,7 @@ export async function generateDrawPlan(
     drawingMask?: DrawingMask | null;
     pathStrategy?: PathStrategy;
     recenterStrategy?: RecenterStrategy;
+    paletteValueCalibration?: PaletteValueCalibration | null;
   },
 ): Promise<DrawPlan> {
   const unsupportedBrushShapeMessage = getUnsupportedBrushShapeMessageForProfile(profile);
@@ -62,11 +64,16 @@ export async function generateDrawPlan(
 
   const { pixelMap, usedColorIndexes } = await pixelizeImage(imageSource, profile, options);
   const previewPng = await renderPreviewToBuffer(pixelMap, profile, previewScale);
+  const scanlineOptions =
+    options?.paletteValueCalibration !== undefined
+      ? { paletteValueCalibration: options.paletteValueCalibration }
+      : {};
   const scanlinePlan = generateScanlinePlan(
     pixelMap,
     profile,
     options?.pathStrategy,
     options?.recenterStrategy,
+    scanlineOptions,
   );
   const drawCommands = scanlinePlan.commands;
   const imageBounds = calculateCanvasBounds(pixelMap, profile);

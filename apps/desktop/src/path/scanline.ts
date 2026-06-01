@@ -17,6 +17,7 @@ import {
   lineCommand,
   moveCommand,
   paletteConfigCommand,
+  paletteValueConfigCommand,
   pressButtonCommand,
   type DrawCommand,
   stickCommand,
@@ -31,6 +32,11 @@ import {
   resetBasicPaletteTimingState,
   updateBasicPaletteTimingState,
 } from "../protocol/paletteTiming.js";
+import {
+  createPaletteValueCalibrationState,
+  updatePaletteValueCalibrationStateForCommand,
+  type PaletteValueCalibration,
+} from "../protocol/paletteValueCalibration.js";
 import { serializeCommand, serializeCommands } from "../protocol/serializer.js";
 
 export type PathStrategy = "scanline" | "nearest";
@@ -48,6 +54,10 @@ export interface GeneratedScanlinePlan {
   commands: DrawCommand[];
   resumePlan: ResumePlan;
   recenterStats: RecenterStats;
+}
+
+export interface ScanlinePlanOptions {
+  paletteValueCalibration?: PaletteValueCalibration | null;
 }
 
 const PALETTE_SLOT_COUNT = 9;
@@ -865,6 +875,7 @@ export function generateScanlinePlan(
   profile: DrawingProfile,
   pathStrategy: PathStrategy = "scanline",
   recenterStrategy: RecenterStrategy = "off",
+  options: ScanlinePlanOptions = {},
 ): GeneratedScanlinePlan {
   const commands: DrawCommand[] = [];
   const grid = createBrushGrid(profile);
@@ -880,6 +891,15 @@ export function generateScanlinePlan(
     profile.homeDuration,
   );
   commands.push(inputConfig);
+  const paletteValueConfig =
+    profile.colorMode === "palette" && options.paletteValueCalibration
+      ? paletteValueConfigCommand(options.paletteValueCalibration)
+      : null;
+
+  if (paletteValueConfig) {
+    commands.push(paletteValueConfig);
+  }
+
   commands.push(...brushSetupCommands);
 
   if (shouldStartFromCanvasCenter(profile)) {
@@ -979,6 +999,7 @@ export function generateScanlinePlan(
             slotIndex,
             resumePrefixCommands: [
               ...brushSetupCommands,
+              ...(paletteValueConfig ? [paletteValueConfig] : []),
               ...batchPrefixCommands.slice(slotIndex),
               colorCommand(slotIndex),
               waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS),
@@ -1074,6 +1095,7 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
     homeMs: profile.homeDuration,
   };
   const basicPaletteState = createBasicPaletteTimingState();
+  const paletteValueState = createPaletteValueCalibrationState();
 
   return commands.reduce((total, command) => {
     switch (command.type) {
@@ -1105,6 +1127,12 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
         return total + timing.buttonPressMs + timing.inputDelayMs;
       case "color":
         return total + estimateColorSelectDurationMs(command.index, timing);
+      case "paletteValueConfig":
+        updatePaletteValueCalibrationStateForCommand(
+          serializeCommand(command),
+          paletteValueState,
+        );
+        return total;
       case "paletteConfig":
         {
           const hex = command.colorHex.replace(/^#/u, "");
@@ -1112,7 +1140,9 @@ export function estimateRuntimeMs(commands: DrawCommand[], profile: DrawingProfi
           const green = Number.parseInt(hex.slice(2, 4), 16);
           const blue = Number.parseInt(hex.slice(4, 6), 16);
 
-          return total + estimatePaletteConfigDurationMs(command.slot, red, green, blue, timing);
+          return total + estimatePaletteConfigDurationMs(command.slot, red, green, blue, timing, {
+            paletteValueCalibration: paletteValueState.calibration,
+          });
         }
       case "basicPaletteConfig":
         {
