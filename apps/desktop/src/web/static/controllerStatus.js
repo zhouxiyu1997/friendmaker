@@ -91,8 +91,8 @@ export function boolLabel(value, labels) {
   return "未知";
 }
 
-export function isControllerSendableStatus({ connected, paired, ready }) {
-  return ready === true || (connected === true && paired === true);
+export function isControllerSendableStatus({ ready }) {
+  return ready === true;
 }
 
 export function shouldReuseExistingControllerConnection(status) {
@@ -103,7 +103,8 @@ export function shouldReuseExistingControllerConnection(status) {
   return (
     status?.readyValue === true ||
     status?.connectedValue === true ||
-    status?.authValue === true
+    status?.authValue === true ||
+    status?.discoverableValue === true
   );
 }
 
@@ -134,8 +135,7 @@ export function deriveControllerStatus(lines) {
     paired === true &&
     congestedSendReport &&
     sendReportFailureCount >= 10;
-  const readyInferredFromPairing = rawReady !== true && connected === true && paired === true && !unstableInferredReady;
-  const ready = rawReady === true || readyInferredFromPairing;
+  const ready = rawReady === true;
   const initError = info.bt_init_error ?? "-";
 
   let tone = "idle";
@@ -147,9 +147,7 @@ export function deriveControllerStatus(lines) {
     tone = "success";
     pill = "已就绪";
     title = "手柄已连接";
-    detail = readyInferredFromPairing
-      ? "开发板已经完成 HID 连接和配对；固件报告通道字段可能滞后，但当前状态已经可以发送按钮和摇杆报告。"
-      : "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
+    detail = "开发板已经完成连接并可发送按钮和摇杆报告，可以继续做手柄测试。";
   } else if (unstableInferredReady) {
     tone = "warning";
     pill = "不稳定";
@@ -199,7 +197,7 @@ export function deriveControllerStatus(lines) {
     initStep: info.bt_init_step ?? "-",
     initError,
     rawReadyValue: rawReady,
-    readyInferredValue: readyInferredFromPairing,
+    readyInferredValue: false,
     unstableValue: unstableInferredReady,
     reconnectRecommendedValue: unstableInferredReady,
     sendReportFailureCount,

@@ -5,6 +5,7 @@ const SEQUENCE_RE = /^[1-9]\d*$/u;
 const OK_ACK_RE = /^OK\s+([0-9a-f]{8})\s+([1-9]\d*)$/iu;
 const ERR_ACK_RE = /^ERR\s+([0-9a-f]{8})\s+([1-9]\d*)\s+(.+)$/iu;
 const FRAME_RE = /^SEQ\s+([0-9a-f]{8})\s+([1-9]\d*)\s+(.+)$/iu;
+export const MAX_SEQUENCED_COMMAND_LENGTH = 256;
 
 export interface SequencedFrame {
   sessionId: string;
@@ -42,11 +43,46 @@ export function createSessionId(): string {
   return randomBytes(4).toString("hex");
 }
 
+export function validateSerialCommand(command: unknown): asserts command is string {
+  if (typeof command !== "string") {
+    throw new Error("Serial commands must be strings.");
+  }
+
+  if (/[\r\n\0]/u.test(command)) {
+    throw new Error("Serial commands must be a single line.");
+  }
+
+  const trimmedCommand = command.trim();
+
+  if (trimmedCommand.length === 0) {
+    throw new Error("Serial commands cannot be empty.");
+  }
+
+  if (trimmedCommand.length > MAX_SEQUENCED_COMMAND_LENGTH) {
+    throw new Error("Serial command is too long.");
+  }
+}
+
+export function validateSerialCommandBatch(commands: unknown): asserts commands is string[] {
+  if (!Array.isArray(commands)) {
+    throw new Error("Serial commands must be an array.");
+  }
+
+  if (commands.length === 0) {
+    throw new Error("Serial command batch cannot be empty.");
+  }
+
+  for (const command of commands) {
+    validateSerialCommand(command);
+  }
+}
+
 export function formatSequencedCommand(
   sessionId: string,
   sequence: number,
   command: string,
 ): string {
+  validateSerialCommand(command);
   const normalizedSessionId = normalizeSessionId(sessionId);
   const trimmedCommand = command.trim();
 
@@ -56,10 +92,6 @@ export function formatSequencedCommand(
 
   if (!Number.isSafeInteger(sequence) || sequence <= 0) {
     throw new Error(`Invalid sequence: ${sequence}`);
-  }
-
-  if (trimmedCommand.length === 0) {
-    throw new Error("Cannot frame an empty command.");
   }
 
   return `SEQ ${normalizedSessionId} ${sequence} ${trimmedCommand}`;

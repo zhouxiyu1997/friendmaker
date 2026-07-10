@@ -16,6 +16,7 @@ import { applyCliOptions, type CliOptions } from "../cli/args.js";
 import { DEFAULT_ACK_TIMEOUT_MS } from "../config/defaultProfile.js";
 import { loadProfile } from "../config/loadProfile.js";
 import { OFFICIAL_COLOR_GRID } from "../config/officialPalette.js";
+import { validateSerialCommandBatch } from "../protocol/sequencing.js";
 import {
   getDrawingTemplateDefinition,
   listDrawingTemplates,
@@ -1449,9 +1450,7 @@ async function executeCommands(body: {
   lines: string[];
   session: SerialSessionSnapshot;
 }> {
-  if (!Array.isArray(body.commands) || body.commands.length === 0) {
-    throw new Error("Missing commands.");
-  }
+  validateSerialCommandBatch(body.commands);
 
   const target = body.target === "serial" ? "serial" : "simulate";
   const ackTimeoutMs = normalizeAckTimeoutMs(body.ackTimeoutMs);
@@ -1640,9 +1639,7 @@ async function startManagedExecution(body: {
   initialCompletedCommands?: number;
   recoverySession?: RecoverySessionRecord | null;
 }): Promise<Record<string, unknown>> {
-  if (!Array.isArray(body.commands) || body.commands.length === 0) {
-    throw new Error("Missing commands.");
-  }
+  validateSerialCommandBatch(body.commands);
 
   if (isManagedExecutionActive(managedExecution.status)) {
     throw new Error("A drawing execution is already running.");
@@ -1909,9 +1906,7 @@ async function handleExecutionStart(
   };
 
   try {
-    if (!Array.isArray(body.commands) || body.commands.length === 0) {
-      throw new Error("Missing commands.");
-    }
+    validateSerialCommandBatch(body.commands);
 
     if (isManagedExecutionActive(managedExecution.status)) {
       throw new Error("A drawing execution is already running.");

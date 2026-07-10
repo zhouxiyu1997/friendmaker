@@ -454,11 +454,15 @@ test("serial sender probes fresh ESP32 serial sessions before first sequenced co
   );
   assert.match(
     senderSource,
-    /INFO serial_session=probe phase=\$\{phase\} command=I timeout_ms=\$\{SERIAL_OPEN_READY_PROBE_TIMEOUT_MS\}[\s\S]*await writeLine\(port, "I"\)[\s\S]*WARN serial_session=probe_timeout phase=\$\{phase\} timeout_ms=\$\{SERIAL_OPEN_READY_PROBE_TIMEOUT_MS\}[\s\S]*INFO serial_session=probe_ready phase=\$\{phase\}/u,
+    /INFO serial_session=probe phase=\$\{phase\} command=I timeout_ms=\$\{SERIAL_OPEN_READY_PROBE_TIMEOUT_MS\}[\s\S]*writeWithPrearmedWait\([\s\S]*waitForReadinessProbeAck\([\s\S]*\(\) => writeLine\(port, "I"\)[\s\S]*WARN serial_session=probe_timeout phase=\$\{phase\} timeout_ms=\$\{SERIAL_OPEN_READY_PROBE_TIMEOUT_MS\}[\s\S]*INFO serial_session=probe_ready phase=\$\{phase\}/u,
   );
   assert.match(
     senderSource,
-    /if \(!sawActivity && elapsedMs >= SERIAL_OPEN_RESET_DETECT_WINDOW_MS\)[\s\S]*if \(sawBoot && idleMs >= SERIAL_OPEN_POST_BOOT_SETTLE_MS\)[\s\S]*WARN serial_session=stabilize_timeout boot_seen=false wait_ms=\$\{SERIAL_OPEN_BOOT_TIMEOUT_MS\}/u,
+    /if \(!sawActivity && elapsedMs >= SERIAL_OPEN_RESET_DETECT_WINDOW_MS\)[\s\S]*if \(sawActivity && idleMs >= SERIAL_OPEN_POST_BOOT_SETTLE_MS\)[\s\S]*if \(elapsedMs >= SERIAL_OPEN_BOOT_TIMEOUT_MS\)[\s\S]*WARN serial_session=stabilize_timeout boot_seen=\$\{sawBoot\} wait_ms=\$\{SERIAL_OPEN_BOOT_TIMEOUT_MS\}/u,
+  );
+  assert.match(
+    senderSource,
+    /writeWithPrearmedWait\([\s\S]*waitForAck\([\s\S]*\(\) => writeLine\(port, framedCommand\)/u,
   );
   assert.match(
     senderSource,
