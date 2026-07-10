@@ -169,7 +169,7 @@ test("mono resume segments keep the first draw command when the segment already 
   assert.equal(segment.commandEndExclusive, 14);
 });
 
-test("official and palette resume segments rebuild only unfinished color slots", () => {
+test("official and palette segments interleave config and use standalone recovery prefixes", () => {
   const profile = makeProfile({
     canvasWidth: 9,
     canvasHeight: 1,
@@ -186,30 +186,32 @@ test("official and palette resume segments rebuild only unfinished color slots",
   const officialCommands = serializeCommands(officialPlan.commands);
   const officialSegments = officialPlan.resumePlan.segments;
   const expectedSquarePrefix = expectedBrushSetupPrefix(1, "square");
+  const expectedOfficialConfigs = ["BC 0 0 2", "BC 1 0 5", "BC 2 0 7"];
 
   assert.equal(officialSegments.length, 3);
-  assert.deepEqual(
-    officialSegments[0]?.resumePrefixCommands.slice(0, expectedSquarePrefix.length),
-    expectedSquarePrefix,
-  );
-  assert.equal(officialSegments[0]?.resumePrefixCommands[expectedSquarePrefix.length], "BC RESET");
-  assert.deepEqual(
-    officialSegments[1]?.resumePrefixCommands.slice(0, expectedSquarePrefix.length),
-    expectedSquarePrefix,
-  );
-  assert.equal(officialSegments[1]?.resumePrefixCommands[expectedSquarePrefix.length], "BC RESET");
-  assert.match(officialSegments[1]?.resumePrefixCommands[expectedSquarePrefix.length + 1] ?? "", /^BC 1 /u);
-  assert.match(officialSegments[1]?.resumePrefixCommands[expectedSquarePrefix.length + 2] ?? "", /^BC 2 /u);
-  assert.equal(
-    officialSegments[1]?.resumePrefixCommands.some((command) => /^BC 0 /u.test(command)),
-    false,
-  );
-  assert.equal(
-    officialSegments[1]?.resumePrefixCommands.at(-2),
-    "C 1",
-  );
-  assert.equal(officialSegments[1]?.resumePrefixCommands.at(-1), "W 500");
-  assert.equal(officialCommands[officialSegments[1]?.bodyStartCommandIndex ?? 0], "P");
+  assert.equal(officialCommands.filter((command) => command === "BC RESET").length, 1);
+  assert.equal(officialCommands.some((command) => /^C /u.test(command)), false);
+
+  officialSegments.forEach((segment, index) => {
+    const configCommand = expectedOfficialConfigs[index]!;
+    const configIndex = officialCommands.indexOf(configCommand);
+
+    assert.deepEqual(segment.resumePrefixCommands, [
+      ...expectedSquarePrefix,
+      "BC RESET",
+      configCommand,
+      "W 500",
+    ]);
+    assert.ok(configIndex >= 0);
+    if (index === 0) {
+      assert.equal(officialCommands[configIndex - 1], "BC RESET");
+    } else {
+      assert.equal(configIndex, officialSegments[index - 1]?.commandEndExclusive);
+    }
+    assert.equal(officialCommands[configIndex + 1], "W 500");
+    assert.ok(configIndex + 1 < segment.bodyStartCommandIndex);
+    assert.equal(officialCommands[segment.bodyStartCommandIndex], "P");
+  });
 
   const paletteProfile = makeProfile({
     canvasWidth: 9,
@@ -219,29 +221,27 @@ test("official and palette resume segments rebuild only unfinished color slots",
     palette: Array.from({ length: 16 }, (_, index) => `#${String(index + 1).padStart(6, "0")}`),
   });
   const palettePlan = generateScanlinePlan(pixelMap, paletteProfile);
+  const paletteCommands = serializeCommands(palettePlan.commands);
   const paletteSegments = palettePlan.resumePlan.segments;
+  const expectedPaletteConfigs = ["PC 0 #ff0000", "PC 1 #00ff00", "PC 2 #0000ff"];
 
-  assert.deepEqual(
-    paletteSegments[0]?.resumePrefixCommands.slice(0, expectedSquarePrefix.length),
-    expectedSquarePrefix,
-  );
-  assert.match(paletteSegments[0]?.resumePrefixCommands[expectedSquarePrefix.length] ?? "", /^PC 0 /u);
-  assert.match(paletteSegments[0]?.resumePrefixCommands[expectedSquarePrefix.length + 1] ?? "", /^PC 1 /u);
-  assert.deepEqual(
-    paletteSegments[1]?.resumePrefixCommands.slice(0, expectedSquarePrefix.length),
-    expectedSquarePrefix,
-  );
-  assert.match(paletteSegments[1]?.resumePrefixCommands[expectedSquarePrefix.length] ?? "", /^PC 1 /u);
-  assert.match(paletteSegments[1]?.resumePrefixCommands[expectedSquarePrefix.length + 1] ?? "", /^PC 2 /u);
-  assert.equal(
-    paletteSegments[1]?.resumePrefixCommands.some((command) => /^PC 0 /u.test(command)),
-    false,
-  );
-  assert.equal(
-    paletteSegments[1]?.resumePrefixCommands.at(-2),
-    "C 1",
-  );
-  assert.equal(paletteSegments[1]?.resumePrefixCommands.at(-1), "W 500");
+  assert.equal(paletteCommands.some((command) => /^C /u.test(command)), false);
+  paletteSegments.forEach((segment, index) => {
+    const configCommand = expectedPaletteConfigs[index]!;
+    const configIndex = paletteCommands.indexOf(configCommand);
+
+    assert.deepEqual(segment.resumePrefixCommands, [
+      ...expectedSquarePrefix,
+      configCommand,
+      "W 500",
+    ]);
+    assert.ok(configIndex >= 0);
+    if (index > 0) {
+      assert.equal(configIndex, paletteSegments[index - 1]?.commandEndExclusive);
+    }
+    assert.equal(paletteCommands[configIndex + 1], "W 500");
+    assert.ok(configIndex + 1 < segment.bodyStartCommandIndex);
+  });
 });
 
 test("recovery execution plan redraws the current failed color segment and still reaches the original total", async () => {

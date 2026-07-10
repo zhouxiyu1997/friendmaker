@@ -1161,6 +1161,14 @@ function normalizeTimingDuration(value: unknown, fallback: number): number {
   return Math.max(16, Math.min(100, Math.round(value)));
 }
 
+function normalizePreviewScale(value: unknown, fallback = 2): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.min(4, Math.round(value)));
+}
+
 function normalizeRecoveryProfileSummary(value: unknown): ExecutionStartProfileSummary {
   const summary = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
@@ -1374,7 +1382,7 @@ async function handleGenerate(request: IncomingMessage, response: ServerResponse
   const plan = await generateDrawPlan(
     decodeDataUrl(body.imageDataUrl),
     profile,
-    body.previewScale ?? 12,
+    normalizePreviewScale(body.previewScale),
     {
       imageScalePercent,
       imageOffsetXPercent,

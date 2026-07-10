@@ -53,6 +53,7 @@ export interface GeneratedScanlinePlan {
 const PALETTE_SLOT_COUNT = 9;
 const EXACT_COMPONENT_ORDER_LIMIT = 6;
 const EXACT_COMPONENT_PIXEL_LIMIT = 300;
+export const MAX_GREEDY_COMPONENT_COUNT = 2_048;
 const RECENTER_STICK_HOLD_MS = 2_000;
 const RECENTER_RELEASE_SETTLE_WAIT_MS = 1_000;
 const RECENTER_UI_SETTLE_WAIT_MS = 500;
@@ -63,6 +64,16 @@ const NEIGHBOR_OFFSETS = [
   { dx: 0, dy: 1 },
   { dx: 0, dy: -1 },
 ];
+
+export function selectComponentOrderingStrategy(
+  componentCount: number,
+): "exact" | "greedy" | "serpentine" {
+  if (componentCount <= EXACT_COMPONENT_ORDER_LIMIT) {
+    return "exact";
+  }
+
+  return componentCount <= MAX_GREEDY_COMPONENT_COUNT ? "greedy" : "serpentine";
+}
 
 interface RecenterPlanner {
   strategy: RecenterStrategy;
@@ -302,6 +313,10 @@ function getNearestNeighborPixelsByComponents(
     return getNearestNeighborPixels(pixels, current, grid);
   }
 
+  if (selectComponentOrderingStrategy(components.length) === "serpentine") {
+    return chooseBestSerpentineOrder(pixels, current, grid);
+  }
+
   const remaining = components.slice();
   const ordered: Pixel[] = [];
   let position = current;
@@ -359,10 +374,16 @@ function getOrderedPixelsForColor(
     return legacyPixels;
   }
 
+  const orderingStrategy = selectComponentOrderingStrategy(components.length);
+
+  if (orderingStrategy === "serpentine") {
+    return legacyPixels;
+  }
+
   let orderedPixels: Pixel[];
 
   if (
-    components.length <= EXACT_COMPONENT_ORDER_LIMIT &&
+    orderingStrategy === "exact" &&
     pixels.length <= EXACT_COMPONENT_PIXEL_LIMIT
   ) {
     orderedPixels = findOptimalComponentOrder(components, current, grid);
@@ -947,22 +968,11 @@ export function generateScanlinePlan(
 
     for (let batchStart = 0; batchStart < usedColors.length; batchStart += PALETTE_SLOT_COUNT) {
       const batch = usedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT);
-      const batchPrefixCommands = batch.map((color, slotIndex) =>
-        paletteConfigCommand(slotIndex, color.colorHex),
-      );
-      let selectedSlot: number | null = null;
-
-      commands.push(...batchPrefixCommands);
 
       for (const [slotIndex, color] of batch.entries()) {
-        let didSelectColor = false;
-
-        if (selectedSlot !== slotIndex) {
-          commands.push(colorCommand(slotIndex));
-          commands.push(waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS));
-          selectedSlot = slotIndex;
-          didSelectColor = true;
-        }
+        const configCommand = paletteConfigCommand(slotIndex, color.colorHex);
+        const settleCommand = waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS);
+        commands.push(configCommand, settleCommand);
 
         const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
         current = appendResumeSegment(
@@ -979,11 +989,10 @@ export function generateScanlinePlan(
             slotIndex,
             resumePrefixCommands: [
               ...brushSetupCommands,
-              ...batchPrefixCommands.slice(slotIndex),
-              colorCommand(slotIndex),
-              waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS),
+              configCommand,
+              settleCommand,
             ],
-            allowInitialRecenter: !didSelectColor,
+            allowInitialRecenter: false,
           },
         );
         segmentIndex += 1;
@@ -991,32 +1000,19 @@ export function generateScanlinePlan(
     }
   } else {
     const usedColors = getUsedPaletteColors(pixelMap);
-    let didResetOfficialPaletteState = false;
+
+    if (usedColors.length > 0) {
+      commands.push(basicPaletteResetCommand());
+    }
 
     for (let batchStart = 0; batchStart < usedColors.length; batchStart += PALETTE_SLOT_COUNT) {
       const batch = usedColors.slice(batchStart, batchStart + PALETTE_SLOT_COUNT);
-      const batchConfigCommands = batch.map((color, slotIndex) => {
-        const cell = officialPaletteCellFromIndex(color.colorIndex);
-        return basicPaletteConfigCommand(slotIndex, cell.row, cell.col);
-      });
-      let selectedSlot: number | null = null;
-
-      if (!didResetOfficialPaletteState) {
-        commands.push(basicPaletteResetCommand());
-        didResetOfficialPaletteState = true;
-      }
-
-      commands.push(...batchConfigCommands);
 
       for (const [slotIndex, color] of batch.entries()) {
-        let didSelectColor = false;
-
-        if (selectedSlot !== slotIndex) {
-          commands.push(colorCommand(slotIndex));
-          commands.push(waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS));
-          selectedSlot = slotIndex;
-          didSelectColor = true;
-        }
+        const cell = officialPaletteCellFromIndex(color.colorIndex);
+        const configCommand = basicPaletteConfigCommand(slotIndex, cell.row, cell.col);
+        const settleCommand = waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS);
+        commands.push(configCommand, settleCommand);
 
         const orderedPixels = getOrderedPixelsForColor(pixelsByColor, color.colorIndex, current, profile, grid, pathStrategy);
         current = appendResumeSegment(
@@ -1034,11 +1030,10 @@ export function generateScanlinePlan(
             resumePrefixCommands: [
               ...brushSetupCommands,
               basicPaletteResetCommand(),
-              ...batchConfigCommands.slice(slotIndex),
-              colorCommand(slotIndex),
-              waitCommand(COLOR_SELECT_CANVAS_SETTLE_WAIT_MS),
+              configCommand,
+              settleCommand,
             ],
-            allowInitialRecenter: !didSelectColor,
+            allowInitialRecenter: false,
           },
         );
         segmentIndex += 1;

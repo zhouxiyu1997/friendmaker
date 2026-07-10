@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calculatePathStats } from "../src/app/generateDrawPlan.js";
-import { estimateRuntimeMs, generateScanlinePlan } from "../src/path/scanline.js";
+import {
+  estimateRuntimeMs,
+  generateScanlinePlan,
+  MAX_GREEDY_COMPONENT_COUNT,
+  selectComponentOrderingStrategy,
+} from "../src/path/scanline.js";
 import type { DrawCommand } from "../src/protocol/commands.js";
 import { serializeCommands } from "../src/protocol/serializer.js";
 import type { DrawingProfile, Pixel, PixelMap } from "../src/types.js";
@@ -77,11 +82,93 @@ function makeColorPixelMap(
   );
 }
 
+function makeCheckerboardPixelMap(size: number): PixelMap {
+  return Array.from({ length: size }, (_, y) =>
+    Array.from({ length: size }, (_, x): Pixel => {
+      const isFilled = (x + y) % 2 === 0;
+
+      return {
+        x,
+        y,
+        colorIndex: isFilled ? 0 : -1,
+        colorHex: isFilled ? "#000000" : "#ffffff",
+        alpha: isFilled ? 255 : 0,
+      };
+    }),
+  );
+}
+
 function getMoveSteps(plan: ReturnType<typeof generateScanlinePlan>): number {
   return plan.commands
     .filter((command) => command.type === "move")
     .reduce((total, command) => total + Math.abs(command.dx) + Math.abs(command.dy), 0);
 }
+
+test("component ordering strategy keeps exact and greedy work bounded", () => {
+  assert.equal(MAX_GREEDY_COMPONENT_COUNT, 2_048);
+  assert.equal(selectComponentOrderingStrategy(6), "exact");
+  assert.equal(selectComponentOrderingStrategy(7), "greedy");
+  assert.equal(selectComponentOrderingStrategy(2_048), "greedy");
+  assert.equal(selectComponentOrderingStrategy(2_049), "serpentine");
+});
+
+test("large disconnected checkerboards use the bounded path for scanline and nearest", () => {
+  const profile = makeProfile({ canvasWidth: 65, canvasHeight: 65 });
+  const pixelMap = makeCheckerboardPixelMap(65);
+
+  for (const strategy of ["scanline", "nearest"] as const) {
+    const first = generateScanlinePlan(pixelMap, profile, strategy);
+    const second = generateScanlinePlan(pixelMap, profile, strategy);
+
+    assert.equal(first.resumePlan.segments.length, 1);
+    assert.deepEqual(
+      serializeCommands(first.commands),
+      serializeCommands(second.commands),
+      `expected deterministic ${strategy} ordering`,
+    );
+  }
+});
+
+test("palette colors configure, settle, and draw one segment at a time while reusing slots", () => {
+  const palette = Array.from(
+    { length: 10 },
+    (_, index) => `#${(index + 1).toString(16).padStart(6, "0")}`,
+  );
+  const profile = makeProfile({
+    canvasWidth: 10,
+    canvasHeight: 1,
+    colorMode: "palette",
+    colorCount: 10,
+    palette,
+  });
+  const pixelMap = makeColorPixelMap(
+    10,
+    1,
+    palette.map((colorHex, x) => ({ x, y: 0, colorIndex: x, colorHex })),
+  );
+  const plan = generateScanlinePlan(pixelMap, profile);
+  const commands = serializeCommands(plan.commands);
+  const slots: number[] = [];
+
+  assert.equal(commands.some((command) => /^C /u.test(command)), false);
+  assert.equal(plan.resumePlan.segments.length, palette.length);
+
+  plan.resumePlan.segments.forEach((segment, index) => {
+    const slot = index % 9;
+    const configCommand = `PC ${slot} ${palette[index]!}`;
+    const configIndex = commands.indexOf(configCommand);
+    slots.push(slot);
+
+    assert.ok(configIndex >= 0, `missing ${configCommand}`);
+    if (index > 0) {
+      assert.equal(configIndex, plan.resumePlan.segments[index - 1]?.commandEndExclusive);
+    }
+    assert.equal(commands[configIndex + 1], "W 500");
+    assert.ok(configIndex + 1 < segment.bodyStartCommandIndex);
+  });
+
+  assert.deepEqual(slots, [0, 1, 2, 3, 4, 5, 6, 7, 8, 0]);
+});
 
 test("scanline reduces travel for sparse single-pixel islands with brush size 1", () => {
   const filled: Array<{ x: number; y: number }> = [];
@@ -239,7 +326,7 @@ test("time-saving recenter macro never emits left-stick click commands", () => {
   assert.equal(serialized.includes("BTN L3"), false);
 });
 
-test("time-saving recenter waits until after the first post-color-select move", () => {
+test("time-saving recenter waits until after the first post-palette-config move", () => {
   const profile = makeProfile({
     canvasWidth: 512,
     canvasHeight: 1,
@@ -257,16 +344,16 @@ test("time-saving recenter waits until after the first post-color-select move", 
 
   const plan = generateScanlinePlan(pixelMap, profile, "scanline", "time-saving");
   const serialized = serializeCommands(plan.commands);
-  const colorSelectIndex = serialized.indexOf("C 1");
-  const firstRecenterAfterColorSelect = serialized.indexOf("STICK -1 0 2000", colorSelectIndex);
+  const colorConfigIndex = serialized.findIndex((command) => command.startsWith("PC 1 "));
+  const firstRecenterAfterColorConfig = serialized.indexOf("STICK -1 0 2000", colorConfigIndex);
 
-  assert.ok(colorSelectIndex >= 0, "expected second palette slot selection");
-  assert.equal(serialized[colorSelectIndex + 1], "W 500");
-  assert.notEqual(serialized[colorSelectIndex + 2], "STICK -1 0 2000");
-  assert.match(serialized[colorSelectIndex + 2] ?? "", /^M /u);
+  assert.ok(colorConfigIndex >= 0, "expected second palette slot configuration");
+  assert.equal(serialized[colorConfigIndex + 1], "W 500");
+  assert.notEqual(serialized[colorConfigIndex + 2], "STICK -1 0 2000");
+  assert.match(serialized[colorConfigIndex + 2] ?? "", /^M /u);
   assert.ok(
-    firstRecenterAfterColorSelect > colorSelectIndex + 3,
-    "expected recenter to remain available after the first post-color-select paint",
+    firstRecenterAfterColorConfig > colorConfigIndex + 3,
+    "expected recenter to remain available after the first post-config paint",
   );
   assert.equal(plan.recenterStats.recenterCount, 1);
 });
@@ -287,13 +374,12 @@ test("official color recenter waits until after returning to the canvas", () => 
 
   const plan = generateScanlinePlan(pixelMap, profile, "scanline", "time-saving");
   const serialized = serializeCommands(plan.commands);
-  const colorSelectIndex = serialized.indexOf("C 1");
+  const colorConfigIndex = serialized.findIndex((command) => command.startsWith("BC 1 "));
 
-  assert.ok(colorSelectIndex >= 0, "expected second official slot selection");
-  assert.ok(serialized.some((command) => /^BC 1 /u.test(command)));
-  assert.equal(serialized[colorSelectIndex + 1], "W 500");
-  assert.notEqual(serialized[colorSelectIndex + 2], "STICK -1 0 2000");
-  assert.match(serialized[colorSelectIndex + 2] ?? "", /^M /u);
+  assert.ok(colorConfigIndex >= 0, "expected second official slot configuration");
+  assert.equal(serialized[colorConfigIndex + 1], "W 500");
+  assert.notEqual(serialized[colorConfigIndex + 2], "STICK -1 0 2000");
+  assert.match(serialized[colorConfigIndex + 2] ?? "", /^M /u);
 });
 
 test("time-saving recenter strategy skips nearby hops", () => {

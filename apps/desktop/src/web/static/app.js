@@ -1552,7 +1552,7 @@ function buildStudioGeneratePayload() {
     colors: state.studio.colorCount,
     resizeMode: "contain",
     threshold: Number(els.thresholdRange.value),
-    previewScale: 12,
+    previewScale: 2,
     removeBackground: state.studio.removeBackground,
     inputDelay: state.sharedTiming.inputDelay,
     buttonPressDuration: state.sharedTiming.buttonPressDuration,
