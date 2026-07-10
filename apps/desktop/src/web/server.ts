@@ -234,6 +234,7 @@ interface ManagedExecution {
   sender: SenderControls | null;
   progressMap: number[] | null;
   recoverySession: RecoverySessionRecord | null;
+  lastPersistedRecoverySegmentIndex: number | null;
   completionPromise: Promise<void> | null;
 }
 
@@ -256,6 +257,7 @@ function createEmptyExecution(): ManagedExecution {
     sender: null,
     progressMap: null,
     recoverySession: null,
+    lastPersistedRecoverySegmentIndex: null,
     completionPromise: null,
   };
 }
@@ -1260,7 +1262,19 @@ async function updateRecoverySessionProgress(
   }
 
   applyRecoveryProgress(execution.recoverySession, completedCommands);
+  const persistedSegmentIndex = execution.recoverySession.lastCompletedSegmentIndex;
+  const mustFlushStableStatus =
+    execution.status === "paused" || execution.status === "stopping";
+
+  if (
+    !mustFlushStableStatus &&
+    persistedSegmentIndex === execution.lastPersistedRecoverySegmentIndex
+  ) {
+    return;
+  }
+
   await webRuntime.recoverySessions.writeSession(execution.recoverySession);
+  execution.lastPersistedRecoverySegmentIndex = persistedSegmentIndex;
 }
 
 async function updateRecoverySessionStatus(
@@ -1273,7 +1287,9 @@ async function updateRecoverySessionStatus(
   }
 
   applyRecoveryStatus(execution.recoverySession, status, error);
+  const persistedSegmentIndex = execution.recoverySession.lastCompletedSegmentIndex;
   await webRuntime.recoverySessions.writeSession(execution.recoverySession);
+  execution.lastPersistedRecoverySegmentIndex = persistedSegmentIndex;
 }
 
 function resolveRecoveryTerminalStatus(execution: ManagedExecution): "recoverable" | "completed" {
@@ -1683,6 +1699,8 @@ async function startManagedExecution(body: {
     sender,
     progressMap: body.progressMap ?? null,
     recoverySession: body.recoverySession ?? null,
+    lastPersistedRecoverySegmentIndex:
+      body.recoverySession?.lastCompletedSegmentIndex ?? null,
     completionPromise: null,
   };
 
@@ -2080,7 +2098,11 @@ async function handleExecutionStop(response: ServerResponse): Promise<void> {
     managedExecution.sender.stop();
     json(response, 200, {
       success: true,
-      execution: await updateManagedExecutionState("stopping", "INFO execution stop requested"),
+      execution: await updateManagedExecutionState(
+        "stopping",
+        "INFO execution stop requested",
+        resolveRecoveryTerminalStatus(managedExecution),
+      ),
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {

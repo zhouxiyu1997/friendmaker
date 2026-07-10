@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -14,9 +14,10 @@ import { SimulatedAckSender } from "../src/simulator/sender.js";
 import { startWebServer } from "../src/web/server.js";
 import {
   RecoverySessionStore,
+  applyRecoveryProgress,
   applyRecoveryStatus,
 } from "../src/web/recoverySessions.js";
-import type { DrawingProfile, Pixel, PixelMap } from "../src/types.js";
+import type { DrawingProfile, Pixel, PixelMap, ResumePlan } from "../src/types.js";
 
 function makeProfile(overrides: Partial<DrawingProfile> = {}): DrawingProfile {
   return {
@@ -81,6 +82,83 @@ function makeRecoveryProfileSummary(profile: DrawingProfile) {
     imageOffsetXPercent: 0,
     imageOffsetYPercent: 0,
   };
+}
+
+function createDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+
+  return { promise, resolve };
+}
+
+async function createRecoverySession(
+  store: RecoverySessionStore,
+  sourceLabel = "recovery-test.png",
+) {
+  const profile = makeProfile({
+    canvasWidth: 6,
+    canvasHeight: 1,
+    colorMode: "palette",
+    palette: ["#000000", "#ffffff"],
+  });
+  const pixelMap = makePixelMap(6, 1, [
+    { x: 1, y: 0, colorIndex: 0, colorHex: "#000000" },
+    { x: 4, y: 0, colorIndex: 1, colorHex: "#ffffff" },
+  ]);
+  const scanlinePlan = generateScanlinePlan(pixelMap, profile);
+  const commands = serializeCommands(scanlinePlan.commands);
+  const record = await store.createSession({
+    commands,
+    resumePlan: scanlinePlan.resumePlan,
+    sourceLabel,
+    profileSummary: makeRecoveryProfileSummary(profile),
+    serialOptions: {
+      baudRate: profile.baudRate,
+      ackTimeoutMs: profile.ackTimeoutMs,
+      retries: profile.commandRetryCount,
+    },
+  });
+
+  return { commands, profile, record, resumePlan: scanlinePlan.resumePlan };
+}
+
+async function waitForCondition(
+  condition: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    if (condition()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.fail("Timed out waiting for recovery test condition.");
+}
+
+async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    const timeout = setTimeout(() => resolve(false), timeoutMs);
+
+    promise.then(
+      () => {
+        clearTimeout(timeout);
+        resolve(true);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 function expectedBrushSetupPrefix(
@@ -416,6 +494,411 @@ test("recovery sessions keep unique job ids even within the same millisecond", a
     assert.equal(sessions.length, 2);
   } finally {
     Date.now = originalNow;
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("recovery writes serialize immutable snapshots and leave no temporary files", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-atomic-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+
+  try {
+    const { record } = await createRecoverySession(setupStore, "atomic-order.png");
+    const firstRenameEntered = createDeferred();
+    const releaseFirstRename = createDeferred();
+    let renameEntries = 0;
+    const store = new RecoverySessionStore(recoverySessionsRoot, {
+      beforeAtomicRename: async () => {
+        renameEntries += 1;
+
+        if (renameEntries === 1) {
+          firstRenameEntered.resolve();
+          await releaseFirstRename.promise;
+        }
+      },
+    });
+    const firstSnapshot = { ...record, completedCommands: 1, updatedAt: record.updatedAt + 1 };
+    const secondSnapshot = { ...record, completedCommands: 2, updatedAt: record.updatedAt + 2 };
+    const firstWrite = store.writeSession(firstSnapshot);
+
+    await waitForCondition(() => renameEntries === 1, 500);
+    const secondWrite = store.writeSession(secondSnapshot);
+    secondSnapshot.completedCommands = 999;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(renameEntries, 1, "the second rename must wait for the first operation");
+    releaseFirstRename.resolve();
+    await Promise.all([firstWrite, secondWrite]);
+
+    assert.equal((await store.loadSession(record.jobId)).completedCommands, 2);
+    assert.equal(
+      (await readdir(recoverySessionsRoot)).some((name) => name.includes(".tmp-")),
+      false,
+    );
+  } finally {
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("a failed recovery write does not poison the next queued snapshot", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-retry-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+
+  try {
+    const { record } = await createRecoverySession(setupStore, "atomic-retry.png");
+    let renameAttempts = 0;
+    const store = new RecoverySessionStore(recoverySessionsRoot, {
+      beforeAtomicRename: () => {
+        renameAttempts += 1;
+
+        if (renameAttempts === 1) {
+          throw new Error("simulated atomic rename failure");
+        }
+      },
+    });
+    const firstWrite = store.writeSession({ ...record, completedCommands: 1 });
+    const secondWrite = store.writeSession({ ...record, completedCommands: 2 });
+
+    await assert.rejects(firstWrite, /simulated atomic rename failure/u);
+    await secondWrite;
+
+    assert.equal((await store.loadSession(record.jobId)).completedCommands, 2);
+    assert.equal(renameAttempts, 2);
+    assert.equal(
+      (await readdir(recoverySessionsRoot)).some((name) => name.includes(".tmp-")),
+      false,
+    );
+  } finally {
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("a temporary-file collision never deletes a file this store did not create", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-collision-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+
+  try {
+    const { record } = await createRecoverySession(setupStore, "atomic-collision.png");
+    const finalPath = path.join(recoverySessionsRoot, `${record.jobId}.resume.json`);
+    const collidingTempPath = `${finalPath}.tmp-collision`;
+    await writeFile(collidingTempPath, "foreign temp contents", "utf8");
+    const store = new RecoverySessionStore(recoverySessionsRoot, {
+      createAtomicTempPath: () => collidingTempPath,
+    });
+
+    await assert.rejects(
+      store.writeSession({ ...record, completedCommands: 1 }),
+      (error: NodeJS.ErrnoException) => error.code === "EEXIST",
+    );
+    assert.equal(await readFile(collidingTempPath, "utf8"), "foreign temp contents");
+  } finally {
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("cleanup skips jobs while their atomic create or update operation is pending", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-cleanup-race-"));
+  const renameEntered = createDeferred();
+  const releaseRename = createDeferred();
+  let gatedJobId: string | null = null;
+  let shouldGate = true;
+  const store = new RecoverySessionStore(recoverySessionsRoot, {
+    beforeAtomicRename: async ({ jobId }) => {
+      if (!shouldGate) {
+        return;
+      }
+
+      gatedJobId = jobId;
+      renameEntered.resolve();
+      await releaseRename.promise;
+    },
+  });
+
+  try {
+    const create = createRecoverySession(store, "cleanup-create-race.png");
+    await renameEntered.promise;
+    assert.ok(gatedJobId);
+
+    const cleanup = store.cleanupSessions();
+    const cleanupSettledBeforeRelease = await settlesWithin(cleanup, 500);
+    shouldGate = false;
+    releaseRename.resolve();
+    const { record } = await create;
+    await cleanup;
+
+    assert.equal(cleanupSettledBeforeRelease, true);
+    assert.equal((await store.loadSession(record.jobId)).jobId, record.jobId);
+    await access(record.commandsFilePath);
+
+    applyRecoveryStatus(record, "completed");
+    record.createdAt = Date.now() - 8 * 24 * 60 * 60 * 1_000;
+    record.updatedAt = record.createdAt;
+    await store.writeSession(record);
+
+    const updateRenameEntered = createDeferred();
+    const releaseUpdateRename = createDeferred();
+    const updateStore = new RecoverySessionStore(recoverySessionsRoot, {
+      beforeAtomicRename: async () => {
+        updateRenameEntered.resolve();
+        await releaseUpdateRename.promise;
+      },
+    });
+    const activeSnapshot = { ...record, status: "running" as const, updatedAt: Date.now() };
+    const update = updateStore.writeSession(activeSnapshot);
+    await updateRenameEntered.promise;
+
+    const updateCleanup = updateStore.cleanupSessions();
+    const updateCleanupSettledBeforeRelease = await settlesWithin(updateCleanup, 500);
+    releaseUpdateRename.resolve();
+    await Promise.all([update, updateCleanup]);
+
+    assert.equal(updateCleanupSettledBeforeRelease, true);
+    assert.equal((await updateStore.loadSession(record.jobId)).status, "running");
+    await access(record.commandsFilePath);
+  } finally {
+    shouldGate = false;
+    releaseRename.resolve();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("discard queued behind an in-flight write cannot resurrect recovery files", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-discard-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+
+  try {
+    const { record } = await createRecoverySession(setupStore, "atomic-discard.png");
+    const renameEntered = createDeferred();
+    const releaseRename = createDeferred();
+    let renameEntries = 0;
+    const store = new RecoverySessionStore(recoverySessionsRoot, {
+      beforeAtomicRename: async () => {
+        renameEntries += 1;
+        renameEntered.resolve();
+        await releaseRename.promise;
+      },
+    });
+    const write = store.writeSession({ ...record, completedCommands: 1 });
+
+    await waitForCondition(() => renameEntries === 1, 500);
+    const discard = store.discardSession(record.jobId);
+    releaseRename.resolve();
+    await Promise.all([write, discard]);
+
+    await assert.rejects(access(record.commandsFilePath));
+    await assert.rejects(access(path.join(recoverySessionsRoot, `${record.jobId}.resume.json`)));
+    assert.equal(
+      (await readdir(recoverySessionsRoot)).some((name) => name.includes(".tmp-")),
+      false,
+    );
+  } finally {
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("managed execution persists only segment checkpoints and terminal status", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-checkpoints-"));
+  const profile = makeProfile({ canvasWidth: 6, canvasHeight: 1 });
+  const commands = ["CFG INPUT 65 45 1800", "P", "P", "P", "P", "E"];
+  const resumePlan: ResumePlan = {
+    inputConfigCommand: commands[0]!,
+    initialCursor: { x: 0, y: 0 },
+    segments: [
+      {
+        segmentIndex: 0,
+        label: "segment 1",
+        colorHex: null,
+        slotIndex: null,
+        resumePrefixCommands: ["C 0", "W 500"],
+        firstCanvasPosition: { x: 0, y: 0 },
+        bodyStartCommandIndex: 1,
+        commandEndExclusive: 3,
+      },
+      {
+        segmentIndex: 1,
+        label: "segment 2",
+        colorHex: null,
+        slotIndex: null,
+        resumePrefixCommands: ["C 1", "W 500"],
+        firstCanvasPosition: { x: 0, y: 0 },
+        bodyStartCommandIndex: 3,
+        commandEndExclusive: 5,
+      },
+    ],
+  };
+  const snapshots: Array<{
+    completedCommands: number;
+    lastCompletedSegmentIndex: number | null;
+    status: string;
+  }> = [];
+  const originalWriteSession = RecoverySessionStore.prototype.writeSession;
+  RecoverySessionStore.prototype.writeSession = async function (record) {
+    snapshots.push({
+      completedCommands: record.completedCommands,
+      lastCompletedSegmentIndex: record.lastCompletedSegmentIndex,
+      status: record.status,
+    });
+    await originalWriteSession.call(this, record);
+  };
+  let server: Awaited<ReturnType<typeof startWebServer>> | null = null;
+
+  try {
+    server = await startWebServer({ port: 0, recoverySessionsRoot });
+    const startResponse = await fetch(`${server.url}/api/execution/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "simulate",
+        commands,
+        resumePlan,
+        sourceLabel: "checkpoint-demo.png",
+        profileSummary: makeRecoveryProfileSummary(profile),
+      }),
+    });
+    assert.equal(startResponse.ok, true);
+    const completionStatus = await waitForExecutionStatus(server.url, "completed", 6_000);
+    const completionResponse = await fetch(`${server.url}/api/execution/status`);
+    const completionPayload = await completionResponse.json();
+    assert.equal(completionStatus, "completed", JSON.stringify(completionPayload));
+
+    assert.deepEqual(
+      snapshots.map(({ lastCompletedSegmentIndex, status }) => ({
+        lastCompletedSegmentIndex,
+        status,
+      })),
+      [
+        { lastCompletedSegmentIndex: 0, status: "running" },
+        { lastCompletedSegmentIndex: 1, status: "running" },
+        { lastCompletedSegmentIndex: 1, status: "completed" },
+      ],
+    );
+    assert.ok(commands.length > snapshots.length, "commands inside a segment must not each rewrite JSON");
+
+    const failureStartIndex = snapshots.length;
+    const failureResponse = await fetch(`${server.url}/api/execution/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "simulate",
+        commands,
+        errorAtCommand: 1,
+        retries: 0,
+        resumePlan,
+        sourceLabel: "checkpoint-failure.png",
+        profileSummary: makeRecoveryProfileSummary(profile),
+      }),
+    });
+    assert.equal(failureResponse.ok, true);
+    assert.equal(await waitForExecutionStatus(server.url, "failed", 6_000), "failed");
+    assert.deepEqual(
+      snapshots.slice(failureStartIndex).map(({ status }) => status),
+      ["recoverable"],
+    );
+  } finally {
+    RecoverySessionStore.prototype.writeSession = originalWriteSession;
+    if (server) {
+      await server.close();
+    }
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("pause, late ACK progress, and stop each flush a stable recovery snapshot", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-status-"));
+  const profile = makeProfile({ canvasWidth: 6, canvasHeight: 1 });
+  const pixelMap = makePixelMap(6, 1, [
+    { x: 1, y: 0, colorIndex: 0, colorHex: "#000000" },
+    { x: 4, y: 0, colorIndex: 1, colorHex: "#ffffff" },
+  ]);
+  const scanlinePlan = generateScanlinePlan(pixelMap, profile);
+  const commands = serializeCommands(scanlinePlan.commands);
+  const snapshots: Array<{ completedCommands: number; status: string }> = [];
+  const originalWriteSession = RecoverySessionStore.prototype.writeSession;
+  RecoverySessionStore.prototype.writeSession = async function (record) {
+    snapshots.push({ completedCommands: record.completedCommands, status: record.status });
+    await originalWriteSession.call(this, record);
+  };
+  let server: Awaited<ReturnType<typeof startWebServer>> | null = null;
+
+  try {
+    server = await startWebServer({ port: 0, recoverySessionsRoot });
+    const startResponse = await fetch(`${server.url}/api/execution/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "simulate",
+        commands,
+        ackDelayMs: 150,
+        resumePlan: scanlinePlan.resumePlan,
+        sourceLabel: "checkpoint-status.png",
+        profileSummary: makeRecoveryProfileSummary(profile),
+      }),
+    });
+    const startPayload = (await startResponse.json()) as {
+      recoverySession?: { jobId: string };
+    };
+    assert.equal(startResponse.ok, true);
+    assert.ok(startPayload.recoverySession);
+
+    const pauseResponse = await fetch(`${server.url}/api/execution/pause`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(pauseResponse.ok, true);
+    assert.equal(snapshots.at(-1)?.status, "paused");
+
+    await waitForCondition(
+      () => snapshots.some((snapshot) => snapshot.status === "paused" && snapshot.completedCommands > 0),
+      3_000,
+    );
+    const writesBeforeStop = snapshots.length;
+    const stopResponse = await fetch(`${server.url}/api/execution/stop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(stopResponse.ok, true);
+    assert.equal(snapshots.length, writesBeforeStop + 1);
+    assert.equal(snapshots.at(-1)?.status, "recoverable");
+    assert.equal(await waitForExecutionStatus(server.url, "stopped", 3_000), "stopped");
+
+    const persisted = await new RecoverySessionStore(recoverySessionsRoot).loadSession(
+      startPayload.recoverySession.jobId,
+    );
+    assert.equal(persisted.status, "recoverable");
+    assert.ok(persisted.completedCommands > 0);
+  } finally {
+    RecoverySessionStore.prototype.writeSession = originalWriteSession;
+    if (server) {
+      await server.close();
+    }
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("startup marks active sessions completed when no resume segment remains", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-final-segment-"));
+  const store = new RecoverySessionStore(recoverySessionsRoot);
+
+  try {
+    for (const status of ["running", "paused"] as const) {
+      const { commands, record } = await createRecoverySession(store, `final-${status}.png`);
+      applyRecoveryProgress(record, commands.length);
+      applyRecoveryStatus(record, status);
+      await store.writeSession(record);
+    }
+
+    await store.cleanupSessions({ startup: true });
+    const sessions = await store.listSessions();
+
+    assert.equal(sessions.length, 2);
+    for (const session of sessions) {
+      assert.equal(session.nextResumeSegmentIndex, null);
+      assert.equal(session.status, "completed");
+      assert.equal(session.error, null);
+    }
+  } finally {
     await rm(recoverySessionsRoot, { recursive: true, force: true });
   }
 });
