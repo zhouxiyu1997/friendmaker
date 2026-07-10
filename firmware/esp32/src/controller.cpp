@@ -293,10 +293,6 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
       scaleChannelToSteps(hsv.saturation, COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT);
   const uint8_t valueDropSteps =
       scaleChannelToSteps(1.0f - hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
-  const uint8_t fineValueSteps = valueDropSteps < COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS
-      ? valueDropSteps
-      : COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS;
-  const uint8_t coarseValueSteps = valueDropSteps - fineValueSteps;
 
   // Palette selection page.
   if (!pressPaletteMenuButton(transport_, ControllerButton::Y)) {
@@ -359,16 +355,7 @@ bool SwitchController::configurePaletteSlot(int index, uint8_t red, uint8_t gree
     }
   }
 
-  if (coarseValueSteps > 0) {
-    if (!transport_.moveDirection(
-            0, 1, static_cast<uint16_t>(coarseValueSteps) * COLOR_PALETTE_EDITOR_MOVE_STEP_MS, inputDelayMs_)) {
-      return false;
-    }
-  }
-
-  // Keep the last darkening steps discrete so near-black shades do not get
-  // flattened by the continuous analog hold.
-  for (uint16_t step = 0; step < fineValueSteps; step += 1) {
+  for (uint16_t step = 0; step < valueDropSteps; step += 1) {
     if (!transport_.pressButton(ControllerButton::DpadDown, buttonPressMs_, inputDelayMs_)) {
       return false;
     }
