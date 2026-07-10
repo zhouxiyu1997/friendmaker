@@ -287,9 +287,17 @@ test("controller firmware routes palette menu navigation through reliable input"
     new URL("../src/serial/sender.ts", import.meta.url),
     "utf8",
   );
+  const paletteBody = /bool SwitchController::configurePaletteSlot[\s\S]*?(?=bool SwitchController::configureBasicPaletteSlot)/u
+    .exec(controllerSource)?.[0] ?? "";
 
   assert.match(configSource, /COLOR_PALETTE_MENU_INPUT_DELAY_MS = 150/u);
   assert.match(senderSource, /from "\.\.\/protocol\/paletteTiming\.js"/u);
+  assert.doesNotMatch(paletteBody, /coarseValueSteps/u);
+  assert.doesNotMatch(paletteBody, /moveDirection\(\s*0,\s*1,/u);
+  assert.match(
+    paletteBody,
+    /for \(uint16_t step = 0; step < valueDropSteps; step \+= 1\)[\s\S]*ControllerButton::DpadDown/u,
+  );
   assert.match(
     transportHeaderSource,
     /virtual bool pressButtonsReliable[\s\S]*return pressButtons\(buttonsMask, holdMs, settleMs\);[\s\S]*pressButtonReliable/u,
