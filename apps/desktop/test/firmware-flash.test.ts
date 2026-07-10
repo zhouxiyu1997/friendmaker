@@ -477,3 +477,47 @@ test("controller firmware can clear the stored bluetooth peer", async () => {
     /line == "BT CLEAR-PEER"[\s\S]*controller\.clearBluetoothPeer\(\)[\s\S]*INFO action=bt-clear-peer/u,
   );
 });
+
+test("controller firmware strictly parses and bounds command parameters", async () => {
+  const protocolSource = await readFile(
+    new URL("../../../firmware/esp32/src/protocol.cpp", import.meta.url),
+    "utf8",
+  );
+  const configSource = await readFile(
+    new URL("../../../firmware/esp32/src/config.h", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(configSource, /MAX_CURSOR_DELTA\s*=\s*255/u);
+  assert.match(configSource, /MAX_WAIT_DURATION_MS\s*=\s*60000/u);
+  assert.match(
+    protocolSource,
+    /parseStrictIntToken[\s\S]*errno\s*=\s*0[\s\S]*strtol\(token\.c_str\(\),\s*&end,\s*10\)[\s\S]*end == token\.c_str\(\)[\s\S]*\*end != '\\0'[\s\S]*parsed < INT_MIN[\s\S]*parsed > INT_MAX/u,
+  );
+  assert.doesNotMatch(protocolSource, /\.toInt\(\)/u);
+  assert.match(
+    protocolSource,
+    /parseCommandTokens[\s\S]*tokenCount[\s\S]*nextSpace[\s\S]*return false/u,
+  );
+  assert.match(
+    protocolSource,
+    /dx < -MAX_CURSOR_DELTA\s*\|\|\s*dx > MAX_CURSOR_DELTA\s*\|\|[\s\S]*dy < -MAX_CURSOR_DELTA\s*\|\|\s*dy > MAX_CURSOR_DELTA/u,
+  );
+  assert.match(
+    protocolSource,
+    /delayMs < 0\s*\|\|\s*delayMs > MAX_WAIT_DURATION_MS/u,
+  );
+  assert.match(protocolSource, /isxdigit/u);
+  assert.match(
+    protocolSource,
+    /paletteSlotIndex < 0\s*\|\|\s*paletteSlotIndex >= COLOR_PALETTE_SLOT_COUNT/u,
+  );
+  assert.match(
+    protocolSource,
+    /basicColorRow < 0\s*\|\|\s*basicColorRow >= BASIC_COLOR_GRID_ROWS/u,
+  );
+  assert.match(
+    protocolSource,
+    /basicColorCol < 0\s*\|\|\s*basicColorCol >= BASIC_COLOR_GRID_COLS/u,
+  );
+});
