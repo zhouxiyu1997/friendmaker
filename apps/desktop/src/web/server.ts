@@ -2173,23 +2173,27 @@ async function handleRecoveryResume(
       throw new Error("Missing portPath.");
     }
 
-    const recoverySession = normalizeRecoverySessionRecord(
-      await webRuntime.recoverySessions.loadSession(body.sessionId),
-    );
-    assertSupportedBrushSelection(
-      recoverySession.profileSummary.brushShape,
-      recoverySession.profileSummary.brushSize,
-    );
-    const commands = await webRuntime.recoverySessions.loadCommands(body.sessionId);
-    const recoveryPlan = buildRecoveryExecutionPlan({
-      commands,
-      resumePlan: recoverySession.resumePlan,
-      completedCommands: recoverySession.completedCommands,
-    });
+    const claimed = await webRuntime.recoverySessions.claimSession(
+      body.sessionId,
+      ({ record, commands }) => {
+        const recoverySession = normalizeRecoverySessionRecord(record);
+        assertSupportedBrushSelection(
+          recoverySession.profileSummary.brushShape,
+          recoverySession.profileSummary.brushSize,
+        );
+        const recoveryPlan = buildRecoveryExecutionPlan({
+          commands,
+          resumePlan: recoverySession.resumePlan,
+          completedCommands: recoverySession.completedCommands,
+        });
 
-    applyRecoveryProgress(recoverySession, recoveryPlan.resumedFromCompletedCommands);
-    applyRecoveryStatus(recoverySession, "running");
-    await webRuntime.recoverySessions.writeSession(recoverySession);
+        applyRecoveryProgress(recoverySession, recoveryPlan.resumedFromCompletedCommands);
+        applyRecoveryStatus(recoverySession, "running");
+        return { record: recoverySession, value: recoveryPlan };
+      },
+    );
+    const recoverySession = claimed.record;
+    const recoveryPlan = claimed.value;
 
     json(response, 200, {
       success: true,

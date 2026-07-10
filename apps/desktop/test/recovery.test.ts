@@ -161,6 +161,10 @@ async function settlesWithin(promise: Promise<void>, timeoutMs: number): Promise
   });
 }
 
+function makeFileSystemError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`simulated ${code}`), { code });
+}
+
 function expectedBrushSetupPrefix(
   brushSize: DrawingProfile["brushSize"],
   brushShape: DrawingProfile["brushShape"],
@@ -658,6 +662,141 @@ test("cleanup skips jobs while their atomic create or update operation is pendin
   } finally {
     shouldGate = false;
     releaseRename.resolve();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("a failed session delete waits for every removal before the next write starts", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-delete-settle-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+  const releaseResumeRemoval = createDeferred();
+  const nextWriteRenameEntered = createDeferred();
+  let resumeRemovalEntries = 0;
+
+  try {
+    const { record } = await createRecoverySession(setupStore, "delete-settle.png");
+    const resumeFilePath = path.join(recoverySessionsRoot, `${record.jobId}.resume.json`);
+    const store = new RecoverySessionStore(recoverySessionsRoot, {
+      removeRecoveryFile: async (filePath) => {
+        if (filePath === record.commandsFilePath) {
+          throw makeFileSystemError("EIO");
+        }
+
+        if (filePath === resumeFilePath) {
+          resumeRemovalEntries += 1;
+          await releaseResumeRemoval.promise;
+        }
+
+        await rm(filePath, { force: true });
+      },
+      beforeAtomicRename: () => {
+        nextWriteRenameEntered.resolve();
+      },
+    });
+    const discard = store.discardSession(record.jobId);
+    void discard.catch(() => undefined);
+
+    await waitForCondition(() => resumeRemovalEntries === 1, 500);
+    const write = store.writeSession({ ...record, completedCommands: 1 });
+    const writeStartedBeforeRemovalFinished = await settlesWithin(
+      nextWriteRenameEntered.promise,
+      200,
+    );
+
+    releaseResumeRemoval.resolve();
+    await assert.rejects(discard, (error: NodeJS.ErrnoException) => error.code === "EIO");
+    await write;
+
+    assert.equal(writeStartedBeforeRemovalFinished, false);
+    assert.equal((await store.loadSession(record.jobId)).completedCommands, 1);
+  } finally {
+    releaseResumeRemoval.resolve();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("claiming a recovery session keeps cleanup outside the read-to-write window", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-claim-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+  const claimRenameEntered = createDeferred();
+  const releaseClaimRename = createDeferred();
+
+  try {
+    const { commands, record } = await createRecoverySession(setupStore, "claim-race.png");
+    applyRecoveryStatus(record, "recoverable");
+    const expiredTimestamp = Date.now() - 31 * 24 * 60 * 60 * 1_000;
+    record.createdAt = expiredTimestamp;
+    record.updatedAt = expiredTimestamp;
+    await setupStore.writeSession(record);
+    const store = new RecoverySessionStore(recoverySessionsRoot, {
+      beforeAtomicRename: async () => {
+        claimRenameEntered.resolve();
+        await releaseClaimRename.promise;
+      },
+    });
+    const claim = store.claimSession(record.jobId, ({ commands: loadedCommands, record: loaded }) => {
+      applyRecoveryStatus(loaded, "running");
+      return {
+        record: loaded,
+        value: loadedCommands.length,
+      };
+    });
+
+    await claimRenameEntered.promise;
+    const cleanup = store.cleanupSessions();
+    const cleanupSettledBeforeClaimWrite = await settlesWithin(cleanup, 500);
+    releaseClaimRename.resolve();
+    const claimed = await claim;
+    await cleanup;
+
+    assert.equal(cleanupSettledBeforeClaimWrite, true);
+    assert.equal(claimed.value, commands.length);
+    assert.equal(claimed.record.status, "running");
+    assert.equal((await store.loadSession(record.jobId)).status, "running");
+    await access(record.commandsFilePath);
+  } finally {
+    releaseClaimRename.resolve();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("cleanup treats only ENOENT as an orphan or missing recovery file", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-read-error-"));
+  const setupStore = new RecoverySessionStore(recoverySessionsRoot);
+
+  try {
+    const orphanCommandsPath = path.join(recoverySessionsRoot, "permission-orphan.commands.txt");
+    const orphanResumePath = path.join(recoverySessionsRoot, "permission-orphan.resume.json");
+    await writeFile(orphanCommandsPath, "P\n", "utf8");
+    const orphanStore = new RecoverySessionStore(recoverySessionsRoot, {
+      readRecoveryFile: async (filePath) => {
+        if (filePath === orphanResumePath) {
+          throw makeFileSystemError("EACCES");
+        }
+
+        return readFile(filePath, "utf8");
+      },
+    });
+
+    await orphanStore.cleanupSessions();
+    await access(orphanCommandsPath);
+
+    const { record } = await createRecoverySession(setupStore, "permission-missing.png");
+    const resumeFilePath = path.join(recoverySessionsRoot, `${record.jobId}.resume.json`);
+    await rm(record.commandsFilePath, { force: true });
+    const missingStore = new RecoverySessionStore(recoverySessionsRoot, {
+      readRecoveryFile: async (filePath) => {
+        if (filePath === record.commandsFilePath) {
+          throw makeFileSystemError("EACCES");
+        }
+
+        return readFile(filePath, "utf8");
+      },
+    });
+
+    await missingStore.cleanupSessions();
+    await access(resumeFilePath);
+  } finally {
     await rm(recoverySessionsRoot, { recursive: true, force: true });
   }
 });

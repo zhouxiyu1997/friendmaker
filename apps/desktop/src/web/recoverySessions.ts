@@ -79,9 +79,21 @@ export interface RecoverySessionStoreAtomicWriteContext {
 
 export interface RecoverySessionStoreOptions {
   createAtomicTempPath?: (finalPath: string) => string;
+  readRecoveryFile?: (filePath: string) => Promise<string>;
+  removeRecoveryFile?: (filePath: string) => Promise<void>;
   beforeAtomicRename?: (
     context: RecoverySessionStoreAtomicWriteContext,
   ) => Promise<void> | void;
+}
+
+export interface RecoverySessionClaimInput {
+  record: RecoverySessionRecord;
+  commands: string[];
+}
+
+export interface RecoverySessionClaimResult<T> {
+  record: RecoverySessionRecord;
+  value: T;
 }
 
 const DAY_IN_MS = 24 * 60 * 60 * 1_000;
@@ -90,6 +102,17 @@ const FAILED_SESSION_RETENTION_MS = 14 * DAY_IN_MS;
 const RECOVERABLE_SESSION_RETENTION_MS = 30 * DAY_IN_MS;
 const STALE_ACTIVE_SESSION_MESSAGE =
   "The previous drawing session ended unexpectedly. Re-enter the drawing page on your Switch and resume from the saved recovery point; the app will switch back to the saved brush automatically.";
+
+function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function parseCommandsFile(content: string): string[] {
+  return content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
 
 function sanitizeLabelSegment(value: string): string {
   const normalized = value
@@ -163,7 +186,7 @@ export function applyRecoveryStatus(
 }
 
 export class RecoverySessionStore {
-  private readonly operationChains = new Map<string, Promise<void>>();
+  private readonly operationChains = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly rootDirectory: string,
@@ -218,12 +241,12 @@ export class RecoverySessionStore {
     }
   }
 
-  private enqueueJobOperation(
+  private enqueueJobOperation<T>(
     jobId: string,
-    operation: (isLatestOperation: () => boolean) => Promise<void>,
-  ): Promise<void> {
+    operation: (isLatestOperation: () => boolean) => Promise<T>,
+  ): Promise<T> {
     const previous = this.operationChains.get(jobId) ?? Promise.resolve();
-    let next: Promise<void>;
+    let next: Promise<T>;
     const isLatestOperation = (): boolean => this.operationChains.get(jobId) === next;
     next = previous.catch(() => undefined).then(() => operation(isLatestOperation));
 
@@ -231,7 +254,7 @@ export class RecoverySessionStore {
 
     return (async () => {
       try {
-        await next;
+        return await next;
       } finally {
         if (this.operationChains.get(jobId) === next) {
           this.operationChains.delete(jobId);
@@ -240,15 +263,39 @@ export class RecoverySessionStore {
     })();
   }
 
+  private readRecoveryFile(filePath: string): Promise<string> {
+    return this.options.readRecoveryFile?.(filePath) ?? readFile(filePath, "utf8");
+  }
+
+  private removeRecoveryFile(filePath: string): Promise<void> {
+    return this.options.removeRecoveryFile?.(filePath) ?? rm(filePath, { force: true });
+  }
+
+  private async removeRecoveryFiles(filePaths: string[]): Promise<void> {
+    const results = await Promise.allSettled(
+      filePaths.map((filePath) =>
+        Promise.resolve().then(() => this.removeRecoveryFile(filePath)),
+      ),
+    );
+    const errors = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason as unknown] : [],
+    );
+
+    if (errors.length === 1) {
+      throw errors[0];
+    }
+
+    if (errors.length > 1) {
+      throw new AggregateError(errors, "Failed to remove recovery session files.");
+    }
+  }
+
   private removeSessionFiles(jobId: string): Promise<void> {
     const resumeFilePath = this.resumeFilePath(jobId);
     const commandsFilePath = this.commandsFilePath(jobId);
 
     return this.enqueueJobOperation(jobId, async () => {
-      await Promise.all([
-        rm(resumeFilePath, { force: true }),
-        rm(commandsFilePath, { force: true }),
-      ]);
+      await this.removeRecoveryFiles([resumeFilePath, commandsFilePath]);
     });
   }
 
@@ -258,14 +305,17 @@ export class RecoverySessionStore {
 
     return this.enqueueJobOperation(jobId, async (isLatestOperation) => {
       try {
-        await readFile(resumeFilePath, "utf8");
+        await this.readRecoveryFile(resumeFilePath);
         return;
-      } catch {
+      } catch (error) {
+        if (!isMissingFileError(error)) {
+          return;
+        }
         // Recheck inside the per-job queue before removing a command-file orphan.
       }
 
       if (isLatestOperation()) {
-        await rm(commandsFilePath, { force: true });
+        await this.removeRecoveryFile(commandsFilePath);
       }
     });
   }
@@ -282,16 +332,20 @@ export class RecoverySessionStore {
       let record: RecoverySessionRecord;
 
       try {
-        record = JSON.parse(await readFile(resumeFilePath, "utf8")) as RecoverySessionRecord;
+        record = JSON.parse(await this.readRecoveryFile(resumeFilePath)) as RecoverySessionRecord;
       } catch {
         return;
       }
 
       try {
-        await readFile(commandsFilePath, "utf8");
-      } catch {
+        await this.readRecoveryFile(commandsFilePath);
+      } catch (error) {
+        if (!isMissingFileError(error)) {
+          return;
+        }
+
         if (isLatestOperation()) {
-          await rm(resumeFilePath, { force: true });
+          await this.removeRecoveryFile(resumeFilePath);
         }
         return;
       }
@@ -315,10 +369,7 @@ export class RecoverySessionStore {
 
       if (this.shouldRemoveExpiredSession(record, now)) {
         if (isLatestOperation()) {
-          await Promise.all([
-            rm(resumeFilePath, { force: true }),
-            rm(commandsFilePath, { force: true }),
-          ]);
+          await this.removeRecoveryFiles([resumeFilePath, commandsFilePath]);
         }
         return;
       }
@@ -490,17 +541,42 @@ export class RecoverySessionStore {
     });
   }
 
+  claimSession<T>(
+    jobId: string,
+    claim: (
+      input: RecoverySessionClaimInput,
+    ) => Promise<RecoverySessionClaimResult<T>> | RecoverySessionClaimResult<T>,
+  ): Promise<RecoverySessionClaimResult<T>> {
+    const resumeFilePath = this.resumeFilePath(jobId);
+    const commandsFilePath = this.commandsFilePath(jobId);
+
+    return this.enqueueJobOperation(jobId, async () => {
+      const record = JSON.parse(
+        await this.readRecoveryFile(resumeFilePath),
+      ) as RecoverySessionRecord;
+      const commands = parseCommandsFile(await this.readRecoveryFile(commandsFilePath));
+      const claimed = await claim({ record, commands });
+
+      if (claimed.record.jobId !== jobId) {
+        throw new Error("Claimed recovery session id does not match the requested session.");
+      }
+
+      await this.writeSerializedSession(
+        jobId,
+        resumeFilePath,
+        `${JSON.stringify(claimed.record, null, 2)}\n`,
+      );
+      return claimed;
+    });
+  }
+
   async loadSession(jobId: string): Promise<RecoverySessionRecord> {
-    const content = await readFile(this.resumeFilePath(jobId), "utf8");
+    const content = await this.readRecoveryFile(this.resumeFilePath(jobId));
     return JSON.parse(content) as RecoverySessionRecord;
   }
 
   async loadCommands(jobId: string): Promise<string[]> {
-    const content = await readFile(this.commandsFilePath(jobId), "utf8");
-    return content
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+    return parseCommandsFile(await this.readRecoveryFile(this.commandsFilePath(jobId)));
   }
 
   async listSessions(): Promise<RecoverySessionSummary[]> {
