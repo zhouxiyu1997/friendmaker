@@ -20,6 +20,7 @@ class ClassicBtControllerTransport : public ControllerTransport {
  private:
   bool initializeClassicBluetooth();
   bool initializeNvsAndBaseAddress();
+  bool patchDeviceInfoReplyBluetoothAddress();
   bool shutdownClassicBluetooth();
   void clearConnectionState();
   void clearInputs();
