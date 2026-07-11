@@ -14,7 +14,7 @@ const PLATFORMIO_INSTALLER_SHA256 = "068d5dca983b22ed36a00dea7d42e58b646f0ac4958
 const PLATFORMIO_INSTALLER_URL =
   `https://raw.githubusercontent.com/platformio/platformio-core-installer/${PLATFORMIO_INSTALLER_COMMIT}/get-platformio.py`;
 const MAX_INSTALL_LOG_LINES = 400;
-const PLATFORMIO_REQUIRED_PYPARSING_VERSION = "2.2.0";
+const PLATFORMIO_REQUIRED_PYPARSING_VERSION = "2.2.1";
 const PLATFORMIO_REQUIRED_PIP_PACKAGES = [
   "idf-component-manager",
   "kconfiglib",

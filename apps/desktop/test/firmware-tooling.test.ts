@@ -51,21 +51,29 @@ test("collectPlatformIoPythonTargets finds penv plus ESP-IDF virtualenv interpre
   );
 });
 
-test("parsePlatformIoPythonDependencyProbe marks ready probe results explicitly", () => {
-  assert.deepEqual(
+test("issue 83 accepts the Python-compatible pyparsing repair version", () => {
+  assert.equal(
+    parsePlatformIoPythonDependencyProbe(
+      JSON.stringify({
+        missingModules: [],
+        pyparsingVersion: "2.2.1",
+        probeError: null,
+      }),
+    )?.state,
+    "ready",
+  );
+});
+
+test("issue 83 repairs the Python-incompatible pyparsing 2.2.0 version", () => {
+  assert.equal(
     parsePlatformIoPythonDependencyProbe(
       JSON.stringify({
         missingModules: [],
         pyparsingVersion: "2.2.0",
         probeError: null,
       }),
-    ),
-    {
-      state: "ready",
-      missingModules: [],
-      pyparsingVersion: "2.2.0",
-      probeError: null,
-    },
+    )?.state,
+    "missing",
   );
 });
 
@@ -142,7 +150,7 @@ test("issue 69 regression: managed PlatformIO compatibility repair accepts a rea
         return {
           state: "ready",
           missingModules: [],
-          pyparsingVersion: "2.2.0",
+          pyparsingVersion: "2.2.1",
           probeError: null,
         };
       },
@@ -203,7 +211,7 @@ test("managed PlatformIO compatibility probe failures stay actionable and still 
         return {
           state: "ready",
           missingModules: [],
-          pyparsingVersion: "2.2.0",
+          pyparsingVersion: "2.2.1",
           probeError: null,
         };
       },
