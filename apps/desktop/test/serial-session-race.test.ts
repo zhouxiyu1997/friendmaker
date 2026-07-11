@@ -59,6 +59,41 @@ test("writeWithPrearmedWait cancels a pending response after a failed write", as
   assert.equal(cancelError, writeError);
 });
 
+test("writeWithPrearmedWait does not release the caller while a timed-out write is still draining", async () => {
+  const waitError = new Error("response timeout");
+  let rejectWait!: (error: Error) => void;
+  let resolveWrite!: () => void;
+  let settled = false;
+  const operation = writeWithPrearmedWait(
+    () => ({
+      promise: new Promise<string>((_resolve, reject) => {
+        rejectWait = reject;
+      }),
+      cancel: () => undefined,
+    }),
+    () => new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    }),
+  );
+  const observed = operation.then(
+    () => {
+      settled = true;
+    },
+    (error: unknown) => {
+      settled = true;
+      throw error;
+    },
+  );
+  void observed.catch(() => undefined);
+
+  rejectWait(waitError);
+  await waitForImmediate();
+  assert.equal(settled, false);
+
+  resolveWrite();
+  await assert.rejects(observed, /response timeout/u);
+});
+
 test("validateSerialCommand rejects serial frame control characters", () => {
   for (const command of ["I\rBT RESET", "I\nBT CLEAR-PEER", "I\0BT RESET"]) {
     assert.throws(() => validateSerialCommand(command), /single line/u);

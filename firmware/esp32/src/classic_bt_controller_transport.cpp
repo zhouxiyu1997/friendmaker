@@ -272,6 +272,20 @@ uint8_t kReply3401[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
+static_assert(sizeof(kReply08) == kSubcommandReplyLength, "reply08 must match HID report 0x21");
+static_assert(sizeof(kReply03) == kSubcommandReplyLength, "reply03 must match HID report 0x21");
+static_assert(sizeof(kReply04) == kSubcommandReplyLength, "reply04 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress50) == kSubcommandReplyLength, "replyspi50 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress80) == kSubcommandReplyLength, "replyspi80 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress98) == kSubcommandReplyLength, "replyspi98 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress10) == kSubcommandReplyLength, "replyspi10 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress3D) == kSubcommandReplyLength, "replyspi3d must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress20) == kSubcommandReplyLength, "replyspi20 must match HID report 0x21");
+static_assert(sizeof(kReply4001) == kSubcommandReplyLength, "reply4001 must match HID report 0x21");
+static_assert(sizeof(kReply4801) == kSubcommandReplyLength, "reply4801 must match HID report 0x21");
+static_assert(sizeof(kReply3001) == kSubcommandReplyLength, "reply3001 must match HID report 0x21");
+static_assert(sizeof(kReply3401) == kSubcommandReplyLength, "reply3401 must match HID report 0x21");
+
 esp_bt_cod_t makeDeviceClass() {
   esp_bt_cod_t cod = {};
   cod.minor = 2;

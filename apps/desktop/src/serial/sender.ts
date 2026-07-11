@@ -70,8 +70,8 @@ export async function writeWithPrearmedWait<T>(
   void pending.promise.catch(() => undefined);
 
   try {
-    const [, response] = await Promise.all([write(), pending.promise]);
-    return response;
+    await write();
+    return await pending.promise;
   } catch (error) {
     pending.cancel(error instanceof Error ? error : new Error(String(error)));
     throw error;

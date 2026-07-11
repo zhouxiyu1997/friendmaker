@@ -93,7 +93,7 @@ bool parseStrictIntCommand(
   return true;
 }
 
-bool parseTwoInts(const String &value, int &first, int &second) {
+bool parseMoveCommand(const String &value, int &first, int &second) {
   int values[2] = {};
   if (!parseStrictIntCommand(value, "M", values)) {
     return false;
@@ -130,7 +130,7 @@ bool parseLineCommand(const String &value, int &dx, int &dy, uint8_t &stride) {
   return true;
 }
 
-bool parseThreeInts(const String &value, int &first, int &second, int &third) {
+bool parseStickIntCommand(const String &value, int &first, int &second, int &third) {
   int values[3] = {};
   if (!parseStrictIntCommand(value, "STICK", values)) {
     return false;
@@ -252,7 +252,7 @@ bool parseStickCommand(const String &line, int &x, int &y, uint16_t &holdMs) {
   }
 
   int parsedHoldMs = 0;
-  if (!parseThreeInts(line, x, y, parsedHoldMs)) {
+  if (!parseStickIntCommand(line, x, y, parsedHoldMs)) {
     return false;
   }
 
@@ -599,7 +599,7 @@ bool executeCommand(const String &line, SwitchController &controller, String &er
     int dx = 0;
     int dy = 0;
 
-    if (!parseTwoInts(line, dx, dy)) {
+    if (!parseMoveCommand(line, dx, dy)) {
       error = "invalid move";
       return false;
     }
