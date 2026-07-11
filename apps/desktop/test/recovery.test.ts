@@ -127,6 +127,39 @@ async function createRecoverySession(
   return { commands, profile, record, resumePlan: scanlinePlan.resumePlan };
 }
 
+function makeTwoSegmentExecutionFixture(): { commands: string[]; resumePlan: ResumePlan } {
+  const commands = ["CFG INPUT 65 45 1800", "P", "P", "P", "P", "E"];
+  return {
+    commands,
+    resumePlan: {
+      inputConfigCommand: commands[0]!,
+      initialCursor: { x: 0, y: 0 },
+      segments: [
+        {
+          segmentIndex: 0,
+          label: "segment 1",
+          colorHex: null,
+          slotIndex: null,
+          resumePrefixCommands: ["C 0", "W 500"],
+          firstCanvasPosition: { x: 0, y: 0 },
+          bodyStartCommandIndex: 1,
+          commandEndExclusive: 3,
+        },
+        {
+          segmentIndex: 1,
+          label: "segment 2",
+          colorHex: null,
+          slotIndex: null,
+          resumePrefixCommands: ["C 1", "W 500"],
+          firstCanvasPosition: { x: 0, y: 0 },
+          bodyStartCommandIndex: 3,
+          commandEndExclusive: 5,
+        },
+      ],
+    },
+  };
+}
+
 async function waitForCondition(
   condition: () => boolean,
   timeoutMs = 2_000,
@@ -831,6 +864,89 @@ test("discard queued behind an in-flight write cannot resurrect recovery files",
       false,
     );
   } finally {
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("concurrent execution starts reserve one lifecycle and create only one recovery session", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-execution-race-"));
+  const profile = makeProfile({ canvasWidth: 6, canvasHeight: 1 });
+  const { commands, resumePlan } = makeTwoSegmentExecutionFixture();
+  let server: Awaited<ReturnType<typeof startWebServer>> | null = null;
+
+  try {
+    server = await startWebServer({ port: 0, recoverySessionsRoot });
+    const requestStart = () => fetch(`${server!.url}/api/execution/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target: "simulate",
+        commands,
+        ackDelayMs: 500,
+        resumePlan,
+        sourceLabel: "concurrent-start.png",
+        profileSummary: makeRecoveryProfileSummary(profile),
+      }),
+    });
+    const responses = await Promise.all([requestStart(), requestStart()]);
+    const statuses = responses.map((response) => response.status).sort((left, right) => left - right);
+    const payloads = await Promise.all(responses.map(async (response) => response.json())) as Array<{
+      recoverySession?: { jobId: string };
+    }>;
+
+    assert.deepEqual(statuses, [200, 400]);
+    const successfulJobId = payloads.find((payload) => payload.recoverySession)?.recoverySession?.jobId;
+    assert.ok(successfulJobId);
+
+    const sessionsResponse = await fetch(`${server.url}/api/recovery/sessions`);
+    const sessionsPayload = (await sessionsResponse.json()) as {
+      sessions?: Array<{ jobId: string; status: string }>;
+    };
+    assert.deepEqual(sessionsPayload.sessions?.map((session) => session.jobId), [successfulJobId]);
+
+    await fetch(`${server.url}/api/execution/stop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    await waitForExecutionStatus(server.url, "stopped", 3_000);
+  } finally {
+    if (server) {
+      await server.close();
+    }
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  }
+});
+
+test("recovery resume refuses a session that is not recoverable", async () => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-recovery-claim-status-"));
+  const store = new RecoverySessionStore(recoverySessionsRoot);
+  const { record } = await createRecoverySession(store, "claim-status.png");
+  let server: Awaited<ReturnType<typeof startWebServer>> | null = null;
+
+  try {
+    server = await startWebServer({ port: 0, recoverySessionsRoot });
+    const activeRecord = await store.loadSession(record.jobId);
+    applyRecoveryStatus(activeRecord, "running");
+    await store.writeSession(activeRecord);
+
+    const response = await fetch(`${server.url}/api/recovery/resume`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionId: record.jobId,
+        portPath: "/dev/friendmaker-missing-test-port",
+      }),
+    });
+    const payload = (await response.json()) as { error?: string };
+
+    assert.equal(response.status, 400);
+    assert.match(payload.error ?? "", /not recoverable/i);
+    assert.equal((await store.loadSession(record.jobId)).status, "running");
+  } finally {
+    if (server) {
+      await server.close();
+    }
     await rm(recoverySessionsRoot, { recursive: true, force: true });
   }
 });

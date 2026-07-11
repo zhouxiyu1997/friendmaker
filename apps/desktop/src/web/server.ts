@@ -263,6 +263,16 @@ function createEmptyExecution(): ManagedExecution {
 }
 
 let managedExecution: ManagedExecution = createEmptyExecution();
+let executionLifecycleTail: Promise<void> = Promise.resolve();
+
+function withExecutionLifecycleLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = executionLifecycleTail.catch(() => undefined).then(operation);
+  executionLifecycleTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
 
 function resetManagedExecutionState(): void {
   managedExecution = createEmptyExecution();
@@ -1292,6 +1302,15 @@ async function updateRecoverySessionStatus(
   execution.lastPersistedRecoverySegmentIndex = persistedSegmentIndex;
 }
 
+async function rollBackUnstartedRecoverySession(
+  recoverySession: RecoverySessionRecord,
+  startError: unknown,
+): Promise<void> {
+  const message = startError instanceof Error ? startError.message : String(startError);
+  applyRecoveryStatus(recoverySession, "recoverable", message);
+  await webRuntime.recoverySessions.writeSession(recoverySession);
+}
+
 function resolveRecoveryTerminalStatus(execution: ManagedExecution): "recoverable" | "completed" {
   const nextResumeSegmentIndex = execution.recoverySession?.nextResumeSegmentIndex ?? null;
   return nextResumeSegmentIndex === null ? "completed" : "recoverable";
@@ -1933,11 +1952,7 @@ async function handleExecutionStart(
 
   try {
     validateSerialCommandBatch(body.commands);
-
-    if (isManagedExecutionActive(managedExecution.status)) {
-      throw new Error("A drawing execution is already running.");
-    }
-
+    const commands = body.commands;
     const target: ExecutionTarget = body.target === "simulate" ? "simulate" : "serial";
     const portPath = target === "serial" ? preferSerialPath(body.portPath ?? "") : null;
     const normalizedProfileSummary = normalizeRecoveryProfileSummary(body.profileSummary);
@@ -1950,56 +1965,82 @@ async function handleExecutionStart(
       normalizedProfileSummary.brushShape,
       normalizedProfileSummary.brushSize,
     );
+    const started = await withExecutionLifecycleLock(async () => {
+      if (isManagedExecutionActive(managedExecution.status)) {
+        throw new Error("A drawing execution is already running.");
+      }
 
-    const recoverySession =
-      body.resumePlan && typeof body.resumePlan === "object"
-        ? await webRuntime.recoverySessions.createSession({
-            commands: body.commands,
-            resumePlan: body.resumePlan,
-            sourceLabel:
-              typeof body.sourceLabel === "string" && body.sourceLabel.trim().length > 0
-                ? body.sourceLabel.trim()
-                : "untitled-drawing",
-            profileSummary: normalizedProfileSummary,
-            serialOptions: {
-              baudRate: body.baudRate ?? 115200,
-              ackTimeoutMs: normalizeAckTimeoutMs(body.ackTimeoutMs),
-              retries: body.retries ?? 1,
-            },
-          })
-        : null;
+      let recoverySession: RecoverySessionRecord | null = null;
+
+      try {
+        recoverySession =
+          body.resumePlan && typeof body.resumePlan === "object"
+            ? await webRuntime.recoverySessions.createSession({
+                commands,
+                resumePlan: body.resumePlan,
+                sourceLabel:
+                  typeof body.sourceLabel === "string" && body.sourceLabel.trim().length > 0
+                    ? body.sourceLabel.trim()
+                    : "untitled-drawing",
+                profileSummary: normalizedProfileSummary,
+                serialOptions: {
+                  baudRate: body.baudRate ?? 115200,
+                  ackTimeoutMs: normalizeAckTimeoutMs(body.ackTimeoutMs),
+                  retries: body.retries ?? 1,
+                },
+              })
+            : null;
+
+        const execution = await startManagedExecution(
+          withDefined({
+            commands,
+            target,
+            ...(portPath ? { portPath } : {}),
+            baudRate: body.baudRate,
+            ackTimeoutMs: body.ackTimeoutMs,
+            retries: body.retries,
+            ackDelayMs: body.ackDelayMs,
+            errorAtCommand: body.errorAtCommand,
+            totalCommands: commands.length,
+            initialCompletedCommands: 0,
+            recoverySession,
+          }) as {
+            commands: string[];
+            target?: ExecutionTarget;
+            portPath?: string;
+            baudRate?: number;
+            ackTimeoutMs?: number;
+            retries?: number;
+            ackDelayMs?: number;
+            errorAtCommand?: number;
+            progressMap?: number[];
+            totalCommands?: number;
+            initialCompletedCommands?: number;
+            recoverySession?: RecoverySessionRecord | null;
+          },
+        );
+        return { execution, recoverySession };
+      } catch (error) {
+        if (recoverySession) {
+          try {
+            await rollBackUnstartedRecoverySession(recoverySession, error);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [error, rollbackError],
+              "Drawing execution failed to start and its recovery status could not be rolled back.",
+            );
+          }
+        }
+        throw error;
+      }
+    });
 
     json(response, 200, {
       success: true,
-      execution: await startManagedExecution(
-        withDefined({
-          commands: body.commands,
-          target,
-          ...(portPath ? { portPath } : {}),
-          baudRate: body.baudRate,
-          ackTimeoutMs: body.ackTimeoutMs,
-          retries: body.retries,
-          ackDelayMs: body.ackDelayMs,
-          errorAtCommand: body.errorAtCommand,
-          totalCommands: body.commands.length,
-          initialCompletedCommands: 0,
-          recoverySession,
-        }) as {
-          commands: string[];
-          target?: ExecutionTarget;
-          portPath?: string;
-          baudRate?: number;
-          ackTimeoutMs?: number;
-          retries?: number;
-          ackDelayMs?: number;
-          errorAtCommand?: number;
-          progressMap?: number[];
-          totalCommands?: number;
-          initialCompletedCommands?: number;
-          recoverySession?: RecoverySessionRecord | null;
-        },
-      ),
-      recoverySession: recoverySession ? summarizeRecoverySession(recoverySession) : null,
+      execution: started.execution,
+      recoverySession: started.recoverySession
+        ? summarizeRecoverySession(started.recoverySession)
+        : null,
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {
@@ -2159,10 +2200,6 @@ async function handleRecoveryResume(
   };
 
   try {
-    if (isManagedExecutionActive(managedExecution.status)) {
-      throw new Error("A drawing execution is already running.");
-    }
-
     if (!body.sessionId) {
       throw new Error("Missing sessionId.");
     }
@@ -2172,44 +2209,68 @@ async function handleRecoveryResume(
     if (!portPath) {
       throw new Error("Missing portPath.");
     }
+    const started = await withExecutionLifecycleLock(async () => {
+      if (isManagedExecutionActive(managedExecution.status)) {
+        throw new Error("A drawing execution is already running.");
+      }
 
-    const claimed = await webRuntime.recoverySessions.claimSession(
-      body.sessionId,
-      ({ record, commands }) => {
-        const recoverySession = normalizeRecoverySessionRecord(record);
-        assertSupportedBrushSelection(
-          recoverySession.profileSummary.brushShape,
-          recoverySession.profileSummary.brushSize,
-        );
-        const recoveryPlan = buildRecoveryExecutionPlan({
-          commands,
-          resumePlan: recoverySession.resumePlan,
-          completedCommands: recoverySession.completedCommands,
+      const claimed = await webRuntime.recoverySessions.claimSession(
+        body.sessionId!,
+        ({ record, commands }) => {
+          if (record.status !== "recoverable") {
+            throw new Error("Recovery session is not recoverable.");
+          }
+
+          const recoverySession = normalizeRecoverySessionRecord(record);
+          assertSupportedBrushSelection(
+            recoverySession.profileSummary.brushShape,
+            recoverySession.profileSummary.brushSize,
+          );
+          const recoveryPlan = buildRecoveryExecutionPlan({
+            commands,
+            resumePlan: recoverySession.resumePlan,
+            completedCommands: recoverySession.completedCommands,
+          });
+
+          applyRecoveryProgress(recoverySession, recoveryPlan.resumedFromCompletedCommands);
+          applyRecoveryStatus(recoverySession, "running");
+          return { record: recoverySession, value: recoveryPlan };
+        },
+      );
+      const recoverySession = claimed.record;
+      const recoveryPlan = claimed.value;
+
+      try {
+        const execution = await startManagedExecution({
+          commands: recoveryPlan.commands,
+          target: "serial",
+          portPath,
+          baudRate: recoverySession.serialOptions.baudRate,
+          ackTimeoutMs: recoverySession.serialOptions.ackTimeoutMs,
+          retries: recoverySession.serialOptions.retries,
+          progressMap: recoveryPlan.progressMap,
+          totalCommands: recoverySession.totalCommands,
+          initialCompletedCommands: recoverySession.completedCommands,
+          recoverySession,
         });
-
-        applyRecoveryProgress(recoverySession, recoveryPlan.resumedFromCompletedCommands);
-        applyRecoveryStatus(recoverySession, "running");
-        return { record: recoverySession, value: recoveryPlan };
-      },
-    );
-    const recoverySession = claimed.record;
-    const recoveryPlan = claimed.value;
+        return { execution, recoverySession };
+      } catch (error) {
+        try {
+          await rollBackUnstartedRecoverySession(recoverySession, error);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "Recovery execution failed to start and its session could not be rolled back.",
+          );
+        }
+        throw error;
+      }
+    });
 
     json(response, 200, {
       success: true,
-      execution: await startManagedExecution({
-        commands: recoveryPlan.commands,
-        target: "serial",
-        portPath,
-        baudRate: recoverySession.serialOptions.baudRate,
-        ackTimeoutMs: recoverySession.serialOptions.ackTimeoutMs,
-        retries: recoverySession.serialOptions.retries,
-        progressMap: recoveryPlan.progressMap,
-        totalCommands: recoverySession.totalCommands,
-        initialCompletedCommands: recoverySession.completedCommands,
-        recoverySession,
-      }),
-      recoverySession: summarizeRecoverySession(recoverySession),
+      execution: started.execution,
+      recoverySession: summarizeRecoverySession(started.recoverySession),
       session: serialSessionManager.snapshot(),
     });
   } catch (error) {
