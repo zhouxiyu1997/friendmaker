@@ -36,6 +36,8 @@ export const SERIAL_OPEN_READY_PROBE_TIMEOUT_MS = 3_000;
 export const SERIAL_OPEN_RESET_PULSE_MS = 120;
 const PASSIVE_DEVICE_LINE_BUFFER_LIMIT = 200;
 const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
+const PALETTE_CONFIG_ACK_TIMEOUT_FLOOR_MS = 90_000;
+const PALETTE_CONFIG_ACK_TIMEOUT_CEILING_MS = 300_000;
 
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
@@ -409,12 +411,16 @@ export function getAckTimeoutForCommand(
     const red = Number.parseInt(hex.slice(0, 2), 16);
     const green = Number.parseInt(hex.slice(2, 4), 16);
     const blue = Number.parseInt(hex.slice(4, 6), 16);
+    const estimatedTimeoutMs = estimatePaletteConfigDurationMs(slotIndex, red, green, blue, timing, {
+      includeTimeoutMargin: true,
+    });
+    const finiteTimeoutCandidates = [baseTimeoutMs, estimatedTimeoutMs].filter((timeoutMs) =>
+      Number.isFinite(timeoutMs),
+    );
 
-    return Math.max(
-      baseTimeoutMs,
-      estimatePaletteConfigDurationMs(slotIndex, red, green, blue, timing, {
-        includeTimeoutMargin: true,
-      }),
+    return Math.min(
+      PALETTE_CONFIG_ACK_TIMEOUT_CEILING_MS,
+      Math.max(PALETTE_CONFIG_ACK_TIMEOUT_FLOOR_MS, ...finiteTimeoutCandidates),
     );
   }
 
