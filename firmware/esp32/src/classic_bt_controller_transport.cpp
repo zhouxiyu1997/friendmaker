@@ -167,12 +167,16 @@ String formatBluetoothAddress(const uint8_t address[6]) {
   return String(buffer);
 }
 
+constexpr size_t kSubcommandReplyLength = 48;
+constexpr size_t kReply02BluetoothAddressOffset = 18;
+
 uint8_t kReply02[] = {
     0x00, 0x8E, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x00, 0x00, 0x00,
     0x82, 0x02, 0x04, 0x00, kControllerTypeProCon, 0x02, 0xD4, 0xF0, 0x57, 0x6E,
     0xF0, 0xD7, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00};
+static_assert(sizeof(kReply02) == kSubcommandReplyLength, "reply02 must match HID report 0x21");
 
 uint8_t kReply08[] = {
     0x01, 0x8E, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x00, 0x00, 0x00,
@@ -197,7 +201,8 @@ uint8_t kReplySpiAddress0[] = {
     0x90, 0x10, 0x00, 0x60, 0x00, 0x00, 0x10, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
     0xff, kControllerTypeProCon, 0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00};
+    0x00, 0x00, 0x00};
+static_assert(sizeof(kReplySpiAddress0) == kSubcommandReplyLength, "replyspi0 must match HID report 0x21");
 
 uint8_t kReplySpiAddress50[] = {
     0x03, 0x8E, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x00, 0x00, 0x00,
@@ -257,14 +262,29 @@ uint8_t kReply3333[] = {
     0x31, 0x8e, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00, 0x08, 0x80, 0x00,
     0xa0, 0x21, 0x01, 0x00, 0x00, 0x00, 0x03, 0x00, 0x05, 0x01, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7b,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7b,
     0x00};
+static_assert(sizeof(kReply3333) == kSubcommandReplyLength, "reply3333 must match HID report 0x21");
 
 uint8_t kReply3401[] = {
     0x12, 0x8e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80, 0x00,
     0x80, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+static_assert(sizeof(kReply08) == kSubcommandReplyLength, "reply08 must match HID report 0x21");
+static_assert(sizeof(kReply03) == kSubcommandReplyLength, "reply03 must match HID report 0x21");
+static_assert(sizeof(kReply04) == kSubcommandReplyLength, "reply04 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress50) == kSubcommandReplyLength, "replyspi50 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress80) == kSubcommandReplyLength, "replyspi80 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress98) == kSubcommandReplyLength, "replyspi98 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress10) == kSubcommandReplyLength, "replyspi10 must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress3D) == kSubcommandReplyLength, "replyspi3d must match HID report 0x21");
+static_assert(sizeof(kReplySpiAddress20) == kSubcommandReplyLength, "replyspi20 must match HID report 0x21");
+static_assert(sizeof(kReply4001) == kSubcommandReplyLength, "reply4001 must match HID report 0x21");
+static_assert(sizeof(kReply4801) == kSubcommandReplyLength, "reply4801 must match HID report 0x21");
+static_assert(sizeof(kReply3001) == kSubcommandReplyLength, "reply3001 must match HID report 0x21");
+static_assert(sizeof(kReply3401) == kSubcommandReplyLength, "reply3401 must match HID report 0x21");
 
 esp_bt_cod_t makeDeviceClass() {
   esp_bt_cod_t cod = {};
@@ -366,6 +386,22 @@ bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() {
   return true;
 }
 
+bool ClassicBtControllerTransport::patchDeviceInfoReplyBluetoothAddress() {
+  const uint8_t *bluetoothAddress = esp_bt_dev_get_address();
+  if (bluetoothAddress == nullptr) {
+    return false;
+  }
+
+  std::memcpy(
+      &kReply02[kReply02BluetoothAddressOffset],
+      bluetoothAddress,
+      sizeof(esp_bd_addr_t));
+  Serial.printf(
+      "INFO bt device_info_address=%s\n",
+      formatBluetoothAddress(bluetoothAddress).c_str());
+  return true;
+}
+
 bool ClassicBtControllerTransport::initializeClassicBluetooth() {
   initStep_ = "nvs";
   initError_ = "none";
@@ -397,6 +433,14 @@ bool ClassicBtControllerTransport::initializeClassicBluetooth() {
     return false;
   }
   bluedroidReady_ = true;
+
+  initStep_ = "device_info_address";
+  if (!patchDeviceInfoReplyBluetoothAddress()) {
+    initError_ = "bluetooth_address_unavailable";
+    Serial.println(
+        "WARN bt device_info_address unavailable after bluedroid_enable; aborting Bluetooth init");
+    return false;
+  }
 
   if (kDisableBluetoothModemSleep) {
     // Prevent modem sleep on the more timing-sensitive controller variants so
@@ -511,12 +555,6 @@ bool ClassicBtControllerTransport::shutdownClassicBluetooth() {
   if (!isIgnorableBluetoothError(scanErr)) {
     Serial.printf("WARN bt shutdown scan_mode err=%s\n", esp_err_to_name(scanErr));
   }
-
-  const esp_err_t unplugErr = esp_bt_hid_device_virtual_cable_unplug();
-  if (!isIgnorableBluetoothError(unplugErr)) {
-    Serial.printf("WARN bt shutdown vc_unplug err=%s\n", esp_err_to_name(unplugErr));
-  }
-  delay(200);
 
   const esp_err_t disconnectErr = esp_bt_hid_device_disconnect();
   if (!isIgnorableBluetoothError(disconnectErr)) {
@@ -827,6 +865,11 @@ bool ClassicBtControllerTransport::clearStoredPeer() {
   if (hadPeerAddress) {
     std::memcpy(previousPeerAddress, lastPeerAddress_, sizeof(previousPeerAddress));
   }
+
+  const esp_err_t unplugErr = esp_bt_hid_device_virtual_cable_unplug();
+  Serial.printf(
+      "INFO bt clear_peer vc_unplug_requested err=%s\n",
+      esp_err_to_name(unplugErr));
 
   if (!clearBondedPeerDevices()) {
     return false;
@@ -1187,13 +1230,14 @@ bool ClassicBtControllerTransport::beginExplicitInput(bool waitForDrain) {
     return false;
   }
 
-  // Before explicit input, align submit/event counters to avoid attributing
-  // earlier idle-send callbacks to the new explicit send window.
+  // Conservative profiles drain any earlier idle-send callback before opening
+  // a new explicit send window. Keep both counters monotonic so a late callback
+  // cannot be attributed to the wrong submission.
   if (paired_ && inputReportSendEventCount_ < inputReportSubmitCount_) {
     uint32_t drainElapsedMs = 0;
     if (waitForDrain) {
       // The more conservative profiles can report SEND_REPORT_EVT later than
-      // expected under transient congestion, so briefly wait before re-aligning.
+      // expected under transient congestion, so wait within the existing budget.
       const uint32_t drainStart = millis();
       while (inputReportSendEventCount_ < inputReportSubmitCount_ &&
              (millis() - drainStart) < kExplicitInputDrainBudgetMs) {
@@ -1206,7 +1250,12 @@ bool ClassicBtControllerTransport::beginExplicitInput(bool waitForDrain) {
         static_cast<unsigned long>(inputReportSubmitCount_),
         static_cast<unsigned long>(inputReportSendEventCount_),
         static_cast<unsigned long>(drainElapsedMs));
-    inputReportSubmitCount_ = inputReportSendEventCount_;
+    if (waitForDrain && inputReportSendEventCount_ < inputReportSubmitCount_) {
+      Serial.println("WARN bt explicit_input blocked reason=pending-report");
+      xSemaphoreGiveRecursive(inputReportSendMutex_);
+      explicitInputActive_ = false;
+      return false;
+    }
   }
   return true;
 }
@@ -1283,9 +1332,6 @@ void ClassicBtControllerTransport::resetInputReportTracking() {
 }
 
 void ClassicBtControllerTransport::markControllerPaired() {
-  if (!paired_) {
-    resetInputReportTracking();
-  }
   paired_ = true;
   pairingComplete_ = true;
   hasReconnectablePeer_ = hasPeerAddress_;
@@ -1319,7 +1365,7 @@ bool ClassicBtControllerTransport::sendSubcommandReply(
     return false;
   }
 
-  Serial.printf("INFO bt reply label=%s report=%u len=%u\n", label, reportId, length);
+  Serial.printf("INFO bt reply queued label=%s report=%u len=%u\n", label, reportId, length);
   return true;
 }
 
@@ -1388,8 +1434,7 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
     return;
   }
   if (data[9] == 3) {
-    sendSubcommandReply(0x21, kReply03, sizeof(kReply03), "reply03");
-    if (kMarkPairedOnSubcommand03) {
+    if (sendSubcommandReply(0x21, kReply03, sizeof(kReply03), "reply03") && kMarkPairedOnSubcommand03) {
       markControllerPaired();
     }
     return;
@@ -1431,13 +1476,15 @@ void ClassicBtControllerTransport::processIncomingReport(uint8_t reportId, uint1
     return;
   }
   if (data[9] == 48) {
-    markControllerPaired();
-    sendSubcommandReply(0x21, kReply3001, sizeof(kReply3001), "reply3001");
+    if (sendSubcommandReply(0x21, kReply3001, sizeof(kReply3001), "reply3001")) {
+      markControllerPaired();
+    }
     return;
   }
   if (data[9] == 33 && data[10] == 33) {
-    markControllerPaired();
-    sendSubcommandReply(0x21, kReply3333, sizeof(kReply3333), "reply3333");
+    if (sendSubcommandReply(0x21, kReply3333, sizeof(kReply3333), "reply3333")) {
+      markControllerPaired();
+    }
     return;
   }
 }
@@ -1798,6 +1845,7 @@ const char *ClassicBtControllerTransport::name() const { return CONTROL_TRANSPOR
 
 bool ClassicBtControllerTransport::initializeClassicBluetooth() { return false; }
 bool ClassicBtControllerTransport::initializeNvsAndBaseAddress() { return false; }
+bool ClassicBtControllerTransport::patchDeviceInfoReplyBluetoothAddress() { return false; }
 void ClassicBtControllerTransport::clearInputs() {}
 void ClassicBtControllerTransport::setButtonBits(uint32_t buttonsMask) { (void)buttonsMask; }
 void ClassicBtControllerTransport::setLeftStickFromVector(int x, int y) {

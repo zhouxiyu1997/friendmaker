@@ -224,6 +224,52 @@ test("/api/generate echoes timing overrides into commands and estimated runtime"
   );
 });
 
+test("/api/generate rounds and clamps interactive preview scale to 1 through 4", async (t) => {
+  const recoverySessionsRoot = await mkdtemp(path.join(os.tmpdir(), "friendmaker-preview-scale-"));
+  const server = await startWebServer({ port: 0, recoverySessionsRoot });
+  t.after(async () => {
+    await server.close();
+    await rm(recoverySessionsRoot, { recursive: true, force: true });
+  });
+
+  const imageDataUrl = await solidPngDataUrl(4, 3);
+  const cases: Array<{
+    label: string;
+    previewScale?: unknown;
+    expectedScale: number;
+  }> = [
+    { label: "lower bound", previewScale: 0, expectedScale: 1 },
+    { label: "rounded", previewScale: 2.6, expectedScale: 3 },
+    { label: "upper bound", previewScale: 5, expectedScale: 4 },
+    { label: "missing fallback", expectedScale: 2 },
+    { label: "invalid fallback", previewScale: "invalid", expectedScale: 2 },
+  ];
+
+  for (const testCase of cases) {
+    const response = await fetch(`${server.url}/api/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        imageDataUrl,
+        width: 4,
+        height: 3,
+        ...(Object.hasOwn(testCase, "previewScale")
+          ? { previewScale: testCase.previewScale }
+          : {}),
+      }),
+    });
+
+    assert.equal(response.ok, true, testCase.label);
+    const payload = (await response.json()) as { previewDataUrl: string };
+    const encodedPreview = payload.previewDataUrl.split(",")[1];
+    assert.ok(encodedPreview, `missing preview for ${testCase.label}`);
+    const metadata = await sharp(Buffer.from(encodedPreview, "base64")).metadata();
+
+    assert.equal(metadata.width, 4 * testCase.expectedScale, testCase.label);
+    assert.equal(metadata.height, 3 * testCase.expectedScale, testCase.label);
+  }
+});
+
 test("official basic palette timing follows current slot position and BC RESET", () => {
   const timing = { buttonPressMs: 100, inputDelayMs: 100, homeMs: 1800 };
   const state = createBasicPaletteTimingState();

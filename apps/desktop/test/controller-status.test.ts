@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   deriveControllerStatus,
+  isControllerSendableStatus,
   normalizeControllerDeviceLines,
   readInfoLineMap,
   shouldReuseExistingControllerConnection,
@@ -40,7 +41,7 @@ test("readInfoLineMap keeps info fields clean when warn lines are glued on", () 
   assert.equal(info.bt_last_send_report_status, "1");
 });
 
-test("deriveControllerStatus prefers connected-ready progress over stale init error display", () => {
+test("deriveControllerStatus does not infer report readiness from connection and pairing", () => {
   const status = deriveControllerStatus([
     "INFO transport=classic-bt-uartswitchcon",
     "INFO bt_profile=uartswitchcon-pro-controller",
@@ -54,11 +55,18 @@ test("deriveControllerStatus prefers connected-ready progress over stale init er
   ]);
 
   assert.ok(status);
-  assert.equal(status?.tone, "success");
-  assert.equal(status?.pill, "已就绪");
-  assert.equal(status?.title, "手柄已连接");
-  assert.equal(status?.ready, "可发送");
+  assert.equal(status?.tone, "running");
+  assert.equal(status?.pill, "已连接");
+  assert.equal(status?.title, "连接已建立");
+  assert.equal(status?.ready, "未就绪");
+  assert.equal(status?.readyValue, false);
+  assert.equal(status?.readyInferredValue, false);
   assert.equal(status?.initError, "btStart_failed");
+});
+
+test("isControllerSendableStatus requires explicit report readiness", () => {
+  assert.equal(isControllerSendableStatus({ connected: true, paired: true, ready: false }), false);
+  assert.equal(isControllerSendableStatus({ connected: true, paired: true, ready: true }), true);
 });
 
 test("deriveControllerStatus marks congested inferred-ready links as unstable", () => {
@@ -128,7 +136,7 @@ test("shouldReuseExistingControllerConnection keeps active bluetooth sessions in
       authValue: false,
       discoverableValue: true,
     }),
-    false,
+    true,
   );
   assert.equal(
     shouldReuseExistingControllerConnection({

@@ -151,11 +151,56 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
     new URL("../../../firmware/esp32/src/classic_bt_controller_transport.cpp", import.meta.url),
     "utf8",
   );
+  const shutdownMatch = firmwareSource.match(
+    /bool ClassicBtControllerTransport::shutdownClassicBluetooth\(\) \{([\s\S]*?)\n\}\n\nvoid ClassicBtControllerTransport::clearInputs/u,
+  );
+  const beginExplicitInputMatch = firmwareSource.match(
+    /bool ClassicBtControllerTransport::beginExplicitInput\(bool waitForDrain\) \{([\s\S]*?)\n\}\n\nvoid ClassicBtControllerTransport::endExplicitInput/u,
+  );
+  const markPairedMatch = firmwareSource.match(
+    /void ClassicBtControllerTransport::markControllerPaired\(\) \{([\s\S]*?)\n\}\n\nbool ClassicBtControllerTransport::sendSubcommandReply/u,
+  );
+  const processIncomingReportMatch = firmwareSource.match(
+    /void ClassicBtControllerTransport::processIncomingReport\([^)]*\) \{([\s\S]*?)\n\}\n\nvoid ClassicBtControllerTransport::handleGapEvent/u,
+  );
+
+  assert.ok(shutdownMatch);
+  assert.ok(beginExplicitInputMatch);
+  assert.ok(markPairedMatch);
+  assert.ok(processIncomingReportMatch);
+  const shutdownBody = shutdownMatch[1];
+  const beginExplicitInputBody = beginExplicitInputMatch[1];
+  const markPairedBody = markPairedMatch[1];
+  const processIncomingReportBody = processIncomingReportMatch[1];
+  assert.ok(shutdownBody);
+  assert.ok(beginExplicitInputBody);
+  assert.ok(markPairedBody);
+  assert.ok(processIncomingReportBody);
 
   assert.match(
     firmwareSource,
     /deriveDeterministicBaseMac[\s\S]*source=%s/u,
   );
+  assert.doesNotMatch(shutdownBody, /virtual_cable_unplug/u);
+  assert.match(firmwareSource, /kSubcommandReplyLength\s*=\s*48/u);
+  assert.match(
+    firmwareSource,
+    /static_assert\(sizeof\(kReply02\) == kSubcommandReplyLength/u,
+  );
+  assert.match(
+    firmwareSource,
+    /static_assert\(sizeof\(kReplySpiAddress0\) == kSubcommandReplyLength/u,
+  );
+  assert.match(
+    firmwareSource,
+    /static_assert\(sizeof\(kReply3333\) == kSubcommandReplyLength/u,
+  );
+  assert.match(firmwareSource, /esp_bt_dev_get_address\(\)[\s\S]*kReply02/u);
+  assert.match(
+    firmwareSource,
+    /esp_bluedroid_enable\(\)[\s\S]*patchDeviceInfoReplyBluetoothAddress\(\)/u,
+  );
+  assert.doesNotMatch(processIncomingReportBody, /esp_bt_dev_get_address/u);
   assert.match(
     firmwareSource,
     /shouldReconnectLastPeer =[\s\S]*reconnectLastPeer && hasPeerAddress_ && hasReconnectablePeer_[\s\S]*reconnectLastPeerOnRegister_ = shouldReconnectLastPeer/u,
@@ -168,9 +213,10 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
     firmwareSource,
     /markControllerPaired\(\)[\s\S]*hasReconnectablePeer_ = hasPeerAddress_/u,
   );
-  assert.match(
-    firmwareSource,
-    /beginExplicitInput\(bool waitForDrain\)[\s\S]*WARN bt explicit_input blocked connected=%s paired=%s ready=%s[\s\S]*inputReportSendEventCount_ < inputReportSubmitCount_[\s\S]*if \(waitForDrain\) \{[\s\S]*kExplicitInputDrainBudgetMs[\s\S]*inputReportSubmitCount_ = inputReportSendEventCount_/u,
+  assert.doesNotMatch(markPairedBody, /resetInputReportTracking/u);
+  assert.doesNotMatch(
+    beginExplicitInputBody,
+    /inputReportSubmitCount_\s*=\s*inputReportSendEventCount_/u,
   );
   assert.match(
     firmwareSource,
@@ -222,8 +268,17 @@ test("controller firmware keeps bluetooth identity stable while scoping Switch-s
   );
   assert.match(
     firmwareSource,
-    /if \(data\[9\] == 3\) \{[\s\S]*sendSubcommandReply\(0x21, kReply03, sizeof\(kReply03\), "reply03"\);[\s\S]*if \(kMarkPairedOnSubcommand03\) \{[\s\S]*markControllerPaired\(\);[\s\S]*\}/u,
+    /if \(sendSubcommandReply\([^;]+"reply03"\) && kMarkPairedOnSubcommand03\)/u,
   );
+  assert.match(
+    firmwareSource,
+    /if \(data\[9\] == 48\) \{\s*if \(sendSubcommandReply\([^;]+"reply3001"\)\) \{\s*markControllerPaired\(\);/u,
+  );
+  assert.match(
+    firmwareSource,
+    /if \(data\[9\] == 33 && data\[10\] == 33\) \{\s*if \(sendSubcommandReply\([^;]+"reply3333"\)\) \{\s*markControllerPaired\(\);/u,
+  );
+  assert.match(firmwareSource, /INFO bt reply queued label=%s/u);
   assert.match(
     firmwareSource,
     /const bool shouldLogSendReportWarning =[\s\S]*!kSuppressRoutineCongestionWarnings \|\| !isRoutineCongestion[\s\S]*if \(shouldLogSendReportWarning\)/u,
@@ -396,11 +451,19 @@ test("controller firmware can clear the stored bluetooth peer", async () => {
     new URL("../../../firmware/esp32/src/protocol.cpp", import.meta.url),
     "utf8",
   );
+  const clearPeerMatch = firmwareSource.match(
+    /bool ClassicBtControllerTransport::clearStoredPeer\(\) \{([\s\S]*?)\n\}\n\nbool ClassicBtControllerTransport::clearBondedPeerDevices/u,
+  );
+
+  assert.ok(clearPeerMatch);
+  const clearPeerBody = clearPeerMatch[1];
+  assert.ok(clearPeerBody);
 
   assert.match(
     firmwareSource,
     /clearStoredPeer\(\)[\s\S]*clearBondedPeerDevices\(\)[\s\S]*clearPersistedPeerAddress\(\)[\s\S]*hasPeerAddress_ = false/u,
   );
+  assert.match(clearPeerBody, /esp_bt_hid_device_virtual_cable_unplug/u);
   assert.match(
     firmwareSource,
     /clearBondedPeerDevices\(\)[\s\S]*esp_bt_gap_get_bond_device_num\(\)[\s\S]*esp_bt_gap_get_bond_device_list[\s\S]*esp_bt_gap_remove_bond_device/u,
@@ -412,5 +475,49 @@ test("controller firmware can clear the stored bluetooth peer", async () => {
   assert.match(
     protocolSource,
     /line == "BT CLEAR-PEER"[\s\S]*controller\.clearBluetoothPeer\(\)[\s\S]*INFO action=bt-clear-peer/u,
+  );
+});
+
+test("controller firmware strictly parses and bounds command parameters", async () => {
+  const protocolSource = await readFile(
+    new URL("../../../firmware/esp32/src/protocol.cpp", import.meta.url),
+    "utf8",
+  );
+  const configSource = await readFile(
+    new URL("../../../firmware/esp32/src/config.h", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(configSource, /MAX_CURSOR_DELTA\s*=\s*255/u);
+  assert.match(configSource, /MAX_WAIT_DURATION_MS\s*=\s*60000/u);
+  assert.match(
+    protocolSource,
+    /parseStrictIntToken[\s\S]*errno\s*=\s*0[\s\S]*strtol\(token\.c_str\(\),\s*&end,\s*10\)[\s\S]*end == token\.c_str\(\)[\s\S]*\*end != '\\0'[\s\S]*parsed < INT_MIN[\s\S]*parsed > INT_MAX/u,
+  );
+  assert.doesNotMatch(protocolSource, /\.toInt\(\)/u);
+  assert.match(
+    protocolSource,
+    /parseCommandTokens[\s\S]*tokenCount[\s\S]*nextSpace[\s\S]*return false/u,
+  );
+  assert.match(
+    protocolSource,
+    /dx < -MAX_CURSOR_DELTA\s*\|\|\s*dx > MAX_CURSOR_DELTA\s*\|\|[\s\S]*dy < -MAX_CURSOR_DELTA\s*\|\|\s*dy > MAX_CURSOR_DELTA/u,
+  );
+  assert.match(
+    protocolSource,
+    /delayMs < 0\s*\|\|\s*delayMs > MAX_WAIT_DURATION_MS/u,
+  );
+  assert.match(protocolSource, /isxdigit/u);
+  assert.match(
+    protocolSource,
+    /paletteSlotIndex < 0\s*\|\|\s*paletteSlotIndex >= COLOR_PALETTE_SLOT_COUNT/u,
+  );
+  assert.match(
+    protocolSource,
+    /basicColorRow < 0\s*\|\|\s*basicColorRow >= BASIC_COLOR_GRID_ROWS/u,
+  );
+  assert.match(
+    protocolSource,
+    /basicColorCol < 0\s*\|\|\s*basicColorCol >= BASIC_COLOR_GRID_COLS/u,
   );
 });

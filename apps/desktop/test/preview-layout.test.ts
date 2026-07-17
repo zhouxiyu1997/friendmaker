@@ -90,6 +90,8 @@ test("studio layout fits the Electron minimum window without horizontal page ove
   assert.doesNotMatch(appSource, /schedulePreviewCanvasLayoutSync/u);
   assert.match(appSource, /const STUDIO_PREVIEW_COLUMN_MIN_PX = 300;/u);
   assert.match(appSource, /minPixels:\s*\[260,\s*STUDIO_PREVIEW_COLUMN_MIN_PX,\s*150\]/u);
+  assert.match(appSource, /function buildStudioGeneratePayload\(\)[\s\S]*?previewScale:\s*2,/u);
+  assert.doesNotMatch(appSource, /function buildStudioGeneratePayload\(\)[\s\S]*?previewScale:\s*12,/u);
 });
 
 test("page switches reset the shared preview column scroll state", async () => {

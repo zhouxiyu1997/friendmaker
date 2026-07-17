@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 
 import { startWebServer } from "../src/web/server.js";
@@ -125,4 +125,67 @@ test("web server refuses to start a second instance in the same process", async 
     }),
     /already running in this process/i,
   );
+});
+
+test("execute API rejects invalid serial command batches before execution", async (t) => {
+  const { parentRoot, server } = await createRecoveryServer("friendmaker-web-guard-commands-");
+
+  t.after(async () => {
+    await server.close();
+    await rm(parentRoot, { recursive: true, force: true });
+  });
+
+  const invalidCases: Array<{ commands: unknown; error: RegExp }> = [
+    { commands: "I", error: /array/u },
+    { commands: [], error: /cannot be empty/u },
+    { commands: ["I", 42], error: /must be strings/u },
+    { commands: ["I\rBT RESET"], error: /single line/u },
+    { commands: ["I\nBT RESET"], error: /single line/u },
+    { commands: ["I\0BT RESET"], error: /single line/u },
+    { commands: [`I${"x".repeat(256)}`], error: /too long/u },
+  ];
+
+  for (const invalidCase of invalidCases) {
+    const response = await fetch(`${server.url}/api/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ commands: invalidCase.commands, target: "simulate" }),
+    });
+    const payload = (await response.json()) as { error?: string; lines?: string[] };
+
+    assert.equal(response.status, 400);
+    assert.match(payload.error ?? "", invalidCase.error);
+    assert.deepEqual(payload.lines, []);
+  }
+});
+
+test("execution start rejects unsafe commands before persisting recovery files", async (t) => {
+  const { parentRoot, recoverySessionsRoot, server } = await createRecoveryServer(
+    "friendmaker-web-guard-recovery-command-",
+  );
+
+  t.after(async () => {
+    await server.close();
+    await rm(parentRoot, { recursive: true, force: true });
+  });
+
+  const response = await fetch(`${server.url}/api/execution/start`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      commands: ["I\nBT CLEAR-PEER"],
+      target: "simulate",
+      sourceLabel: "unsafe-command",
+      resumePlan: {
+        inputConfigCommand: "CFG INPUT 65 45 1800",
+        initialCursor: { x: 0, y: 0 },
+        segments: [],
+      },
+    }),
+  });
+  const payload = (await response.json()) as { error?: string };
+
+  assert.equal(response.status, 400);
+  assert.match(payload.error ?? "", /single line/u);
+  assert.deepEqual(await readdir(recoverySessionsRoot), []);
 });

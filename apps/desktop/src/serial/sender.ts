@@ -36,6 +36,7 @@ export const SERIAL_OPEN_READY_PROBE_TIMEOUT_MS = 3_000;
 export const SERIAL_OPEN_RESET_PULSE_MS = 120;
 const PASSIVE_DEVICE_LINE_BUFFER_LIMIT = 200;
 const CONTROLLER_SEND_REPORT_FAILURE_THRESHOLD = 10;
+const SERIAL_WRITE_TIMEOUT_MS = 5_000;
 
 interface SerialCommandSendOptions {
   ackTimeoutMs: number;
@@ -54,6 +55,27 @@ export interface SerialSessionSnapshot {
   busy: boolean;
   idleTimeoutMs: number;
   lastUsedAt: number | null;
+}
+
+export interface PendingSerialWait<T> {
+  promise: Promise<T>;
+  cancel(error?: Error): void;
+}
+
+export async function writeWithPrearmedWait<T>(
+  startWait: () => PendingSerialWait<T>,
+  write: () => Promise<void>,
+): Promise<T> {
+  const pending = startWait();
+  void pending.promise.catch(() => undefined);
+
+  try {
+    await write();
+    return await pending.promise;
+  } catch (error) {
+    pending.cancel(error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
 }
 
 function isRecognizedDeviceLine(line: string): boolean {
@@ -139,8 +161,9 @@ function waitForAck(
     onDeviceLine?: (line: string) => void;
     onInterruptReady?: (interrupt: (() => void) | null) => void;
   },
-): Promise<"OK"> {
-  return new Promise((resolve, reject) => {
+): PendingSerialWait<"OK"> {
+  let cancelWait: (error?: Error) => void = () => undefined;
+  const promise = new Promise<"OK">((resolve, reject) => {
     if (!port.isOpen) {
       reject(new Error("Execution stopped."));
       return;
@@ -233,10 +256,6 @@ function waitForAck(
       finish(() => reject(error));
     };
 
-    const onInterrupt = () => {
-      finish(() => reject(new Error("Execution stopped.")));
-    };
-
     const cleanup = () => {
       clearTimeout(timeoutId);
       parser.off("data", onData);
@@ -245,11 +264,20 @@ function waitForAck(
       options?.onInterruptReady?.(null);
     };
 
-    options?.onInterruptReady?.(onInterrupt);
+    cancelWait = (error = new Error("Execution stopped.")) => {
+      finish(() => reject(error));
+    };
+
     parser.on("data", onData);
     port.on("close", onClose);
     port.on("error", onError);
+    options?.onInterruptReady?.(() => cancelWait());
   });
+
+  return {
+    promise,
+    cancel: (error) => cancelWait(error),
+  };
 }
 
 export function getAckTimeoutForCommand(
@@ -448,21 +476,48 @@ export function updateBasicPaletteStateForCommand(
 
 function writeLine(port: SerialPort, line: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    port.write(`${line}\n`, (error) => {
-      if (error) {
-        reject(error);
+    let settled = false;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
         return;
       }
 
-      port.drain((drainError) => {
-        if (drainError) {
-          reject(drainError);
+      settled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      callback();
+    };
+
+    timeoutId = setTimeout(() => {
+      finish(() => reject(new Error(`Timed out writing serial line after ${SERIAL_WRITE_TIMEOUT_MS}ms.`)));
+    }, SERIAL_WRITE_TIMEOUT_MS);
+
+    try {
+      port.write(`${line}\n`, (error) => {
+        if (error) {
+          finish(() => reject(error));
           return;
         }
 
-        resolve();
+        try {
+          port.drain((drainError) => {
+            if (drainError) {
+              finish(() => reject(drainError));
+              return;
+            }
+
+            finish(() => resolve());
+          });
+        } catch (drainError) {
+          finish(() => reject(drainError));
+        }
       });
-    });
+    } catch (writeError) {
+      finish(() => reject(writeError));
+    }
   });
 }
 
@@ -514,13 +569,13 @@ async function stabilizeFreshSerialSession(
         return;
       }
 
-      if (sawBoot && idleMs >= SERIAL_OPEN_POST_BOOT_SETTLE_MS) {
+      if (sawActivity && idleMs >= SERIAL_OPEN_POST_BOOT_SETTLE_MS) {
         return;
       }
 
-      if (sawActivity && !sawBoot && elapsedMs >= SERIAL_OPEN_BOOT_TIMEOUT_MS) {
+      if (elapsedMs >= SERIAL_OPEN_BOOT_TIMEOUT_MS) {
         onDeviceLine?.(
-          `WARN serial_session=stabilize_timeout boot_seen=false wait_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
+          `WARN serial_session=stabilize_timeout boot_seen=${sawBoot} wait_ms=${SERIAL_OPEN_BOOT_TIMEOUT_MS}`,
         );
         return;
       }
@@ -534,13 +589,14 @@ async function stabilizeFreshSerialSession(
   }
 }
 
-async function waitForReadinessProbeAck(
+function waitForReadinessProbeAck(
   parser: ReadlineParser,
   port: SerialPort,
   timeoutMs: number,
   onDeviceLine?: (line: string) => void,
-): Promise<boolean> {
-  return new Promise((resolve, reject) => {
+): PendingSerialWait<boolean> {
+  let cancelWait: (error?: Error) => void = () => undefined;
+  const promise = new Promise<boolean>((resolve, reject) => {
     if (!port.isOpen) {
       reject(new Error("Serial session is not open."));
       return;
@@ -573,12 +629,16 @@ async function waitForReadinessProbeAck(
 
       if (ack) {
         onDeviceLine?.(`WARN ignored readiness ack session=${ack.sessionId} seq=${ack.sequence}`);
+        return;
+      }
+
+      if (line === "OK" || line.startsWith("OK ")) {
         finish(() => resolve(true));
         return;
       }
 
-      if (isUnsequencedAckLine(line)) {
-        finish(() => resolve(true));
+      if (line === "ERR" || line.startsWith("ERR ")) {
+        finish(() => reject(new Error(`Device rejected readiness probe: ${line}`)));
         return;
       }
 
@@ -600,10 +660,19 @@ async function waitForReadinessProbeAck(
       port.off("error", onError);
     };
 
+    cancelWait = (error = new Error("Serial session is not open.")) => {
+      finish(() => reject(error));
+    };
+
     parser.on("data", onData);
     port.on("close", onClose);
     port.on("error", onError);
   });
+
+  return {
+    promise,
+    cancel: (error) => cancelWait(error),
+  };
 }
 
 async function pulseRunModeReset(port: SerialPort, onDeviceLine?: (line: string) => void): Promise<void> {
@@ -626,12 +695,15 @@ async function probeFreshSerialSession(
     onDeviceLine?.(
       `INFO serial_session=probe phase=${phase} command=I timeout_ms=${SERIAL_OPEN_READY_PROBE_TIMEOUT_MS}`,
     );
-    await writeLine(port, "I");
-    const ready = await waitForReadinessProbeAck(
-      parser,
-      port,
-      SERIAL_OPEN_READY_PROBE_TIMEOUT_MS,
-      onDeviceLine,
+    const ready = await writeWithPrearmedWait(
+      () =>
+        waitForReadinessProbeAck(
+          parser,
+          port,
+          SERIAL_OPEN_READY_PROBE_TIMEOUT_MS,
+          onDeviceLine,
+        ),
+      () => writeLine(port, "I"),
     );
 
     if (!ready) {
@@ -987,6 +1059,8 @@ export class SerialCommandSession {
       throw new Error("Serial session is not open.");
     }
 
+    const port = this.port;
+    const parser = this.parser;
     let inputTiming = { ...DEFAULT_SAFE_INPUT_TIMING };
     const basicPaletteState = createBasicPaletteTimingState();
     this.flushPassiveDeviceLines(options.onDeviceLine);
@@ -1007,35 +1081,37 @@ export class SerialCommandSession {
       while (!sent) {
         try {
           this.beginForegroundDeviceLineCapture();
-          await writeLine(this.port, framedCommand);
           try {
-            await waitForAck(
-              this.parser,
-              this.port,
-              getAckTimeoutForCommand(
-                command,
-                options.ackTimeoutMs,
-                inputTiming,
-                basicPaletteState,
-              ),
-              {
-                sessionId: this.sessionId,
-                sequence: commandSequence,
-              },
-              {
-                ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
-                onInterruptReady: (interrupt) => {
-                  this.interruptAckWait = interrupt;
-                  options.onInterruptReady?.(interrupt);
-                },
-              },
+            await writeWithPrearmedWait(
+              () =>
+                waitForAck(
+                  parser,
+                  port,
+                  getAckTimeoutForCommand(
+                    command,
+                    options.ackTimeoutMs,
+                    inputTiming,
+                    basicPaletteState,
+                  ),
+                  {
+                    sessionId: this.sessionId,
+                    sequence: commandSequence,
+                  },
+                  {
+                    ...(options.onDeviceLine ? { onDeviceLine: options.onDeviceLine } : {}),
+                    onInterruptReady: (interrupt) => {
+                      this.interruptAckWait = interrupt;
+                      options.onInterruptReady?.(interrupt);
+                    },
+                  },
+                ),
+              () => writeLine(port, framedCommand),
             );
           } finally {
             this.endForegroundDeviceLineCapture();
           }
           sent = true;
         } catch (error) {
-          this.endForegroundDeviceLineCapture();
           if (options.shouldStop?.()) {
             throw new Error("Execution stopped.");
           }
