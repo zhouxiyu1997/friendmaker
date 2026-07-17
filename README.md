@@ -354,4 +354,12 @@ The Switch Bluetooth compatibility path under `firmware/esp32` borrows from and 
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=zhouxiyu1997/friendmaker&type=Date)](https://star-history.com/#zhouxiyu1997/friendmaker&Date)
+## Star History
+
+<a href="https://www.star-history.com/?repos=zhouxiyu1997%2Ffriendmaker&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zhouxiyu1997/friendmaker&type=date&theme=dark&legend=top-left&sealed_token=50XsYmHltvxwh3Yzpbk2QXlrrMP4pdfrtRx2i1JSrUgI7zKD4Yni8iprvwyT02Nf43YHzKDDyR3hkKnCOOhiPmPqu5lvv04I3R1OihDViQ9AQtmsmySn3AjTdP-GvZIOs8GpsOTe-g8m_Xv8hYmT0oJxvsYSg8YuDosS07Z2eAb-D0fILN6wWVZyJflK" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zhouxiyu1997/friendmaker&type=date&legend=top-left&sealed_token=50XsYmHltvxwh3Yzpbk2QXlrrMP4pdfrtRx2i1JSrUgI7zKD4Yni8iprvwyT02Nf43YHzKDDyR3hkKnCOOhiPmPqu5lvv04I3R1OihDViQ9AQtmsmySn3AjTdP-GvZIOs8GpsOTe-g8m_Xv8hYmT0oJxvsYSg8YuDosS07Z2eAb-D0fILN6wWVZyJflK" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zhouxiyu1997/friendmaker&type=date&legend=top-left&sealed_token=50XsYmHltvxwh3Yzpbk2QXlrrMP4pdfrtRx2i1JSrUgI7zKD4Yni8iprvwyT02Nf43YHzKDDyR3hkKnCOOhiPmPqu5lvv04I3R1OihDViQ9AQtmsmySn3AjTdP-GvZIOs8GpsOTe-g8m_Xv8hYmT0oJxvsYSg8YuDosS07Z2eAb-D0fILN6wWVZyJflK" />
+ </picture>
+</a>
