@@ -14,7 +14,6 @@ const COLOR_PALETTE_EDITOR_RESET_UP_HOLD_MS = 1_500;
 const COLOR_PALETTE_EDITOR_RESET_LEFT_HOLD_MS = 3_000;
 const COLOR_PALETTE_EDITOR_MOVE_STEP_MS = 20;
 const COLOR_PALETTE_EDITOR_HUE_RESET_SETTLE_MS = 500;
-const COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS = 12;
 const BASIC_COLOR_GRID_ROWS = 7;
 const BASIC_COLOR_GRID_COLS = 12;
 const BASIC_COLOR_TAB_SETTLE_MS = 140;
@@ -113,19 +112,6 @@ function rgbToHsv(red: number, green: number, blue: number): HsvColor {
   };
 }
 
-function splitPaletteValueDropSteps(valueDropSteps: number): {
-  coarseValueSteps: number;
-  fineValueSteps: number;
-} {
-  const normalizedSteps = valueDropSteps < 0 ? 0 : valueDropSteps;
-  const fineValueSteps = Math.min(normalizedSteps, COLOR_PALETTE_EDITOR_DARK_VALUE_FINE_STEPS);
-
-  return {
-    coarseValueSteps: normalizedSteps - fineValueSteps,
-    fineValueSteps,
-  };
-}
-
 function timeoutMargin(options: PaletteTimingOptions): number {
   return options.includeTimeoutMargin ? PALETTE_CONFIG_TIMEOUT_MARGIN_MS : 0;
 }
@@ -195,7 +181,6 @@ export function estimatePaletteConfigDurationMs(
   const hueSteps = Math.round(hueRatio * COLOR_PALETTE_EDITOR_HUE_STEP_COUNT);
   const saturationSteps = scaleChannelToSteps(hsv.saturation, COLOR_PALETTE_EDITOR_SATURATION_STEP_COUNT);
   const valueDropSteps = scaleChannelToSteps(1 - hsv.value, COLOR_PALETTE_EDITOR_VALUE_STEP_COUNT);
-  const { coarseValueSteps, fineValueSteps } = splitPaletteValueDropSteps(valueDropSteps);
   const generalPressMs = timing.buttonPressMs + timing.inputDelayMs;
   const menuPressMs = COLOR_PALETTE_MENU_PRESS_DURATION_MS + COLOR_PALETTE_MENU_INPUT_DELAY_MS;
 
@@ -213,10 +198,7 @@ export function estimatePaletteConfigDurationMs(
     (saturationSteps > 0
       ? saturationSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs
       : 0) +
-    (coarseValueSteps > 0
-      ? coarseValueSteps * COLOR_PALETTE_EDITOR_MOVE_STEP_MS + timing.inputDelayMs
-      : 0) +
-    fineValueSteps * generalPressMs +
+    valueDropSteps * generalPressMs +
     3 * menuPressMs +
     timing.inputDelayMs +
     timeoutMargin(options)
