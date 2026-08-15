@@ -27,6 +27,9 @@ import type { ProgressUpdate, SenderControls } from "../types.js";
 
 const ACK_LINE_PREFIXES = ["OK ", "ERR "] as const;
 const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
+// ESP-IDF 日志格式：`W (4652) BT_HCI: ...`（可能带 ANSI 颜色前缀）。这些会与协议
+// ACK 混在同一 UART，必须识别并剥离，否则 friendmaker 会把日志当 malformed ACK。
+const ESP_IDF_LOG_PREFIX_RE = /^[IWED] \(\d+\) [A-Za-z_]+:/u;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
 export const SERIAL_OPEN_RESET_DETECT_WINDOW_MS = 400;
 export const SERIAL_OPEN_BOOT_TIMEOUT_MS = 10_000;
@@ -63,12 +66,15 @@ function isRecognizedDeviceLine(line: string): boolean {
     return true;
   }
 
-  return DEVICE_LINE_PREFIXES.some((prefix) => line.startsWith(prefix));
+  return (
+    DEVICE_LINE_PREFIXES.some((prefix) => line.startsWith(prefix)) || ESP_IDF_LOG_PREFIX_RE.test(line)
+  );
 }
 
 function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
   const rawText = Buffer.isBuffer(rawLine) ? rawLine.toString("utf8") : rawLine;
   const cleanText = rawText
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "") // 剥离 ANSI 颜色转义
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
     .replace(/\r/g, "")
     .trim();
@@ -98,12 +104,22 @@ function getEmbeddedDeviceLine(line: string): string | null {
     (index) => index > 0,
   );
 
+  // ESP-IDF 日志（`W (4652) BT_HCI: ...`）可能内嵌在 ACK 行尾部；
+  // ANSI 剥离后日志可能紧贴前文（如 `1W (4652)`），不要求前置空白
+  const idfMatch = line.match(/[IWED] \(\d+\) [A-Za-z_]+:/u);
+  if (idfMatch?.index !== undefined && idfMatch.index > 0) {
+    candidateIndexes.push(idfMatch.index);
+  }
+
   if (candidateIndexes.length === 0) {
     return null;
   }
 
   const candidate = line.slice(Math.min(...candidateIndexes)).trim();
-  return DEVICE_LINE_PREFIXES.some((prefix) => candidate.startsWith(prefix)) ? candidate : null;
+  return DEVICE_LINE_PREFIXES.some((prefix) => candidate.startsWith(prefix)) ||
+    ESP_IDF_LOG_PREFIX_RE.test(candidate)
+    ? candidate
+    : null;
 }
 
 export function isCongestedControllerSendReportLine(line: string): boolean {
@@ -195,6 +211,29 @@ function waitForAck(
         const embeddedDeviceLine = getEmbeddedDeviceLine(line);
 
         if (embeddedDeviceLine) {
+          // ACK 与 ESP-IDF 日志混在同一行时：剥离日志段后重试解析 ACK（避免 ACK 丢失触发重试/reset）
+          const cleanLine = line.slice(0, line.indexOf(embeddedDeviceLine)).trim();
+          const cleanAck = parseSequencedAck(cleanLine);
+          if (cleanAck) {
+            if (cleanAck.sessionId !== expected.sessionId || cleanAck.sequence !== expected.sequence) {
+              options?.onDeviceLine?.(
+                `WARN ignored ack session=${cleanAck.sessionId} seq=${cleanAck.sequence} expected=${expected.sessionId}:${expected.sequence}`,
+              );
+              return;
+            }
+            if (cleanAck.type === "ok") {
+              finish(() => resolve("OK"));
+              return;
+            }
+            finish(() =>
+              reject(
+                new Error(
+                  `Device returned ERR ${cleanAck.sessionId} ${cleanAck.sequence} ${cleanAck.message}`,
+                ),
+              ),
+            );
+            return;
+          }
           options?.onDeviceLine?.(`WARN ignored malformed serial line=${line}`);
           options?.onDeviceLine?.(embeddedDeviceLine);
           return;
