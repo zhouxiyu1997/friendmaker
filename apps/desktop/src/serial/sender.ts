@@ -30,6 +30,7 @@ const DEVICE_LINE_PREFIXES = ["INFO ", "WARN ", "BOOT ", "rst:"] as const;
 // ESP-IDF 日志格式：`W (4652) BT_HCI: ...`（可能带 ANSI 颜色前缀）。这些会与协议
 // ACK 混在同一 UART，必须识别并剥离，否则 friendmaker 会把日志当 malformed ACK。
 const ESP_IDF_LOG_PREFIX_RE = /^[IWED] \(\d+\) [A-Za-z_]+:/u;
+const ANSI_ESCAPE_RE = /\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[()][0-2A-Z])/gu;
 export const DEFAULT_SERIAL_SESSION_IDLE_TIMEOUT_MS = 15 * 60 * 1_000;
 export const SERIAL_OPEN_RESET_DETECT_WINDOW_MS = 400;
 export const SERIAL_OPEN_BOOT_TIMEOUT_MS = 10_000;
@@ -74,7 +75,7 @@ function isRecognizedDeviceLine(line: string): boolean {
 function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
   const rawText = Buffer.isBuffer(rawLine) ? rawLine.toString("utf8") : rawLine;
   const cleanText = rawText
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "") // 剥离 ANSI 颜色转义
+    .replace(ANSI_ESCAPE_RE, "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
     .replace(/\r/g, "")
     .trim();

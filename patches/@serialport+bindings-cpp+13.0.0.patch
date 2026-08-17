@@ -1,19 +1,20 @@
-diff --git a/node_modules/@serialport/bindings-cpp/dist/unix-read.js b/node_modules/@serialport/bindings-cpp/dist/unix-read.js
+diff --git a/node_modules/@serialport/bindings-cpp/src/poller.cpp b/node_modules/@serialport/bindings-cpp/src/poller.cpp
 index 100644..100644
---- a/node_modules/@serialport/bindings-cpp/dist/unix-read.js
-+++ b/node_modules/@serialport/bindings-cpp/dist/unix-read.js
-@@ -38,7 +38,13 @@
-                 throw new errors_1.BindingsError('Port is not open', { canceled: true });
-             }
-             logger('waiting for readable because of code:', err.code);
--            await readable(binding);
-+            // Linux 的 poller readable 事件可能丢失（read/write 共享 uv_poll，覆盖式注册），
-+            // 导致串口数据在 fd 里滞留数秒（直到下一次设备输出才被读到）。用 50ms 兜底轮询：
-+            // poller 正常时 <50ms 触发；poller 丢失时主动重试 fs.read，数据最多延迟 50ms。
-+            await Promise.race([
-+                readable(binding),
-+                new Promise((resolve) => setTimeout(resolve, 50)),
-+            ]);
-             return (0, exports.unixRead)({ binding, buffer, offset, length, fsReadAsync });
-         }
-         const disconnectError = err.code === 'EBADF' || // Bad file number means we got closed
+--- a/node_modules/@serialport/bindings-cpp/src/poller.cpp
++++ b/node_modules/@serialport/bindings-cpp/src/poller.cpp
+@@ -81,13 +81,13 @@ void Poller::onData(uv_poll_t* handle, int status, int events) {
+   if (0 != status) {
+     // fprintf(stdout, "OnData Error status=%s events=%d\n", uv_strerror(status), events);
+     obj->_stop(); // doesn't matter if this errors
+-    obj->callback.Call({Napi::Error::New(env, uv_strerror(status)).Value(), env.Undefined()});
++    obj->callback.MakeCallback(obj->Value(), {Napi::Error::New(env, uv_strerror(status)).Value(), env.Undefined()});
+   } else {
+     // fprintf(stdout, "OnData status=%d events=%d subscribed=%d\n", status, events, obj->events);
+     // remove triggered events from the poll
+     int newEvents = obj->events & ~events;
+     obj->poll(env, newEvents);
+-    obj->callback.Call({env.Null(), Napi::Number::New(env, events)});
++    obj->callback.MakeCallback(obj->Value(), {env.Null(), Napi::Number::New(env, events)});
+   }
+
+ }
