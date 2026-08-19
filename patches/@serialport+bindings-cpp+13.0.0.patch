@@ -1,0 +1,20 @@
+diff --git a/node_modules/@serialport/bindings-cpp/src/poller.cpp b/node_modules/@serialport/bindings-cpp/src/poller.cpp
+index 100644..100644
+--- a/node_modules/@serialport/bindings-cpp/src/poller.cpp
++++ b/node_modules/@serialport/bindings-cpp/src/poller.cpp
+@@ -81,13 +81,13 @@ void Poller::onData(uv_poll_t* handle, int status, int events) {
+   if (0 != status) {
+     // fprintf(stdout, "OnData Error status=%s events=%d\n", uv_strerror(status), events);
+     obj->_stop(); // doesn't matter if this errors
+-    obj->callback.Call({Napi::Error::New(env, uv_strerror(status)).Value(), env.Undefined()});
++    obj->callback.MakeCallback(obj->Value(), {Napi::Error::New(env, uv_strerror(status)).Value(), env.Undefined()});
+   } else {
+     // fprintf(stdout, "OnData status=%d events=%d subscribed=%d\n", status, events, obj->events);
+     // remove triggered events from the poll
+     int newEvents = obj->events & ~events;
+     obj->poll(env, newEvents);
+-    obj->callback.Call({env.Null(), Napi::Number::New(env, events)});
++    obj->callback.MakeCallback(obj->Value(), {env.Null(), Napi::Number::New(env, events)});
+   }
+
+ }

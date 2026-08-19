@@ -19,7 +19,7 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run dist:win:x64",
     "dist:win:x64": "npm run build && electron-builder --win --x64",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "patch-package && electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.friendmaker.desktop",
@@ -102,6 +102,7 @@
     "@types/node": "^24.0.15",
     "electron": "^41.4.0",
     "electron-builder": "^26.8.1",
+    "patch-package": "^8.0.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   }
