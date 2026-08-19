@@ -16,6 +16,7 @@ import {
   createSessionId,
   formatSequencedCommand,
   parseSequencedAck,
+  type SequencedAck,
 } from "../protocol/sequencing.js";
 import {
   DEFAULT_SAFE_INPUT_TIMING,
@@ -72,7 +73,7 @@ function isRecognizedDeviceLine(line: string): boolean {
   );
 }
 
-function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
+export function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
   const rawText = Buffer.isBuffer(rawLine) ? rawLine.toString("utf8") : rawLine;
   const cleanText = rawText
     .replace(ANSI_ESCAPE_RE, "")
@@ -100,7 +101,7 @@ function sanitizeDeviceLine(rawLine: string | Buffer): string | null {
   return isRecognizedDeviceLine(candidate) ? candidate : null;
 }
 
-function getEmbeddedDeviceLine(line: string): string | null {
+export function getEmbeddedDeviceLine(line: string): string | null {
   const candidateIndexes = DEVICE_LINE_PREFIXES.map((prefix) => line.indexOf(prefix)).filter(
     (index) => index > 0,
   );
@@ -146,7 +147,7 @@ export function isDirectControllerInputReportFailureLine(line: string): boolean 
   );
 }
 
-function waitForAck(
+export function waitForAck(
   parser: ReadlineParser,
   port: SerialPort,
   timeoutMs: number,
@@ -182,6 +183,22 @@ function waitForAck(
       finish(() => reject(new Error(`Timed out waiting for ACK after ${timeoutMs}ms.`)));
     }, timeoutMs);
 
+    const handleSequencedAck = (ack: SequencedAck) => {
+      if (ack.sessionId !== expected.sessionId || ack.sequence !== expected.sequence) {
+        options?.onDeviceLine?.(
+          `WARN ignored ack session=${ack.sessionId} seq=${ack.sequence} expected=${expected.sessionId}:${expected.sequence}`,
+        );
+        return;
+      }
+
+      if (ack.type === "ok") {
+        finish(() => resolve("OK"));
+        return;
+      }
+
+      finish(() => reject(new Error(`Device returned ERR ${ack.sessionId} ${ack.sequence} ${ack.message}`)));
+    };
+
     const onData = (rawLine: string | Buffer) => {
       const line = sanitizeDeviceLine(rawLine);
 
@@ -192,19 +209,7 @@ function waitForAck(
       const ack = parseSequencedAck(line);
 
       if (ack) {
-        if (ack.sessionId !== expected.sessionId || ack.sequence !== expected.sequence) {
-          options?.onDeviceLine?.(
-            `WARN ignored ack session=${ack.sessionId} seq=${ack.sequence} expected=${expected.sessionId}:${expected.sequence}`,
-          );
-          return;
-        }
-
-        if (ack.type === "ok") {
-          finish(() => resolve("OK"));
-          return;
-        }
-
-        finish(() => reject(new Error(`Device returned ERR ${ack.sessionId} ${ack.sequence} ${ack.message}`)));
+        handleSequencedAck(ack);
         return;
       }
 
@@ -216,23 +221,7 @@ function waitForAck(
           const cleanLine = line.slice(0, line.indexOf(embeddedDeviceLine)).trim();
           const cleanAck = parseSequencedAck(cleanLine);
           if (cleanAck) {
-            if (cleanAck.sessionId !== expected.sessionId || cleanAck.sequence !== expected.sequence) {
-              options?.onDeviceLine?.(
-                `WARN ignored ack session=${cleanAck.sessionId} seq=${cleanAck.sequence} expected=${expected.sessionId}:${expected.sequence}`,
-              );
-              return;
-            }
-            if (cleanAck.type === "ok") {
-              finish(() => resolve("OK"));
-              return;
-            }
-            finish(() =>
-              reject(
-                new Error(
-                  `Device returned ERR ${cleanAck.sessionId} ${cleanAck.sequence} ${cleanAck.message}`,
-                ),
-              ),
-            );
+            handleSequencedAck(cleanAck);
             return;
           }
           options?.onDeviceLine?.(`WARN ignored malformed serial line=${line}`);
@@ -248,6 +237,25 @@ function waitForAck(
           ),
         );
         return;
+      }
+
+      // 设备日志（含 ESP-IDF 日志）行尾可能粘着 ACK（如 `W (4652) BT_HCI: ...OK <sid> <seq>`）：
+      // 提取尾部 ACK 处理，剩余日志段照常上报，避免 ACK 被当日志丢弃后超时重试
+      const tailAckIndex = Math.max(line.lastIndexOf("OK "), line.lastIndexOf("ERR "));
+
+      if (tailAckIndex > 0) {
+        const tailAck = parseSequencedAck(line.slice(tailAckIndex));
+
+        if (tailAck) {
+          const leadingDeviceLine = line.slice(0, tailAckIndex).trim();
+
+          if (leadingDeviceLine.length > 0) {
+            options?.onDeviceLine?.(leadingDeviceLine);
+          }
+
+          handleSequencedAck(tailAck);
+          return;
+        }
       }
 
       if (isDirectControllerInputReportFailureLine(line)) {
