@@ -3,6 +3,12 @@ name: Electron Release Build
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to package
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,6 +17,8 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,8 +37,24 @@ jobs:
             artifact: friend-maker-windows-x64
 
     steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || exit 1
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Checkout signing compatibility patch
+        if: runner.os == 'macOS'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: patches/app-builder-lib+26.8.1.patch
+          sparse-checkout-cone-mode: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -41,10 +65,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Apply macOS keychain compatibility fix
+        if: runner.os == 'macOS'
+        run: npx --no-install patch-package --patch-dir .release-tools/patches --error-on-fail
+
       - name: Sync package version with release
         shell: bash
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
 
@@ -139,6 +165,6 @@ jobs:
             exit 1
           fi
           printf 'Uploading release asset: %s\n' "${files[@]}"
-          gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
