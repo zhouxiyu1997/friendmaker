@@ -35,11 +35,11 @@ test("firmware site points the default manifest to Switch1 and Lite firmware", (
   assert.equal(getFirmwareVariant("switch").hidden, true);
   assert.equal(getFirmwareVariant("switch2").environmentId, "esp32dev_wireless_switch2");
   assert.equal(getFirmwareVariant("switch_lite").boardId, "esp32dev_wireless");
-  assert.equal(getVersionedManifestPath("switch_lite", "0.7.2"), "./firmware/0.7.2/manifest.json");
-  assert.equal(getVersionedManifestPath("switch", "0.7.2"), "./firmware/0.7.2/manifest.legacy-switch.json");
+  assert.equal(getVersionedManifestPath("switch_lite", "1.0.0"), "./firmware/1.0.0/manifest.json");
+  assert.equal(getVersionedManifestPath("switch", "1.0.0"), "./firmware/1.0.0/manifest.legacy-switch.json");
   assert.deepEqual(
     listFlasherReleases().map((release) => release.version),
-    ["0.7.2"],
+    ["1.0.0"],
   );
 });
 

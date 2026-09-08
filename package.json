@@ -1,6 +1,6 @@
 {
   "name": "switch-auto-draw",
-  "version": "0.7.2",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist/apps/desktop/src/electron/main.js",
@@ -54,6 +54,7 @@
       "node_modules/@img/**"
     ],
     "npmRebuild": true,
+    "buildDependenciesFromSource": true,
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.utilities",

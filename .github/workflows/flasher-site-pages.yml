@@ -62,6 +62,13 @@ jobs:
       - name: Verify Pages artifact
         run: npm run verify:pages --prefix site/flasher
 
+      - name: Archive versioned firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: friend-maker-firmware
+          path: site/flasher/dist/pages/firmware
+          if-no-files-found: error
+
       - name: Setup Pages
         if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
